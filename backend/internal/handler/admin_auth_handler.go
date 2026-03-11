@@ -23,10 +23,11 @@ type loginRequest struct {
 }
 
 type adminProfileResponse struct {
-	ID       string            `json:"id"`
-	Username string            `json:"username"`
-	Role     string            `json:"role"`
-	Status   model.AdminStatus `json:"status"`
+	ID          string                  `json:"id"`
+	Username    string                  `json:"username"`
+	Role        string                  `json:"role"`
+	Status      model.AdminStatus       `json:"status"`
+	Permissions []model.AdminPermission `json:"permissions"`
 }
 
 type loginResponse struct {
@@ -85,11 +86,44 @@ func (h *AdminAuthHandler) Logout(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
+func (h *AdminAuthHandler) Me(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{
+			"error": "authentication required",
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, loginResponse{
+		Admin: adminProfileResponse{
+			ID:          identity.AdminID,
+			Username:    identity.Username,
+			Role:        identity.Role,
+			Status:      model.AdminStatusActive,
+			Permissions: identity.Permissions,
+		},
+	})
+}
+
+func (h *AdminAuthHandler) PermissionProbe(permission model.AdminPermission) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		identity, _ := session.GetAdminIdentity(ctx)
+		ctx.JSON(http.StatusOK, gin.H{
+			"admin_id":    identity.AdminID,
+			"permission":  permission,
+			"authorized":  true,
+			"super_admin": identity.IsSuperAdmin(),
+		})
+	}
+}
+
 func toAdminProfileResponse(admin *model.Admin) adminProfileResponse {
 	return adminProfileResponse{
-		ID:       admin.ID,
-		Username: strings.TrimSpace(admin.Username),
-		Role:     admin.Role,
-		Status:   admin.Status,
+		ID:          admin.ID,
+		Username:    strings.TrimSpace(admin.Username),
+		Role:        admin.Role,
+		Status:      admin.Status,
+		Permissions: admin.PermissionList(),
 	}
 }

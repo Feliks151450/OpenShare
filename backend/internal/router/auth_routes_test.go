@@ -39,10 +39,11 @@ func TestAdminLoginCreatesSessionAndReturnsProfile(t *testing.T) {
 
 	var response struct {
 		Admin struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-			Role     string `json:"role"`
-			Status   string `json:"status"`
+			ID          string   `json:"id"`
+			Username    string   `json:"username"`
+			Role        string   `json:"role"`
+			Status      string   `json:"status"`
+			Permissions []string `json:"permissions"`
 		} `json:"admin"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
@@ -54,6 +55,9 @@ func TestAdminLoginCreatesSessionAndReturnsProfile(t *testing.T) {
 	}
 	if response.Admin.Username != admin.Username {
 		t.Fatalf("expected username %q, got %q", admin.Username, response.Admin.Username)
+	}
+	if len(response.Admin.Permissions) != 0 {
+		t.Fatalf("expected no explicit permissions for super admin bootstrap test, got %v", response.Admin.Permissions)
 	}
 
 	cookies := recorder.Result().Cookies()
@@ -144,6 +148,158 @@ func TestAdminLogoutDeletesSessionAndClearsCookie(t *testing.T) {
 	}
 }
 
+func TestAdminMeRequiresAuthentication(t *testing.T) {
+	db := newRouterTestDB(t)
+	manager := newRouterSessionManager(db)
+	engine := New(db, manager)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/me", nil)
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", recorder.Code)
+	}
+}
+
+func TestAdminMeReturnsIdentityFromSession(t *testing.T) {
+	db := newRouterTestDB(t)
+	admin := createRouterTestAdminWithAccess(t, db, adminAccess{
+		username: "reviewer",
+		password: "s3cret-pass",
+		role:     model.AdminRoleAdmin,
+		permissions: []model.AdminPermission{
+			model.AdminPermissionReviewSubmissions,
+			model.AdminPermissionManageTags,
+		},
+	})
+	manager := newRouterSessionManager(db)
+	engine := New(db, manager)
+
+	cookieValue, _, err := manager.Create(t.Context(), admin)
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/me", nil)
+	request.AddCookie(&http.Cookie{Name: manager.CookieName(), Value: cookieValue, Path: "/"})
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Admin struct {
+			ID          string   `json:"id"`
+			Username    string   `json:"username"`
+			Role        string   `json:"role"`
+			Permissions []string `json:"permissions"`
+		} `json:"admin"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+
+	if response.Admin.ID != admin.ID {
+		t.Fatalf("expected admin id %q, got %q", admin.ID, response.Admin.ID)
+	}
+	if response.Admin.Role != model.AdminRoleAdmin {
+		t.Fatalf("expected role %q, got %q", model.AdminRoleAdmin, response.Admin.Role)
+	}
+	if len(response.Admin.Permissions) != 2 {
+		t.Fatalf("expected 2 permissions, got %v", response.Admin.Permissions)
+	}
+}
+
+func TestPermissionMiddlewareRejectsUnauthorizedPermission(t *testing.T) {
+	db := newRouterTestDB(t)
+	admin := createRouterTestAdminWithAccess(t, db, adminAccess{
+		username: "reviewer",
+		password: "s3cret-pass",
+		role:     model.AdminRoleAdmin,
+		permissions: []model.AdminPermission{
+			model.AdminPermissionReviewSubmissions,
+		},
+	})
+	manager := newRouterSessionManager(db)
+	engine := New(db, manager)
+
+	cookieValue, _, err := manager.Create(t.Context(), admin)
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/_internal/system", nil)
+	request.AddCookie(&http.Cookie{Name: manager.CookieName(), Value: cookieValue, Path: "/"})
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPermissionMiddlewareAllowsGrantedPermission(t *testing.T) {
+	db := newRouterTestDB(t)
+	admin := createRouterTestAdminWithAccess(t, db, adminAccess{
+		username: "reviewer",
+		password: "s3cret-pass",
+		role:     model.AdminRoleAdmin,
+		permissions: []model.AdminPermission{
+			model.AdminPermissionReviewSubmissions,
+		},
+	})
+	manager := newRouterSessionManager(db)
+	engine := New(db, manager)
+
+	cookieValue, _, err := manager.Create(t.Context(), admin)
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/_internal/review", nil)
+	request.AddCookie(&http.Cookie{Name: manager.CookieName(), Value: cookieValue, Path: "/"})
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPermissionMiddlewareAllowsSuperAdminBypass(t *testing.T) {
+	db := newRouterTestDB(t)
+	admin := createRouterTestAdminWithAccess(t, db, adminAccess{
+		username:    "superadmin",
+		password:    "s3cret-pass",
+		role:        model.AdminRoleSuperAdmin,
+		permissions: nil,
+	})
+	manager := newRouterSessionManager(db)
+	engine := New(db, manager)
+
+	cookieValue, _, err := manager.Create(t.Context(), admin)
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/_internal/system", nil)
+	request.AddCookie(&http.Cookie{Name: manager.CookieName(), Value: cookieValue, Path: "/"})
+	recorder := httptest.NewRecorder()
+
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func newRouterTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -183,22 +339,39 @@ func newRouterSessionManager(db *gorm.DB) *session.Manager {
 
 func createRouterTestAdmin(t *testing.T, db *gorm.DB, username, password string) *model.Admin {
 	t.Helper()
+	return createRouterTestAdminWithAccess(t, db, adminAccess{
+		username: username,
+		password: password,
+		role:     model.AdminRoleSuperAdmin,
+	})
+}
+
+type adminAccess struct {
+	username    string
+	password    string
+	role        string
+	permissions []model.AdminPermission
+}
+
+func createRouterTestAdminWithAccess(t *testing.T, db *gorm.DB, access adminAccess) *model.Admin {
+	t.Helper()
 
 	adminID, err := identity.NewID()
 	if err != nil {
 		t.Fatalf("generate admin id failed: %v", err)
 	}
 
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(access.password), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("generate password hash failed: %v", err)
 	}
 
 	admin := &model.Admin{
 		ID:           adminID,
-		Username:     username,
+		Username:     access.username,
 		PasswordHash: string(passwordHash),
-		Role:         model.AdminRoleSuperAdmin,
+		Role:         access.role,
+		Permissions:  model.NormalizeAdminPermissions(access.permissions),
 		Status:       model.AdminStatusActive,
 	}
 	if err := db.Create(admin).Error; err != nil {

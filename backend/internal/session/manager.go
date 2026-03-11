@@ -47,11 +47,12 @@ type Manager struct {
 }
 
 type AdminIdentity struct {
-	SessionID string
-	AdminID   string
-	Username  string
-	Role      string
-	ExpiresAt time.Time
+	SessionID   string
+	AdminID     string
+	Username    string
+	Role        string
+	Permissions []model.AdminPermission
+	ExpiresAt   time.Time
 }
 
 type ResolveResult struct {
@@ -105,11 +106,12 @@ func (m *Manager) Create(ctx context.Context, admin *model.Admin) (string, Admin
 
 	cookieValue := m.signToken(token)
 	identity := AdminIdentity{
-		SessionID: sessionModel.ID,
-		AdminID:   admin.ID,
-		Username:  admin.Username,
-		Role:      admin.Role,
-		ExpiresAt: sessionModel.ExpiresAt,
+		SessionID:   sessionModel.ID,
+		AdminID:     admin.ID,
+		Username:    admin.Username,
+		Role:        admin.Role,
+		Permissions: admin.PermissionList(),
+		ExpiresAt:   sessionModel.ExpiresAt,
 	}
 
 	return cookieValue, identity, nil
@@ -141,11 +143,12 @@ func (m *Manager) Resolve(ctx context.Context, cookieValue string) (*ResolveResu
 
 	result := &ResolveResult{
 		Identity: AdminIdentity{
-			SessionID: sessionModel.ID,
-			AdminID:   sessionModel.Admin.ID,
-			Username:  sessionModel.Admin.Username,
-			Role:      sessionModel.Admin.Role,
-			ExpiresAt: sessionModel.ExpiresAt,
+			SessionID:   sessionModel.ID,
+			AdminID:     sessionModel.Admin.ID,
+			Username:    sessionModel.Admin.Username,
+			Role:        sessionModel.Admin.Role,
+			Permissions: sessionModel.Admin.PermissionList(),
+			ExpiresAt:   sessionModel.ExpiresAt,
 		},
 	}
 

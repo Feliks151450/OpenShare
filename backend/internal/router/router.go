@@ -8,6 +8,7 @@ import (
 
 	"openshare/backend/internal/handler"
 	"openshare/backend/internal/middleware"
+	"openshare/backend/internal/model"
 	"openshare/backend/internal/repository"
 	"openshare/backend/internal/service"
 	"openshare/backend/internal/session"
@@ -47,6 +48,22 @@ func New(db *gorm.DB, sessionManager *session.Manager) *gin.Engine {
 	admin := api.Group("/admin")
 	admin.POST("/session/login", adminAuthHandler.Login)
 	admin.POST("/session/logout", adminAuthHandler.Logout)
+
+	adminProtected := admin.Group("")
+	adminProtected.Use(middleware.RequireAdminAuth())
+	adminProtected.GET("/me", adminAuthHandler.Me)
+
+	adminPermissionProbe := adminProtected.Group("/_internal")
+	adminPermissionProbe.GET(
+		"/review",
+		middleware.RequireAdminPermission(model.AdminPermissionReviewSubmissions),
+		adminAuthHandler.PermissionProbe(model.AdminPermissionReviewSubmissions),
+	)
+	adminPermissionProbe.GET(
+		"/system",
+		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
+		adminAuthHandler.PermissionProbe(model.AdminPermissionManageSystem),
+	)
 
 	return engine
 }

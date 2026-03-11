@@ -76,6 +76,7 @@ type Admin struct {
 	Username     string      `gorm:"column:username;type:text;not null;uniqueIndex:ux_admins_username"`
 	PasswordHash string      `gorm:"column:password_hash;type:text;not null"`
 	Role         string      `gorm:"column:role;type:text;not null"` // super_admin | admin
+	Permissions  string      `gorm:"column:permissions;type:text;not null;default:''"`
 	Status       AdminStatus `gorm:"column:status;type:text;not null;default:'active'"`
 	CreatedAt    time.Time   `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time   `gorm:"column:updated_at;autoUpdateTime"`
