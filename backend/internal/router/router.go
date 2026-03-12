@@ -21,9 +21,13 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	engine.Use(gin.Logger(), gin.Recovery())
 	engine.Use(middleware.SessionLoader(sessionManager))
 
+	storageService := storage.NewService(cfg.Storage)
 	adminRepo := repository.NewAdminRepository(db)
 	adminAuthService := service.NewAdminAuthService(db, adminRepo, sessionManager)
 	adminAuthHandler := handler.NewAdminAuthHandler(adminAuthService, sessionManager)
+	moderationHandler := handler.NewModerationHandler(
+		service.NewModerationService(repository.NewModerationRepository(db), storageService),
+	)
 	publicCatalogHandler := handler.NewPublicCatalogHandler(
 		service.NewPublicCatalogService(repository.NewPublicCatalogRepository(db)),
 	)
@@ -34,7 +38,7 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 		service.NewPublicUploadService(
 			cfg.Upload,
 			repository.NewUploadRepository(db),
-			storage.NewService(cfg.Storage),
+			storageService,
 		),
 		cfg.Upload.MaxFileSizeBytes+(1<<20),
 	)
@@ -73,6 +77,21 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	adminProtected := admin.Group("")
 	adminProtected.Use(middleware.RequireAdminAuth())
 	adminProtected.GET("/me", adminAuthHandler.Me)
+	adminProtected.GET(
+		"/submissions/pending",
+		middleware.RequireAdminPermission(model.AdminPermissionReviewSubmissions),
+		moderationHandler.ListPendingSubmissions,
+	)
+	adminProtected.POST(
+		"/submissions/:submissionID/approve",
+		middleware.RequireAdminPermission(model.AdminPermissionReviewSubmissions),
+		moderationHandler.ApproveSubmission,
+	)
+	adminProtected.POST(
+		"/submissions/:submissionID/reject",
+		middleware.RequireAdminPermission(model.AdminPermissionReviewSubmissions),
+		moderationHandler.RejectSubmission,
+	)
 
 	adminPermissionProbe := adminProtected.Group("/_internal")
 	adminPermissionProbe.GET(
