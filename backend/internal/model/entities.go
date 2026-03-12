@@ -109,6 +109,7 @@ type File struct {
 	SubmissionID  *EntityID      `gorm:"column:submission_id;type:text;index:idx_files_submission_id"`
 	SourcePath    *string        `gorm:"column:source_path;type:text;uniqueIndex:ux_files_source_path"`
 	Title         string         `gorm:"column:title;type:text;not null"`
+	Description   string         `gorm:"column:description;type:text;not null;default:''"`
 	OriginalName  string         `gorm:"column:original_name;type:text;not null"`
 	StoredName    string         `gorm:"column:stored_name;type:text;not null"`
 	Extension     string         `gorm:"column:extension;type:text;not null;default:''"`
@@ -274,6 +275,17 @@ type TagSubmission struct {
 	Reviewer *Admin `gorm:"foreignKey:ReviewerID"`
 }
 
+// SystemSetting stores extensible JSON-backed management policy blobs.
+type SystemSetting struct {
+	Key         string     `gorm:"column:key;type:text;primaryKey"`
+	Value       string     `gorm:"column:value;type:text;not null;default:''"`
+	UpdatedByID *EntityID  `gorm:"column:updated_by_id;type:text"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+
+	UpdatedBy *Admin `gorm:"foreignKey:UpdatedByID"`
+}
+
 // ---------------------------------------------------------------------------
 // Table name overrides
 // ---------------------------------------------------------------------------
@@ -290,3 +302,4 @@ func (Announcement) TableName() string  { return "announcements" }
 func (OperationLog) TableName() string  { return "operation_logs" }
 func (AdminSession) TableName() string  { return "admin_sessions" }
 func (TagSubmission) TableName() string { return "tag_submissions" }
+func (SystemSetting) TableName() string { return "system_settings" }

@@ -24,6 +24,7 @@ var managedModels = []any{
 	&model.OperationLog{},
 	&model.AdminSession{},
 	&model.TagSubmission{},
+	&model.SystemSetting{},
 }
 
 // EnsureSchema initializes the current baseline schema used by the application.

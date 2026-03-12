@@ -30,12 +30,24 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	tagRepo := repository.NewTagRepository(db)
 	searchService := service.NewSearchService(searchRepo, tagRepo)
 	searchHandler := handler.NewSearchHandler(searchService)
+	announcementHandler := handler.NewAnnouncementHandler(
+		service.NewAnnouncementService(repository.NewAnnouncementRepository(db)),
+	)
+	adminManagementHandler := handler.NewAdminManagementHandler(
+		service.NewAdminManagementService(adminRepo),
+	)
 
 	importHandler := handler.NewImportHandler(
 		service.NewImportService(repository.NewImportRepository(db), storageService, searchService),
 	)
 	moderationHandler := handler.NewModerationHandler(
 		service.NewModerationService(repository.NewModerationRepository(db), storageService, searchService),
+	)
+	resourceManagementHandler := handler.NewResourceManagementHandler(
+		service.NewResourceManagementService(repository.NewResourceManagementRepository(db), storageService),
+	)
+	systemSettingHandler := handler.NewSystemSettingHandler(
+		service.NewSystemSettingService(repository.NewSystemSettingRepository(db), cfg),
 	)
 	tagService := service.NewTagService(tagRepo, searchService)
 	tagHandler := handler.NewTagHandler(tagService)
@@ -87,6 +99,7 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	public.GET("/files", publicCatalogHandler.ListPublicFiles)
 	public.GET("/files/:fileID/download", publicDownloadHandler.DownloadFile)
 	public.GET("/folders", publicCatalogHandler.ListPublicFolders)
+	public.GET("/announcements", announcementHandler.ListPublic)
 	public.GET("/search", searchHandler.Search)
 	public.POST("/submissions", publicUploadHandler.CreateSubmission)
 	public.GET("/submissions/:receiptCode", publicSubmissionHandler.LookupByReceiptCode)
@@ -100,6 +113,26 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	adminProtected := admin.Group("")
 	adminProtected.Use(middleware.RequireAdminAuth())
 	adminProtected.GET("/me", adminAuthHandler.Me)
+	adminProtected.GET(
+		"/announcements",
+		middleware.RequireAdminPermission(model.AdminPermissionManageAnnouncements),
+		announcementHandler.ListAdmin,
+	)
+	adminProtected.POST(
+		"/announcements",
+		middleware.RequireAdminPermission(model.AdminPermissionManageAnnouncements),
+		announcementHandler.Create,
+	)
+	adminProtected.PUT(
+		"/announcements/:announcementID",
+		middleware.RequireAdminPermission(model.AdminPermissionManageAnnouncements),
+		announcementHandler.Update,
+	)
+	adminProtected.DELETE(
+		"/announcements/:announcementID",
+		middleware.RequireAdminPermission(model.AdminPermissionManageAnnouncements),
+		announcementHandler.Delete,
+	)
 	adminProtected.GET(
 		"/submissions/pending",
 		middleware.RequireAdminPermission(model.AdminPermissionReviewSubmissions),
@@ -128,6 +161,25 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	adminProtected.GET(
 		"/folders/tree",
 		importHandler.GetFolderTree,
+	)
+	adminProtected.GET(
+		"/resources/files",
+		resourceManagementHandler.ListFiles,
+	)
+	adminProtected.PUT(
+		"/resources/files/:fileID",
+		middleware.RequireAdminPermission(model.AdminPermissionEditResources),
+		resourceManagementHandler.UpdateFile,
+	)
+	adminProtected.POST(
+		"/resources/files/:fileID/offline",
+		middleware.RequireAdminPermission(model.AdminPermissionDeleteResources),
+		resourceManagementHandler.OfflineFile,
+	)
+	adminProtected.DELETE(
+		"/resources/files/:fileID",
+		middleware.RequireAdminPermission(model.AdminPermissionDeleteResources),
+		resourceManagementHandler.DeleteFile,
 	)
 	adminProtected.PUT(
 		"/folders/:folderID/tags",
@@ -206,6 +258,15 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 		middleware.RequireAdminPermission(model.AdminPermissionReviewReports),
 		reportHandler.RejectReport,
 	)
+
+	superAdminOnly := adminProtected.Group("")
+	superAdminOnly.Use(middleware.RequireSuperAdmin())
+	superAdminOnly.GET("/admins", adminManagementHandler.ListAdmins)
+	superAdminOnly.POST("/admins", adminManagementHandler.CreateAdmin)
+	superAdminOnly.PUT("/admins/:adminID", adminManagementHandler.UpdateAdmin)
+	superAdminOnly.POST("/admins/:adminID/reset-password", adminManagementHandler.ResetPassword)
+	superAdminOnly.GET("/system/settings", systemSettingHandler.GetPolicy)
+	superAdminOnly.PUT("/system/settings", systemSettingHandler.SavePolicy)
 
 	adminPermissionProbe := adminProtected.Group("/_internal")
 	adminPermissionProbe.GET(

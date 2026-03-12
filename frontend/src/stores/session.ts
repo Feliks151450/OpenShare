@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 export const useSessionStore = defineStore("session", () => {
   const authenticated = ref(false);
@@ -8,6 +8,7 @@ export const useSessionStore = defineStore("session", () => {
   const role = ref("");
   const status = ref("");
   const permissions = ref<string[]>([]);
+  const isSuperAdmin = computed(() => role.value === "super_admin");
 
   function setAuthenticated(value: boolean, name = "", payload?: {
     adminId?: string;
@@ -27,6 +28,10 @@ export const useSessionStore = defineStore("session", () => {
     setAuthenticated(false);
   }
 
+  function hasPermission(permission: string) {
+    return isSuperAdmin.value || permissions.value.includes(permission);
+  }
+
   return {
     authenticated,
     displayName,
@@ -34,7 +39,9 @@ export const useSessionStore = defineStore("session", () => {
     role,
     status,
     permissions,
+    isSuperAdmin,
     setAuthenticated,
+    hasPermission,
     reset,
   };
 });

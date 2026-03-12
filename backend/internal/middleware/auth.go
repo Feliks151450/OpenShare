@@ -43,3 +43,24 @@ func RequireAdminPermission(permission model.AdminPermission) gin.HandlerFunc {
 		ctx.Next()
 	}
 }
+
+func RequireSuperAdmin() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		identity, ok := session.GetAdminIdentity(ctx)
+		if !ok {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "authentication required",
+			})
+			return
+		}
+
+		if !identity.IsSuperAdmin() {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "super admin required",
+			})
+			return
+		}
+
+		ctx.Next()
+	}
+}

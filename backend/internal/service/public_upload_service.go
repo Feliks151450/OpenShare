@@ -159,6 +159,7 @@ func (s *PublicUploadService) CreateSubmission(ctx context.Context, input Public
 		FolderID:      folderID,
 		SubmissionID:  &submissionRef,
 		Title:         normalized.Title,
+		Description:   normalized.Description,
 		OriginalName:  normalized.OriginalName,
 		StoredName:    stagedFile.StoredName,
 		Extension:     normalized.Extension,

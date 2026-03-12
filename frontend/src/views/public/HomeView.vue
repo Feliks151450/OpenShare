@@ -49,6 +49,13 @@ interface UploadResponse {
   uploaded_at: string;
 }
 
+interface AnnouncementItem {
+  id: string;
+  title: string;
+  content: string;
+  published_at?: string | null;
+}
+
 const cachedReceiptCodeKey = "openshare:last_receipt_code";
 
 const uploadDescription = ref("");
@@ -77,11 +84,12 @@ const receiptCode = ref("");
 const records = ref<PublicSubmissionItem[]>([]);
 const lookupLoading = ref(false);
 const lookupError = ref("");
+const announcements = ref<AnnouncementItem[]>([]);
 
 const totalFiles = computed(() => files.value.length);
 
 onMounted(async () => {
-  await Promise.all([loadFiles(), loadFolders(), loadAllFoldersForUpload()]);
+  await Promise.all([loadAnnouncements(), loadFiles(), loadFolders(), loadAllFoldersForUpload()]);
 
   const cached = window.localStorage.getItem(cachedReceiptCodeKey);
   if (!cached) {
@@ -109,6 +117,15 @@ async function loadFiles() {
     listError.value = "加载公开资料失败，请稍后重试。";
   } finally {
     listLoading.value = false;
+  }
+}
+
+async function loadAnnouncements() {
+  try {
+    const response = await httpClient.get<{ items: AnnouncementItem[] }>("/public/announcements");
+    announcements.value = response.items ?? [];
+  } catch {
+    announcements.value = [];
   }
 }
 
@@ -335,6 +352,35 @@ function openFolderReport(folder: PublicFolderItem) {
         浏览、下载和上传学习资料。上传的资料会经过管理员审核后公开。
       </p>
     </header>
+
+    <article
+      v-if="announcements.length > 0"
+      class="rounded-[28px] border border-amber-200 bg-amber-50/90 p-6 shadow-sm"
+    >
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold uppercase tracking-[0.22em] text-amber-700">Announcements</p>
+          <h3 class="mt-2 text-2xl font-semibold text-slate-900">系统公告</h3>
+        </div>
+        <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-700">
+          当前 {{ announcements.length }} 条有效公告
+        </span>
+      </div>
+
+      <div class="mt-5 grid gap-4 lg:grid-cols-2">
+        <article
+          v-for="item in announcements"
+          :key="item.id"
+          class="rounded-[22px] border border-amber-200 bg-white px-5 py-4"
+        >
+          <h4 class="text-lg font-semibold text-slate-900">{{ item.title }}</h4>
+          <p class="mt-2 text-sm leading-6 text-slate-700">{{ item.content }}</p>
+          <p v-if="item.published_at" class="mt-3 text-xs text-slate-500">
+            发布于 {{ formatDate(item.published_at) }}
+          </p>
+        </article>
+      </div>
+    </article>
 
     <div class="grid gap-6 xl:grid-cols-[1fr_1fr]">
       <article class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
