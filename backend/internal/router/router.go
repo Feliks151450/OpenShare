@@ -31,6 +31,8 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	moderationHandler := handler.NewModerationHandler(
 		service.NewModerationService(repository.NewModerationRepository(db), storageService),
 	)
+	tagService := service.NewTagService(repository.NewTagRepository(db))
+	tagHandler := handler.NewTagHandler(tagService)
 	publicCatalogHandler := handler.NewPublicCatalogHandler(
 		service.NewPublicCatalogService(repository.NewPublicCatalogRepository(db)),
 	)
@@ -77,6 +79,7 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	public.GET("/folders", publicCatalogHandler.ListPublicFolders)
 	public.POST("/submissions", publicUploadHandler.CreateSubmission)
 	public.GET("/submissions/:receiptCode", publicSubmissionHandler.LookupByReceiptCode)
+	public.POST("/tag-submissions", tagHandler.SubmitCandidateTag)
 
 	admin := api.Group("/admin")
 	admin.POST("/session/login", adminAuthHandler.Login)
@@ -112,7 +115,62 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	adminProtected.PUT(
 		"/folders/:folderID/tags",
 		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
-		importHandler.BindFolderTags,
+		tagHandler.BindFolderTags,
+	)
+
+	// Tag management routes
+	adminProtected.GET(
+		"/tags",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.ListTags,
+	)
+	adminProtected.POST(
+		"/tags",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.CreateTag,
+	)
+	adminProtected.PUT(
+		"/tags/:tagID",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.UpdateTag,
+	)
+	adminProtected.DELETE(
+		"/tags/:tagID",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.DeleteTag,
+	)
+	adminProtected.POST(
+		"/tags/merge",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.MergeTags,
+	)
+	adminProtected.PUT(
+		"/files/:fileID/tags",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.BindFileTags,
+	)
+	adminProtected.GET(
+		"/files/:fileID/tags",
+		tagHandler.GetFileTagsWithInheritance,
+	)
+	adminProtected.GET(
+		"/folders/:folderID/tags",
+		tagHandler.GetFolderTagsWithInheritance,
+	)
+	adminProtected.GET(
+		"/tag-submissions/pending",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.ListPendingTagSubmissions,
+	)
+	adminProtected.POST(
+		"/tag-submissions/:submissionID/approve",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.ApproveCandidateTag,
+	)
+	adminProtected.POST(
+		"/tag-submissions/:submissionID/reject",
+		middleware.RequireAdminPermission(model.AdminPermissionManageTags),
+		tagHandler.RejectCandidateTag,
 	)
 
 	adminPermissionProbe := adminProtected.Group("/_internal")
