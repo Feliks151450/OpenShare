@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import { Home, Settings, Shield, Flag, Files, Users, Inbox } from "lucide-vue-next";
+import { Home, Files } from "lucide-vue-next";
 
 export interface AdminSidebarItem {
   label: string;
@@ -41,18 +41,6 @@ const fallbackIcon = Files;
 const emit = defineEmits<{
   logout: [];
 }>();
-
-defineExpose({
-  icons: {
-    Files,
-    Flag,
-    Inbox,
-    Users,
-    Shield,
-    Settings,
-    Home,
-  },
-});
 </script>
 
 <template>
@@ -64,7 +52,7 @@ defineExpose({
           <span v-else>{{ avatarFallback }}</span>
         </div>
         <div class="min-w-0">
-          <p class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{{ title }}</p>
+          <p class="truncate text-lg font-semibold text-slate-900 dark:text-slate-100">{{ title }}</p>
           <p v-if="subtitle" class="truncate text-xs text-slate-500 dark:text-slate-400">{{ subtitle }}</p>
         </div>
       </div>

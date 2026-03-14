@@ -43,7 +43,6 @@ const permissionOptions = [
   { value: "direct_upload", label: "上传资料（免审核上传）" },
   { value: "edit_resources", label: "编辑资料" },
   { value: "delete_resources", label: "删除资料" },
-  { value: "manage_announcements", label: "公告" },
 ];
 
 const permissionMap: Record<string, string[]> = {
@@ -51,10 +50,9 @@ const permissionMap: Record<string, string[]> = {
   direct_upload: ["direct_upload"],
   edit_resources: ["edit_resources"],
   delete_resources: ["delete_resources"],
-  manage_announcements: ["manage_announcements"],
 };
 
-const hiddenPermissions = ["manage_admins", "manage_system", "manage_tags"];
+const hiddenPermissions = ["manage_admins", "manage_system", "manage_tags", "manage_announcements"];
 
 const items = ref<AdminItem[]>([]);
 const loading = ref(false);

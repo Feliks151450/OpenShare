@@ -2,12 +2,10 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 
 import AdminLayout from "@/layouts/AdminLayout.vue";
 import AdminAdminsView from "@/views/admin/AdminAdminsView.vue";
-import AdminAnnouncementsView from "@/views/admin/AdminAnnouncementsView.vue";
 import PublicLayout from "@/layouts/PublicLayout.vue";
 import AdminAuditView from "@/views/admin/AdminAuditView.vue";
 import AdminAccountSettingsView from "@/views/admin/AdminAccountSettingsView.vue";
 import AdminDashboard from "@/views/admin/AdminDashboard.vue";
-import AdminTagsView from "@/views/admin/AdminTagsView.vue";
 import AdminOperationLogsView from "@/views/admin/AdminOperationLogsView.vue";
 import PublicFileDetailView from "@/views/public/PublicFileDetailView.vue";
 import HomeView from "@/views/public/Home.vue";
@@ -45,11 +43,6 @@ const routes: RouteRecordRaw[] = [
         component: AdminDashboard,
       },
       {
-        path: "announcements",
-        name: "admin-announcements",
-        component: AdminAnnouncementsView,
-      },
-      {
         path: "admins",
         redirect: "/admin/permissions",
       },
@@ -62,11 +55,6 @@ const routes: RouteRecordRaw[] = [
         path: "audit",
         name: "admin-audit",
         component: AdminAuditView,
-      },
-      {
-        path: "tags",
-        name: "admin-tags",
-        component: AdminTagsView,
       },
       {
         path: "logs",
