@@ -19,6 +19,7 @@ var (
 	ErrAnnouncementInvalidInput = errors.New("invalid announcement input")
 	ErrAnnouncementDeleteDenied = errors.New("announcement delete denied")
 	ErrAnnouncementUpdateDenied = errors.New("announcement update denied")
+	ErrAnnouncementPinDenied    = errors.New("announcement pin denied")
 )
 
 type AnnouncementService struct {
@@ -28,20 +29,30 @@ type AnnouncementService struct {
 }
 
 type AnnouncementItem struct {
-	ID          string                     `json:"id"`
-	Title       string                     `json:"title"`
-	Content     string                     `json:"content"`
-	Status      model.AnnouncementStatus   `json:"status"`
-	CreatedByID string                     `json:"created_by_id"`
-	PublishedAt *time.Time                 `json:"published_at,omitempty"`
-	CreatedAt   time.Time                  `json:"created_at"`
-	UpdatedAt   time.Time                  `json:"updated_at"`
+	ID          string                   `json:"id"`
+	Title       string                   `json:"title"`
+	Content     string                   `json:"content"`
+	Status      model.AnnouncementStatus `json:"status"`
+	IsPinned    bool                     `json:"is_pinned"`
+	CreatedByID string                   `json:"created_by_id"`
+	Creator     AnnouncementCreator      `json:"creator"`
+	PublishedAt *time.Time               `json:"published_at,omitempty"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
+}
+
+type AnnouncementCreator struct {
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url"`
+	Role      string `json:"role"`
 }
 
 type SaveAnnouncementInput struct {
 	Title      string
 	Content    string
 	Status     model.AnnouncementStatus
+	IsPinned   *bool
 	OperatorID string
 	OperatorIP string
 }
@@ -85,11 +96,16 @@ func (s *AnnouncementService) Create(ctx context.Context, input SaveAnnouncement
 		return nil, fmt.Errorf("generate announcement log id: %w", err)
 	}
 	now := s.nowFunc()
+	isPinned, err := s.resolvePinnedValue(ctx, nil, input.OperatorID, input.IsPinned)
+	if err != nil {
+		return nil, err
+	}
 	item := &model.Announcement{
 		ID:          id,
 		Title:       title,
 		Content:     content,
 		Status:      status,
+		IsPinned:    isPinned,
 		CreatedByID: input.OperatorID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -102,7 +118,11 @@ func (s *AnnouncementService) Create(ctx context.Context, input SaveAnnouncement
 		return nil, fmt.Errorf("create announcement: %w", err)
 	}
 
-	result := mapAnnouncements([]model.Announcement{*item})
+	created, err := s.repo.FindByID(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	result := mapAnnouncements([]model.Announcement{*created})
 	return &result[0], nil
 }
 
@@ -126,12 +146,17 @@ func (s *AnnouncementService) Update(ctx context.Context, id string, input SaveA
 	if err != nil {
 		return nil, err
 	}
+	isPinned, err := s.resolvePinnedValue(ctx, current, input.OperatorID, input.IsPinned)
+	if err != nil {
+		return nil, err
+	}
 
 	now := s.nowFunc()
 	updates := map[string]any{
 		"title":      title,
 		"content":    content,
 		"status":     status,
+		"is_pinned":  isPinned,
 		"updated_at": now,
 	}
 	switch status {
@@ -162,14 +187,50 @@ func (s *AnnouncementService) Update(ctx context.Context, id string, input SaveA
 	return &result[0], nil
 }
 
+func (s *AnnouncementService) resolvePinnedValue(
+	ctx context.Context,
+	current *model.Announcement,
+	operatorID string,
+	requested *bool,
+) (bool, error) {
+	operator, err := s.loadOperator(ctx, operatorID)
+	if err != nil {
+		return false, err
+	}
+	if operator == nil {
+		return false, ErrAnnouncementUpdateDenied
+	}
+
+	currentPinned := current != nil && current.IsPinned
+	if requested == nil {
+		return currentPinned, nil
+	}
+	if operator.Role != string(model.AdminRoleSuperAdmin) {
+		return false, ErrAnnouncementPinDenied
+	}
+	return *requested, nil
+}
+
+func (s *AnnouncementService) loadOperator(ctx context.Context, operatorID string) (*model.Admin, error) {
+	if s.adminRepo == nil {
+		return nil, nil
+	}
+
+	operator, err := s.adminRepo.FindByID(ctx, operatorID)
+	if err != nil {
+		return nil, fmt.Errorf("find operator admin: %w", err)
+	}
+	return operator, nil
+}
+
 func (s *AnnouncementService) canUpdateAnnouncement(ctx context.Context, current *model.Announcement, operatorID string) error {
 	if s.adminRepo == nil {
 		return nil
 	}
 
-	operator, err := s.adminRepo.FindByID(ctx, operatorID)
+	operator, err := s.loadOperator(ctx, operatorID)
 	if err != nil {
-		return fmt.Errorf("find operator admin: %w", err)
+		return err
 	}
 	if operator == nil {
 		return ErrAnnouncementUpdateDenied
@@ -217,9 +278,9 @@ func (s *AnnouncementService) canDeleteAnnouncement(ctx context.Context, current
 		return nil
 	}
 
-	operator, err := s.adminRepo.FindByID(ctx, operatorID)
+	operator, err := s.loadOperator(ctx, operatorID)
 	if err != nil {
-		return fmt.Errorf("find operator admin: %w", err)
+		return err
 	}
 	if operator == nil {
 		return ErrAnnouncementDeleteDenied
@@ -265,7 +326,14 @@ func mapAnnouncements(items []model.Announcement) []AnnouncementItem {
 			Title:       item.Title,
 			Content:     item.Content,
 			Status:      item.Status,
+			IsPinned:    item.IsPinned,
 			CreatedByID: item.CreatedByID,
+			Creator: AnnouncementCreator{
+				ID:        item.CreatedBy.ID,
+				Username:  item.CreatedBy.Username,
+				AvatarURL: item.CreatedBy.AvatarURL,
+				Role:      item.CreatedBy.Role,
+			},
 			PublishedAt: item.PublishedAt,
 			CreatedAt:   item.CreatedAt,
 			UpdatedAt:   item.UpdatedAt,

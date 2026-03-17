@@ -175,6 +175,7 @@ type Announcement struct {
 	Title       string             `gorm:"column:title;type:text;not null"`
 	Content     string             `gorm:"column:content;type:text;not null;default:''"`
 	Status      AnnouncementStatus `gorm:"column:status;type:text;not null;default:'draft';index:idx_announcements_status_published_at"`
+	IsPinned    bool               `gorm:"column:is_pinned;type:boolean;not null;default:false;index:idx_announcements_is_pinned"`
 	CreatedByID EntityID           `gorm:"column:created_by_id;type:text;not null"`
 	PublishedAt *time.Time         `gorm:"column:published_at;type:datetime;index:idx_announcements_status_published_at,sort:desc"`
 	CreatedAt   time.Time          `gorm:"column:created_at;autoCreateTime"`

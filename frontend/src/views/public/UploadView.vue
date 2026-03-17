@@ -5,6 +5,7 @@ import EmptyState from "../../components/ui/EmptyState.vue";
 import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
+import { clearStoredReceiptCode, ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 
 interface SubmissionLookupResponse {
   receipt_code: string;
@@ -40,11 +41,7 @@ const submissionLookupResult = ref<SubmissionLookupResponse | null>(null);
 const feedbackLookupResult = ref<FeedbackLookupResponse | null>(null);
 
 onMounted(() => {
-  const storedReceiptCode =
-    sessionStorage.getItem("openshare_receipt_code") ??
-    localStorage.getItem("openshare_receipt_code") ??
-    readReceiptCodeFromCookie();
-  receiptCode.value = storedReceiptCode;
+  void syncSessionReceiptCode();
   localStorage.removeItem("openshare_feedback_receipt_code");
 });
 
@@ -96,20 +93,20 @@ async function lookupReceipt() {
 }
 
 function clearReceipt() {
-  receiptCode.value = "";
+  clearStoredReceiptCode();
   submissionLookupResult.value = null;
   feedbackLookupResult.value = null;
   lookupError.value = "";
-  sessionStorage.removeItem("openshare_receipt_code");
-  localStorage.removeItem("openshare_receipt_code");
   localStorage.removeItem("openshare_feedback_receipt_code");
+  void syncSessionReceiptCode();
 }
 
-function readReceiptCodeFromCookie() {
-  const cookie = document.cookie
-    .split("; ")
-    .find((item) => item.startsWith("openshare_receipt_code="));
-  return cookie ? decodeURIComponent(cookie.split("=").slice(1).join("=")) : "";
+async function syncSessionReceiptCode() {
+  try {
+    receiptCode.value = await ensureSessionReceiptCode();
+  } catch {
+    receiptCode.value = readStoredReceiptCode();
+  }
 }
 
 function formatDate(value: string) {
@@ -149,15 +146,18 @@ function feedbackReasonLabel(item: FeedbackLookupResponse["items"][number]) {
         <PageHeader
           eyebrow="Receipt"
           title="回执查询"
-          description="上传和反馈共用同一个回执查询入口，输入回执码后自动识别记录类型。"
         />
+
+        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-600">
+          本会话回执码为：<span class="font-semibold text-slate-900">{{ receiptCode || "暂未同步" }}</span>。请妥善保存该回执码，若清除浏览器缓存或更换浏览器/设备，该回执码将会改变。
+        </div>
 
         <div class="mt-6 flex gap-3">
           <input
             v-model="receiptCode"
             class="field flex-1"
             placeholder="输入回执码"
-            @keydown.enter.prevent="lookupReceipt"
+            readonly
           />
           <button class="btn-secondary" :disabled="lookupLoading" @click="lookupReceipt">
             {{ lookupLoading ? "查询中…" : "查询" }}
@@ -225,7 +225,7 @@ function feedbackReasonLabel(item: FeedbackLookupResponse["items"][number]) {
         </div>
 
         <div v-if="!submissionLookupResult && !feedbackLookupResult" class="mt-6">
-          <EmptyState title="输入回执码后查看记录" description="系统会自动识别这是上传记录还是反馈记录。" />
+          <EmptyState title="输入回执码后查看记录" />
         </div>
       </SurfaceCard>
     </div>

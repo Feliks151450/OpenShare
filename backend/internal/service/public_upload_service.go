@@ -289,6 +289,10 @@ func (s *PublicUploadService) normalizeInput(input PublicUploadInput, policy Sys
 
 	files := make([]normalizedUploadFile, 0, len(input.Files))
 	for _, item := range input.Files {
+		if isIgnoredUploadFile(item.OriginalName, item.RelativePath) {
+			continue
+		}
+
 		originalName := filepath.Base(strings.TrimSpace(item.OriginalName))
 		if originalName == "" || originalName == "." {
 			return nil, ErrInvalidUploadInput
@@ -329,6 +333,14 @@ func (s *PublicUploadService) normalizeInput(input PublicUploadInput, policy Sys
 		DirectPublish: input.DirectPublish,
 		Files:         files,
 	}, nil
+}
+
+func isIgnoredUploadFile(originalName string, relativePath string) bool {
+	name := strings.TrimSpace(filepath.Base(originalName))
+	if name == "" && strings.TrimSpace(relativePath) != "" {
+		name = strings.TrimSpace(filepath.Base(filepath.ToSlash(relativePath)))
+	}
+	return strings.EqualFold(name, ".DS_Store")
 }
 
 func (s *PublicUploadService) ensureTargetFolderForUpload(ctx context.Context, rootFolder *model.Folder, relativeDir string, now time.Time) (*model.Folder, error) {

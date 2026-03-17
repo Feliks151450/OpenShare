@@ -49,6 +49,8 @@ func (h *ReportHandler) CreateReport(ctx *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrReportReasonRequired):
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "reason is required"})
+		case errors.Is(err, service.ErrReportDescriptionRequired):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "description is required"})
 		case errors.Is(err, service.ErrReportReasonInvalid):
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid report reason"})
 		case errors.Is(err, service.ErrReportTargetRequired):

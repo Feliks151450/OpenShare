@@ -4,6 +4,7 @@ import { computed } from "vue";
 export interface InfoPanelCardItem {
   id: string;
   label: string;
+  badge?: string;
 }
 
 const props = withDefaults(
@@ -53,7 +54,6 @@ const emit = defineEmits<{
         >
           {{ actionLabel }}
         </button>
-        <span class="text-xs text-slate-400 dark:text-slate-500">{{ hasItems ? props.items.length : "--" }}</span>
       </div>
     </header>
 
@@ -68,7 +68,15 @@ const emit = defineEmits<{
           :class="clickable ? 'transition hover:bg-slate-50 hover:text-slate-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100' : ''"
           @click="clickable ? emit('select', item) : undefined"
         >
-          <span class="line-clamp-2">{{ item.label }}</span>
+          <span class="flex items-start gap-2">
+            <span
+              v-if="item.badge"
+              class="mt-0.5 inline-flex shrink-0 rounded-md bg-[#dcecff] px-2 py-0.5 text-xs font-semibold text-[#4f8ff7]"
+            >
+              {{ item.badge }}
+            </span>
+            <span class="line-clamp-2">{{ item.label }}</span>
+          </span>
         </component>
       </div>
 

@@ -70,6 +70,42 @@ func TestCreateSubmissionReturnsReceiptGenerationError(t *testing.T) {
 	}
 }
 
+func TestCreateSubmissionIgnoresDSStoreFiles(t *testing.T) {
+	cfg, db, storageService := newUploadTestDeps(t)
+	repo := repository.NewUploadRepository(db)
+	service := NewPublicUploadService(cfg.Upload, repo, NewReceiptCodeService(repository.NewReceiptCodeRepository(db), cfg.Upload.ReceiptCodeLength), storageService, nil)
+	folderID := createUploadTargetFolder(t, db)
+
+	result, err := service.CreateSubmission(context.Background(), PublicUploadInput{
+		FolderID: folderID,
+		Files: []PublicUploadFileInput{
+			{
+				OriginalName: ".DS_Store",
+				File:         strings.NewReader("ignored"),
+			},
+			{
+				OriginalName: "notes.pdf",
+				DeclaredMIME: "application/pdf",
+				File:         strings.NewReader("%PDF-1.4 test document"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if result.ItemCount != 1 {
+		t.Fatalf("expected only 1 uploaded item after filtering, got %d", result.ItemCount)
+	}
+
+	var count int64
+	if err := db.Model(&model.Submission{}).Count(&count).Error; err != nil {
+		t.Fatalf("count submissions failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 stored submission, got %d", count)
+	}
+}
+
 func newUploadTestDeps(t *testing.T) (config.Config, *gorm.DB, *storage.Service) {
 	t.Helper()
 

@@ -194,7 +194,7 @@ func TestCreateReportReusesReceiptCodeFromCookie(t *testing.T) {
 
 	file := createActiveFile(t, db)
 
-	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `","reason":"copyright"}`)
+	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `","reason":"copyright","description":"存在侵权风险"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "openshare_receipt_code", Value: "SESSION88"})
@@ -224,7 +224,7 @@ func TestCreateReportForFolder(t *testing.T) {
 
 	folder := createActiveFolder(t, db)
 
-	body := bytes.NewBufferString(`{"folder_id":"` + folder.ID + `","reason":"irrelevant"}`)
+	body := bytes.NewBufferString(`{"folder_id":"` + folder.ID + `","reason":"irrelevant","description":"目录内容与主题无关"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -243,7 +243,7 @@ func TestCreateReportRejectsMissingReason(t *testing.T) {
 
 	file := createActiveFile(t, db)
 
-	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `"}`)
+	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `","description":"缺少原因字段"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -262,7 +262,7 @@ func TestCreateReportRejectsInvalidReason(t *testing.T) {
 
 	file := createActiveFile(t, db)
 
-	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `","reason":"spam"}`)
+	body := bytes.NewBufferString(`{"file_id":"` + file.ID + `","reason":"spam","description":"原因码非法"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -279,7 +279,7 @@ func TestCreateReportRejectsBothTargets(t *testing.T) {
 	manager := newRouterSessionManager(db)
 	engine := New(db, cfg, manager)
 
-	body := bytes.NewBufferString(`{"file_id":"abc","folder_id":"def","reason":"copyright"}`)
+	body := bytes.NewBufferString(`{"file_id":"abc","folder_id":"def","reason":"copyright","description":"同时传了两个目标"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -296,7 +296,7 @@ func TestCreateReportRejectsNonexistentTarget(t *testing.T) {
 	manager := newRouterSessionManager(db)
 	engine := New(db, cfg, manager)
 
-	body := bytes.NewBufferString(`{"file_id":"nonexistent","reason":"copyright"}`)
+	body := bytes.NewBufferString(`{"file_id":"nonexistent","reason":"copyright","description":"目标不存在"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reports", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

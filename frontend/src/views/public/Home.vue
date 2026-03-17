@@ -26,6 +26,7 @@ import InfoPanelCard, { type InfoPanelCardItem } from "../../components/InfoPane
 import SearchSection from "../../components/SearchSection.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
 import { renderSimpleMarkdown } from "../../lib/markdown";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
@@ -34,6 +35,13 @@ interface AnnouncementItem {
   id: string;
   title: string;
   content: string;
+  is_pinned: boolean;
+  creator: {
+    id: string;
+    username: string;
+    avatar_url: string;
+    role: string;
+  };
   published_at?: string;
   updated_at: string;
 }
@@ -117,6 +125,7 @@ const router = useRouter();
 
 const announcements = ref<AnnouncementItem[]>([]);
 const announcementDetail = ref<AnnouncementItem | null>(null);
+const announcementListOpen = ref(false);
 const hotDownloadItems = ref<HotDownloadItem[]>([]);
 const latestItems = ref<LatestItem[]>([]);
 const sidebarDetailModal = ref<SidebarDetailModalState | null>(null);
@@ -147,6 +156,7 @@ const feedbackDescription = ref("");
 const feedbackSubmitting = ref(false);
 const feedbackMessage = ref("");
 const feedbackError = ref("");
+const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 
 const loading = ref(false);
 const error = ref("");
@@ -182,6 +192,11 @@ const hotDownloads = computed(() => hotDownloadItems.value.slice(0, 5).map((item
 const latestTitles = computed(() => latestItems.value.slice(0, 5).map((item) => ({
   id: item.id,
   label: item.name,
+})));
+const recentAnnouncements = computed(() => announcements.value.slice(0, 5).map((item) => ({
+  id: item.id,
+  label: item.title,
+  badge: item.is_pinned ? "置顶" : undefined,
 })));
 
 type DirectoryRow = {
@@ -283,6 +298,7 @@ function downloadResource(row: DirectoryRow) {
 function syncBodyScrollLock() {
   const shouldLock = Boolean(
     announcementDetail.value
+      || announcementListOpen.value
       || sidebarDetailModal.value
       || uploadModalOpen.value
       || feedbackModalOpen.value
@@ -301,7 +317,7 @@ onMounted(async () => {
   if (storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format") {
     sortMode.value = storedSortMode;
   }
-  currentReceiptCode.value = readStoredReceiptCode();
+  currentReceiptCode.value = await syncSessionReceiptCode();
   await Promise.all([loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), loadDirectory(), loadAdminPermission()]);
 });
 
@@ -331,6 +347,7 @@ function openAnnouncementDetail(item: InfoPanelCardItem) {
   if (!target) {
     return;
   }
+  announcementListOpen.value = false;
   announcementDetail.value = target;
   syncBodyScrollLock();
 }
@@ -338,6 +355,34 @@ function openAnnouncementDetail(item: InfoPanelCardItem) {
 function closeAnnouncementDetail() {
   announcementDetail.value = null;
   syncBodyScrollLock();
+}
+
+function returnToAnnouncementList() {
+  announcementDetail.value = null;
+  announcementListOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function openAnnouncementList() {
+  announcementListOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function closeAnnouncementList() {
+  announcementListOpen.value = false;
+  syncBodyScrollLock();
+}
+
+function announcementAuthorName(item: AnnouncementItem) {
+  return item.creator?.username?.trim() || "未知用户";
+}
+
+function announcementAuthorInitial(item: AnnouncementItem) {
+  return announcementAuthorName(item).slice(0, 1).toUpperCase() || "A";
+}
+
+function announcementAuthorIsSuperAdmin(item: AnnouncementItem) {
+  return item.creator?.role === "super_admin";
 }
 
 function openSidebarDetailModal(modal: SidebarDetailModalState) {
@@ -623,7 +668,7 @@ function openUpload() {
   uploadMessage.value = "";
   uploadForm.value.description = "";
   uploadForm.value.entries = [];
-  currentReceiptCode.value = readStoredReceiptCode();
+  void syncSessionReceiptCode();
   if (uploadFileInput.value) {
     uploadFileInput.value.value = "";
   }
@@ -638,6 +683,9 @@ function closeUploadModal() {
 function onUploadFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
   uploadForm.value.entries = normalizeFiles(Array.from(target.files ?? []).slice(0, 1));
+  if (uploadForm.value.entries.length === 0 && (target.files?.length ?? 0) > 0) {
+    uploadError.value = "已自动忽略 .DS_Store，请重新选择可上传文件。";
+  }
 }
 
 function triggerUploadFileSelect() {
@@ -671,6 +719,9 @@ async function onUploadDrop(event: DragEvent) {
   try {
     const entries = await collectDroppedEntries(event);
     uploadForm.value.entries = entries;
+    if (entries.length === 0 && (event.dataTransfer?.files.length ?? 0) > 0) {
+      uploadError.value = "检测到的内容仅包含 .DS_Store，已自动忽略。";
+    }
   } catch {
     uploadError.value = "解析拖拽内容失败，请重试。";
   } finally {
@@ -837,7 +888,7 @@ function openFeedbackModal(target: { id: string; type: "file" | "folder"; name: 
   feedbackDescription.value = "";
   feedbackMessage.value = "";
   feedbackError.value = "";
-  currentReceiptCode.value = readStoredReceiptCode();
+  void syncSessionReceiptCode();
   syncBodyScrollLock();
 }
 
@@ -900,6 +951,10 @@ async function saveFolderDescription() {
 
 async function submitFeedback() {
   if (!feedbackTarget.value) {
+    return;
+  }
+  if (!feedbackDescription.value.trim()) {
+    feedbackError.value = "请填写问题说明。";
     return;
   }
 
@@ -1003,17 +1058,15 @@ function formatSortRank(row: DirectoryRow) {
   return 3;
 }
 
-function readStoredReceiptCode() {
-  const stored = window.sessionStorage.getItem("openshare_receipt_code")
-    || window.localStorage.getItem("openshare_receipt_code");
-  if (stored) {
-    return stored;
+async function syncSessionReceiptCode() {
+  try {
+    const receiptCode = await ensureSessionReceiptCode();
+    currentReceiptCode.value = receiptCode || readStoredReceiptCode();
+    return currentReceiptCode.value;
+  } catch {
+    currentReceiptCode.value = readStoredReceiptCode();
+    return currentReceiptCode.value;
   }
-
-  const cookie = document.cookie
-    .split("; ")
-    .find((item) => item.startsWith("openshare_receipt_code="));
-  return cookie ? decodeURIComponent(cookie.split("=").slice(1).join("=")) : "";
 }
 </script>
 
@@ -1034,10 +1087,12 @@ function readStoredReceiptCode() {
       <aside class="space-y-4 xl:pt-2">
         <InfoPanelCard
           title="公告栏"
-          :items="announcements.map((item) => ({ id: item.id, label: item.title }))"
+          :items="recentAnnouncements"
           clickable
+          action-label="详情"
           empty-text="暂无公告"
           @select="openAnnouncementDetail"
+          @action="openAnnouncementList"
         />
         <InfoPanelCard
           title="热门下载"
@@ -1319,6 +1374,14 @@ function readStoredReceiptCode() {
                 </div>
                 <div class="flex shrink-0 items-start gap-3">
                   <button
+                    type="button"
+                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                    aria-label="反馈文件夹"
+                    @click="openFeedbackModal({ id: currentFolderDetail.id, type: 'folder', name: currentFolderDetail.name })"
+                  >
+                    <Flag class="h-4 w-4" />
+                  </button>
+                  <button
                     v-if="canManageResourceDescriptions"
                     type="button"
                     class="btn-secondary"
@@ -1398,17 +1461,88 @@ function readStoredReceiptCode() {
   </Teleport>
 
   <Teleport to="body">
+    <div v-if="announcementListOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
+      <div class="panel w-full max-w-3xl p-6">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+          <div class="min-w-0">
+            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p>
+            <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">全部公告</h3>
+          </div>
+          <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
+        </div>
+        <div class="mt-5 max-h-[70vh] space-y-3 overflow-auto pr-1">
+          <button
+            v-for="item in announcements"
+            :key="item.id"
+            type="button"
+            class="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+            @click="openAnnouncementDetail({ id: item.id, label: item.title })"
+          >
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  v-if="item.is_pinned"
+                  class="rounded-md bg-[#dcecff] px-2 py-0.5 text-xs font-semibold text-[#4f8ff7]"
+                >
+                  置顶
+                </span>
+                <p class="text-base font-semibold text-slate-900">{{ item.title }}</p>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                  <img v-if="item.creator?.avatar_url" :src="item.creator.avatar_url" alt="发布人头像" class="h-full w-full object-cover" />
+                  <span v-else>{{ announcementAuthorInitial(item) }}</span>
+                </div>
+                <span class="text-sm font-medium text-slate-700">{{ announcementAuthorName(item) }}</span>
+                <span
+                  v-if="announcementAuthorIsSuperAdmin(item)"
+                  class="rounded-full bg-[#fff1e4] px-2.5 py-1 text-xs font-semibold text-[#d07a2d]"
+                >
+                  超级管理员
+                </span>
+              </div>
+              <p class="mt-2 line-clamp-2 text-sm text-slate-500">{{ item.content }}</p>
+            </div>
+            <span class="shrink-0 text-sm text-slate-400">
+              {{ formatDateTime(item.published_at || item.updated_at) }}
+            </span>
+          </button>
+          <p v-if="announcements.length === 0" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            暂无公告
+          </p>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
     <div v-if="announcementDetail" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
       <div class="panel w-full max-w-2xl p-6">
         <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
           <div class="min-w-0">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement</p>
             <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{{ announcementDetail.title }}</h3>
-            <p class="mt-2 text-sm text-slate-500">
-              {{ formatDateTime(announcementDetail.published_at || announcementDetail.updated_at) }}
-            </p>
+            <div class="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+              <div class="flex items-center gap-2">
+                <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                  <img v-if="announcementDetail.creator?.avatar_url" :src="announcementDetail.creator.avatar_url" alt="发布人头像" class="h-full w-full object-cover" />
+                  <span v-else>{{ announcementAuthorInitial(announcementDetail) }}</span>
+                </div>
+                <span class="font-medium text-slate-700">{{ announcementAuthorName(announcementDetail) }}</span>
+              </div>
+              <span
+                v-if="announcementAuthorIsSuperAdmin(announcementDetail)"
+                class="rounded-full bg-[#fff1e4] px-2.5 py-1 text-xs font-semibold text-[#d07a2d]"
+              >
+                超级管理员
+              </span>
+              <span>{{ formatDateTime(announcementDetail.published_at || announcementDetail.updated_at) }}</span>
+            </div>
           </div>
-          <button type="button" class="btn-secondary" @click="closeAnnouncementDetail">关闭</button>
+          <div class="flex items-center gap-3">
+            <button type="button" class="btn-secondary" @click="returnToAnnouncementList">返回</button>
+            <button type="button" class="btn-secondary" @click="closeAnnouncementDetail">关闭</button>
+          </div>
         </div>
         <div class="mt-5 rounded-3xl border border-slate-200 bg-white px-5 py-5">
           <div class="markdown-content" v-html="renderSimpleMarkdown(announcementDetail.content)" />
@@ -1564,14 +1698,12 @@ function readStoredReceiptCode() {
           <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
               <h3 class="text-lg font-semibold text-slate-900">反馈中心</h3>
-              <p class="mt-1 text-sm text-slate-500">反馈和上传共用当前会话回执码，可到回执查询页查看处理进度。</p>
             </div>
             <button type="button" class="btn-secondary" @click="closeFeedbackModal">关闭</button>
           </div>
 
           <div class="mt-5 space-y-4">
             <div>
-              <h4 class="text-base font-semibold text-slate-900">提交反馈</h4>
               <p v-if="feedbackTarget" class="mt-2 text-sm text-slate-600">当前对象：{{ feedbackTarget.name }}</p>
             </div>
 
@@ -1585,18 +1717,13 @@ function readStoredReceiptCode() {
             </label>
 
             <label class="space-y-2">
-              <span class="text-sm font-medium text-slate-700">反馈类型</span>
-              <select v-model="feedbackReason" class="field">
-                <option value="copyright">侵权</option>
-                <option value="content_error">内容错误</option>
-                <option value="file_corrupted">文件损坏</option>
-                <option value="irrelevant">无关资料</option>
-              </select>
-            </label>
-
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-slate-700">补充说明</span>
-              <textarea v-model="feedbackDescription" rows="5" class="field-area" placeholder="可选，填写更具体的问题说明" />
+              <span class="text-sm font-medium text-slate-700">问题说明</span>
+              <textarea
+                v-model="feedbackDescription"
+                rows="5"
+                class="field-area"
+                placeholder="信息不当/侵权/损坏……描述您遇到的问题，我们会尽快改进！"
+              />
             </label>
 
             <p v-if="feedbackMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ feedbackMessage }}</p>
@@ -1604,7 +1731,7 @@ function readStoredReceiptCode() {
 
             <div class="flex justify-end gap-3">
               <button type="button" class="btn-secondary" @click="closeFeedbackModal">取消</button>
-              <button type="button" class="btn-primary" :disabled="feedbackSubmitting" @click="submitFeedback">
+              <button type="button" class="btn-primary" :disabled="feedbackSubmitDisabled" @click="submitFeedback">
                 {{ feedbackSubmitting ? "提交中…" : "提交反馈" }}
               </button>
             </div>

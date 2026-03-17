@@ -21,6 +21,7 @@ var (
 	ErrReportNotFound       = errors.New("report not found")
 	ErrReportNotPending     = errors.New("report is not pending")
 	ErrReportReasonRequired = errors.New("report reason is required")
+	ErrReportDescriptionRequired = errors.New("report description is required")
 	ErrReportReasonInvalid  = errors.New("invalid report reason")
 	ErrReportTargetRequired = errors.New("exactly one of file_id or folder_id is required")
 	ErrReportTargetNotFound = errors.New("reported resource not found or already offline")
@@ -122,6 +123,10 @@ func (s *ReportService) CreateReport(ctx context.Context, input CreateReportInpu
 	if reason == "" {
 		return nil, ErrReportReasonRequired
 	}
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return nil, ErrReportDescriptionRequired
+	}
 	if _, ok := validReportReasons[reason]; !ok {
 		return nil, ErrReportReasonInvalid
 	}
@@ -181,7 +186,7 @@ func (s *ReportService) CreateReport(ctx context.Context, input CreateReportInpu
 		TargetName:  targetName,
 		TargetType:  targetType,
 		Reason:      reason,
-		Description: strings.TrimSpace(input.Description),
+		Description: description,
 		ReporterIP:  input.ReporterIP,
 		Status:      model.ReportStatusPending,
 		CreatedAt:   now,

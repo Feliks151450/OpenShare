@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Download } from "lucide-vue-next";
+import { Download, Flag } from "lucide-vue-next";
 
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
 import { renderSimpleMarkdown } from "../../lib/markdown";
 
@@ -36,9 +37,16 @@ const deleteDialogOpen = ref(false);
 const deletePassword = ref("");
 const deleteSubmitting = ref(false);
 const deleteError = ref("");
+const feedbackModalOpen = ref(false);
+const feedbackDescription = ref("");
+const feedbackSubmitting = ref(false);
+const feedbackMessage = ref("");
+const feedbackError = ref("");
+const currentReceiptCode = ref("");
 const fileID = computed(() => String(route.params.fileID ?? ""));
 const downloadURL = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
 const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
+const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 const detailStats = computed(() => {
   if (!detail.value) {
     return [];
@@ -63,11 +71,11 @@ const editorDirty = computed(() => {
 });
 
 onMounted(() => {
-  void Promise.all([loadDetail(), loadAdminPermission()]);
+  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
 });
 
 watch(fileID, () => {
-  void Promise.all([loadDetail(), loadAdminPermission()]);
+  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
 });
 
 async function loadDetail() {
@@ -115,6 +123,18 @@ function openDeleteDialog() {
   deletePassword.value = "";
   deleteError.value = "";
   deleteDialogOpen.value = true;
+}
+
+function openFeedbackModal() {
+  feedbackDescription.value = "";
+  feedbackError.value = "";
+  feedbackMessage.value = "";
+  feedbackModalOpen.value = true;
+  void syncSessionReceiptCode();
+}
+
+function closeFeedbackModal() {
+  feedbackModalOpen.value = false;
 }
 
 function closeDeleteDialog() {
@@ -169,6 +189,45 @@ async function confirmDeleteFile() {
     deleteError.value = readApiError(err, "删除文件失败。");
   } finally {
     deleteSubmitting.value = false;
+  }
+}
+
+async function submitFeedback() {
+  if (!detail.value || !feedbackDescription.value.trim()) {
+    return;
+  }
+
+  feedbackSubmitting.value = true;
+  feedbackMessage.value = "";
+  feedbackError.value = "";
+  try {
+    const response = await httpClient.post<{ receipt_code: string }>("/public/reports", {
+      file_id: detail.value.id,
+      folder_id: "",
+      reason: "content_error",
+      description: feedbackDescription.value.trim(),
+    });
+    feedbackMessage.value = `反馈已提交，请保存回执码 ${response.receipt_code}。`;
+    currentReceiptCode.value = response.receipt_code;
+    window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
+  } catch (err: unknown) {
+    if (err instanceof HttpError && err.status === 400) {
+      feedbackError.value = "请填写问题说明。";
+    } else if (err instanceof HttpError && err.status === 404) {
+      feedbackError.value = "文件不存在或已下线。";
+    } else {
+      feedbackError.value = "提交反馈失败。";
+    }
+  } finally {
+    feedbackSubmitting.value = false;
+  }
+}
+
+async function syncSessionReceiptCode() {
+  try {
+    currentReceiptCode.value = await ensureSessionReceiptCode();
+  } catch {
+    currentReceiptCode.value = readStoredReceiptCode();
   }
 }
 
@@ -265,6 +324,14 @@ function downloadFile() {
                 </button>
                 <button
                   type="button"
+                  class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                  aria-label="反馈文件"
+                  @click="openFeedbackModal"
+                >
+                  <Flag class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
                   class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white transition hover:bg-slate-800"
                   aria-label="下载文件"
                   @click="downloadFile"
@@ -313,6 +380,58 @@ function downloadFile() {
               >
                 {{ deleteSubmitting ? "删除中…" : "确认删除" }}
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="feedbackModalOpen && detail" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-screen items-center justify-center px-4 py-6">
+          <div class="panel w-full max-w-2xl overflow-hidden p-6">
+            <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <h3 class="text-lg font-semibold text-slate-900">反馈中心</h3>
+              </div>
+              <button type="button" class="btn-secondary" @click="closeFeedbackModal">关闭</button>
+            </div>
+
+            <div class="mt-5 space-y-4">
+              <p class="text-sm text-slate-600">当前对象：{{ detail.original_name }}</p>
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">回执码</span>
+                <div class="rounded-xl bg-slate-50 px-4 py-3">
+                  <p class="text-sm font-semibold tracking-[0.12em] text-slate-900">
+                    {{ currentReceiptCode || "当前会话回执码暂未同步" }}
+                  </p>
+                </div>
+              </label>
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">问题说明</span>
+                <textarea
+                  v-model="feedbackDescription"
+                  rows="5"
+                  class="field-area"
+                  placeholder="信息不当/侵权/损坏……描述您遇到的问题，我们会尽快改进！"
+                />
+              </label>
+
+              <p v-if="feedbackMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {{ feedbackMessage }}
+              </p>
+              <p v-if="feedbackError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {{ feedbackError }}
+              </p>
+
+              <div class="flex justify-end gap-3">
+                <button type="button" class="btn-secondary" @click="closeFeedbackModal">取消</button>
+                <button type="button" class="btn-primary" :disabled="feedbackSubmitDisabled" @click="submitFeedback">
+                  {{ feedbackSubmitting ? "提交中…" : "提交反馈" }}
+                </button>
+              </div>
             </div>
           </div>
         </div>

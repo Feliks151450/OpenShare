@@ -16,6 +16,7 @@ interface AnnouncementItem {
   title: string;
   content: string;
   status: AnnouncementStatus;
+  is_pinned: boolean;
   created_by_id: string;
   published_at?: string;
   created_at: string;
@@ -38,6 +39,7 @@ const form = reactive({
   title: "",
   content: "",
   status: "published" as AnnouncementStatus,
+  isPinned: false,
 });
 
 const canManageAnnouncements = computed(() => sessionStore.hasPermission("announcements"));
@@ -50,7 +52,8 @@ const formDirty = computed(() => {
   return (
     form.title.trim() !== editingItem.value.title ||
     form.content.trim() !== editingItem.value.content ||
-    form.status !== editingItem.value.status
+    form.status !== editingItem.value.status ||
+    form.isPinned !== editingItem.value.is_pinned
   );
 });
 
@@ -87,6 +90,7 @@ function openCreateEditor() {
   form.title = "";
   form.content = "";
   form.status = "published";
+  form.isPinned = false;
   editorOpen.value = true;
 }
 
@@ -95,6 +99,7 @@ function openEditEditor(item: AnnouncementItem) {
   form.title = item.title;
   form.content = item.content;
   form.status = item.status;
+  form.isPinned = item.is_pinned;
   editorOpen.value = true;
 }
 
@@ -116,6 +121,7 @@ async function saveAnnouncement() {
       title: form.title.trim(),
       content: form.content.trim(),
       status: form.status,
+      ...(sessionStore.isSuperAdmin ? { is_pinned: form.isPinned } : {}),
     };
     if (editingItem.value) {
       await httpClient.request(`/admin/announcements/${editingItem.value.id}`, {
@@ -199,17 +205,20 @@ function statusClass(status: AnnouncementStatus) {
       return "bg-emerald-50 text-emerald-700";
   }
 }
+
+function pinLabel(item: AnnouncementItem) {
+  return item.is_pinned ? "已置顶" : "普通公告";
+}
 </script>
 
 <template>
   <section class="space-y-8">
-    <PageHeader eyebrow="Announcements" title="公告" description="管理首页公告，支持简单 Markdown，公开页只展示已发布内容。" />
+    <PageHeader eyebrow="Announcements" title="公告" />
 
     <SurfaceCard class="space-y-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 class="text-lg font-semibold text-slate-900">公告列表</h2>
-          <p class="mt-1 text-sm text-slate-500">普通管理员可管理自己发布的公告，超级管理员可删除其他管理员发布的公告。</p>
         </div>
         <div class="flex gap-3">
           <button class="btn-secondary" @click="loadItems">刷新</button>
@@ -230,6 +239,12 @@ function statusClass(status: AnnouncementStatus) {
                 <h3 class="text-lg font-semibold text-slate-900">{{ item.title }}</h3>
                 <span class="rounded-lg px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                   {{ statusLabel(item.status) }}
+                </span>
+                <span
+                  class="rounded-lg px-2.5 py-1 text-xs font-medium"
+                  :class="item.is_pinned ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'"
+                >
+                  {{ pinLabel(item) }}
                 </span>
               </div>
               <div class="mt-2 flex flex-wrap gap-4 text-sm text-slate-500">
@@ -277,14 +292,45 @@ function statusClass(status: AnnouncementStatus) {
                 <input v-model="form.title" class="field" placeholder="输入公告标题" />
               </label>
 
-              <label class="space-y-2">
-                <span class="text-sm font-medium text-slate-700">状态</span>
-                <select v-model="form.status" class="field">
-                  <option value="published">发布</option>
-                  <option value="draft">草稿</option>
-                  <option value="hidden">隐藏</option>
-                </select>
-              </label>
+              <div class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">发布设置</span>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    class="flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition"
+                    :class="form.status === 'published' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
+                    @click="form.status = form.status === 'published' ? 'draft' : 'published'"
+                  >
+                    <div>
+                      <p class="text-sm font-semibold">是否公开</p>
+                      <p class="mt-1 text-xs" :class="form.status === 'published' ? 'text-blue-600/80' : 'text-slate-400'">
+                        {{ form.status === 'published' ? '公开展示' : '暂不公开' }}
+                      </p>
+                    </div>
+                    <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="form.status === 'published' ? 'bg-white text-blue-700' : 'bg-slate-100 text-slate-500'">
+                      {{ form.status === 'published' ? '公开' : '不公开' }}
+                    </span>
+                  </button>
+
+                  <button
+                    v-if="sessionStore.isSuperAdmin"
+                    type="button"
+                    class="flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition"
+                    :class="form.isPinned ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
+                    @click="form.isPinned = !form.isPinned"
+                  >
+                    <div>
+                      <p class="text-sm font-semibold">是否置顶</p>
+                      <p class="mt-1 text-xs" :class="form.isPinned ? 'text-blue-600/80' : 'text-slate-400'">
+                        {{ form.isPinned ? '优先展示在前面' : '按时间顺序展示' }}
+                      </p>
+                    </div>
+                    <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="form.isPinned ? 'bg-white text-blue-700' : 'bg-slate-100 text-slate-500'">
+                      {{ form.isPinned ? '置顶' : '普通' }}
+                    </span>
+                  </button>
+                </div>
+              </div>
 
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">公告内容</span>

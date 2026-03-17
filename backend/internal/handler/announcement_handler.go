@@ -16,9 +16,10 @@ type AnnouncementHandler struct {
 }
 
 type saveAnnouncementRequest struct {
-	Title   string                   `json:"title"`
-	Content string                   `json:"content"`
-	Status  model.AnnouncementStatus `json:"status"`
+	Title    string                   `json:"title"`
+	Content  string                   `json:"content"`
+	Status   model.AnnouncementStatus `json:"status"`
+	IsPinned *bool                    `json:"is_pinned,omitempty"`
 }
 
 func NewAnnouncementHandler(service *service.AnnouncementService) *AnnouncementHandler {
@@ -60,12 +61,17 @@ func (h *AnnouncementHandler) Create(ctx *gin.Context) {
 		Title:      req.Title,
 		Content:    req.Content,
 		Status:     req.Status,
+		IsPinned:   req.IsPinned,
 		OperatorID: identity.AdminID,
 		OperatorIP: ctx.ClientIP(),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrAnnouncementInvalidInput) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid announcement"})
+			return
+		}
+		if errors.Is(err, service.ErrAnnouncementPinDenied) {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can pin announcements"})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create announcement"})
@@ -91,6 +97,7 @@ func (h *AnnouncementHandler) Update(ctx *gin.Context) {
 		Title:      req.Title,
 		Content:    req.Content,
 		Status:     req.Status,
+		IsPinned:   req.IsPinned,
 		OperatorID: identity.AdminID,
 		OperatorIP: ctx.ClientIP(),
 	})
@@ -98,6 +105,8 @@ func (h *AnnouncementHandler) Update(ctx *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrAnnouncementInvalidInput):
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid announcement"})
+		case errors.Is(err, service.ErrAnnouncementPinDenied):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can pin announcements"})
 		case errors.Is(err, service.ErrAnnouncementUpdateDenied):
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "cannot update this announcement"})
 		case errors.Is(err, service.ErrAnnouncementNotFound):

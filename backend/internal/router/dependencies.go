@@ -23,6 +23,7 @@ type routeHandlers struct {
 	operationLog       *handler.OperationLogHandler
 	publicCatalog      *handler.PublicCatalogHandler
 	publicDownload     *handler.PublicDownloadHandler
+	publicReceipt      *handler.PublicReceiptHandler
 	publicSubmission   *handler.PublicSubmissionHandler
 	publicUpload       *handler.PublicUploadHandler
 	report             *handler.ReportHandler
@@ -74,6 +75,7 @@ func buildRouteHandlers(db *gorm.DB, cfg config.Config, sessionManager *session.
 		publicDownload: handler.NewPublicDownloadHandler(
 			service.NewPublicDownloadService(repository.NewPublicDownloadRepository(db), storageService),
 		),
+		publicReceipt: handler.NewPublicReceiptHandler(receiptCodeService),
 		publicSubmission: handler.NewPublicSubmissionHandler(
 			service.NewPublicSubmissionService(repository.NewPublicSubmissionRepository(db)),
 		),
