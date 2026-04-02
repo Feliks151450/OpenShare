@@ -201,7 +201,7 @@ wait
 目录结构：
 
 ```text
-openshare-1.0.0-linux-amd64/
+openshare-x.x.x-linux-amd64/
 ├── openshare
 ├── start.sh
 └── configs/
