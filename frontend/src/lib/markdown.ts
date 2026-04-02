@@ -7,12 +7,82 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+/** 从简介 Markdown 中取封面图：仅当 alt 为 `cover`（不区分大小写）时，取首次出现的图片 URL */
+export function extractCoverImageUrlFromMarkdown(source: string): string | null {
+  const normalized = source.replace(/\r\n/g, "\n");
+  const re = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    if (m[1].trim().toLowerCase() !== "cover") {
+      continue;
+    }
+    return m[2].trim();
+  }
+  return null;
+}
+
+/** 去掉 `![cover](...)`，避免卡片摘要里出现 Markdown 源码 */
+export function stripCoverImageMarkdown(source: string): string {
+  return source
+    .replace(/\r\n/g, "\n")
+    .replace(/!\[cover\]\([^)]*\)/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isSafeImageUrlForSrc(url: string): boolean {
+  const u = url.trim().toLowerCase();
+  if (!u) {
+    return false;
+  }
+  if (u.startsWith("javascript:") || u.startsWith("data:") || u.startsWith("vbscript:")) {
+    return false;
+  }
+  return true;
+}
+
+/** 将 Markdown 中的图片地址转为可在当前页展示的绝对 URL */
+export function resolveMarkdownImageUrlToHref(raw: string): string {
+  const u = raw.trim();
+  if (!u) {
+    return "";
+  }
+  if (typeof window === "undefined") {
+    return u;
+  }
+  if (/^https?:\/\//i.test(u)) {
+    return u;
+  }
+  try {
+    return new URL(u, window.location.href).href;
+  } catch {
+    return u;
+  }
+}
+
+export function coverImageHrefFromDescription(description: string): string | null {
+  const raw = extractCoverImageUrlFromMarkdown(description);
+  if (!raw || !isSafeImageUrlForSrc(raw)) {
+    return null;
+  }
+  const href = resolveMarkdownImageUrlToHref(raw);
+  return href || null;
+}
+
 function renderInlineMarkdown(value: string) {
   const escaped = escapeHtml(value);
   return escaped
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+      const rawUrl = String(url).trim();
+      if (!isSafeImageUrlForSrc(rawUrl)) {
+        return `![${alt}](${url})`;
+      }
+      const src = escapeHtml(resolveMarkdownImageUrlToHref(rawUrl));
+      return `<img src="${src}" alt="${escapeHtml(String(alt))}" class="markdown-img" loading="lazy" decoding="async" />`;
+    })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 

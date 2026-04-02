@@ -28,7 +28,11 @@ import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
-import { renderSimpleMarkdown } from "../../lib/markdown";
+import {
+  coverImageHrefFromDescription,
+  renderSimpleMarkdown,
+  stripCoverImageMarkdown,
+} from "../../lib/markdown";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 
 interface AnnouncementItem {
@@ -50,6 +54,7 @@ interface AnnouncementItem {
 interface PublicFolderItem {
   id: string;
   name: string;
+  description?: string;
   updated_at: string;
   file_count: number;
   download_count: number;
@@ -211,6 +216,8 @@ type DirectoryRow = {
   name: string;
   extension: string;
   description: string;
+  /** 由简介中 `![cover](url)` 解析，用于卡片/表格缩略图 */
+  coverUrl: string | null;
   downloadCount: number;
   fileCount: number;
   sizeText: string;
@@ -219,31 +226,39 @@ type DirectoryRow = {
 };
 
 const rows = computed<DirectoryRow[]>(() => [
-  ...folders.value.map((folder) => ({
-    id: folder.id,
-    kind: "folder" as const,
-    name: folder.name,
-    extension: "",
-    description: "",
-    downloadCount: folder.download_count ?? 0,
-    fileCount: folder.file_count ?? 0,
-    sizeText: formatSize(folder.total_size ?? 0),
-    updatedAt: formatDateTime(folder.updated_at),
-    downloadURL: `/api/public/folders/${encodeURIComponent(folder.id)}/download`,
-  })),
+  ...folders.value.map((folder) => {
+    const desc = (folder.description ?? "").trim();
+    return {
+      id: folder.id,
+      kind: "folder" as const,
+      name: folder.name,
+      extension: "",
+      description: desc,
+      coverUrl: coverImageHrefFromDescription(desc),
+      downloadCount: folder.download_count ?? 0,
+      fileCount: folder.file_count ?? 0,
+      sizeText: formatSize(folder.total_size ?? 0),
+      updatedAt: formatDateTime(folder.updated_at),
+      downloadURL: `/api/public/folders/${encodeURIComponent(folder.id)}/download`,
+    };
+  }),
   ...(currentFolderID.value
-    ? files.value.map((file) => ({
-        id: file.id,
-        kind: "file" as const,
-        name: file.name,
-        extension: file.extension || extractExtension(file.name),
-        description: (file.description ?? "").trim(),
-        downloadCount: file.download_count ?? 0,
-        fileCount: 0,
-        sizeText: formatSize(file.size),
-        updatedAt: formatDateTime(file.uploaded_at),
-        downloadURL: `/api/public/files/${encodeURIComponent(file.id)}/download`,
-      }))
+    ? files.value.map((file) => {
+        const desc = (file.description ?? "").trim();
+        return {
+          id: file.id,
+          kind: "file" as const,
+          name: file.name,
+          extension: file.extension || extractExtension(file.name),
+          description: desc,
+          coverUrl: coverImageHrefFromDescription(desc),
+          downloadCount: file.download_count ?? 0,
+          fileCount: 0,
+          sizeText: formatSize(file.size),
+          updatedAt: formatDateTime(file.uploaded_at),
+          downloadURL: `/api/public/files/${encodeURIComponent(file.id)}/download`,
+        };
+      })
     : []),
 ]);
 const displayedRows = computed<DirectoryRow[]>(() => (searchKeyword.value ? searchRows.value : rows.value));
@@ -669,7 +684,8 @@ function downloadCurrentFolder() {
     kind: "folder",
     name: currentFolderDetail.value.name,
     extension: "",
-    description: "",
+    description: (currentFolderDetail.value.description ?? "").trim(),
+    coverUrl: coverImageHrefFromDescription((currentFolderDetail.value.description ?? "").trim()),
     downloadCount: currentFolderDetail.value.download_count ?? 0,
     fileCount: currentFolderDetail.value.file_count ?? 0,
     sizeText: formatSize(currentFolderDetail.value.total_size ?? 0),
@@ -757,6 +773,7 @@ async function runSearch(keyword: string) {
       name: item.name,
       extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
       description: "",
+      coverUrl: null,
       downloadCount: item.download_count ?? 0,
       fileCount: 0,
       sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
@@ -1138,6 +1155,10 @@ async function submitFeedback() {
   }
 }
 
+function descriptionCardPreview(description: string): string {
+  return stripCoverImageMarkdown(description).trim();
+}
+
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(2)} KB`;
@@ -1271,6 +1292,69 @@ async function syncSessionReceiptCode() {
               </div>
 
             </div>
+          </div>
+
+          <div v-if="currentFolderDetail" class="border-b border-slate-200 px-4 py-5 sm:px-6 dark:border-slate-800">
+            <section>
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0 flex-1 space-y-3">
+                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Folder Info</p>
+                  <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
+                    <div
+                      v-for="item in currentFolderStats"
+                      :key="item.label"
+                      class="inline-flex items-center gap-2"
+                    >
+                      <span>{{ item.label }}</span>
+                      <span class="font-medium text-slate-900">{{ item.value }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-start gap-3">
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary"
+                    @click="openFolderDescriptionEditor"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                    @click="openDeleteFolderDialog"
+                  >
+                    删除
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    aria-label="反馈文件夹"
+                    @click="openFeedbackModal({ id: currentFolderDetail.id, type: 'folder', name: currentFolderDetail.name })"
+                  >
+                    <Flag class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    aria-label="下载文件夹"
+                    @click="downloadCurrentFolder"
+                  >
+                    <Download class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
+                <div
+                  v-if="currentFolderDescriptionHTML"
+                  class="markdown-content"
+                  v-html="currentFolderDescriptionHTML"
+                />
+                <p v-else class="text-sm text-slate-400">该文件夹暂无简介orz</p>
+              </div>
+            </section>
           </div>
 
           <div>
@@ -1425,73 +1509,157 @@ async function syncSessionReceiptCode() {
           <div v-else-if="sortedRows.length === 0" class="px-4 py-8 text-sm text-slate-500 sm:px-6">
             {{ searchKeyword ? "没有找到匹配结果。" : "当前目录为空。" }}
           </div>
-          <div v-else-if="viewMode === 'cards'" class="grid gap-4 px-4 py-3 xl:grid-cols-2 sm:px-6 2xl:grid-cols-3">
+          <div
+            v-else-if="viewMode === 'cards'"
+            class="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-2 sm:px-5 md:gap-5 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4 2xl:grid-cols-4"
+          >
             <article
               v-for="row in sortedRows"
               :key="`${row.kind}-${row.id}`"
-              class="group relative min-w-0 flex min-h-[168px] cursor-pointer flex-col rounded-3xl border border-slate-200 bg-white px-4 pt-3.5 transition hover:border-slate-300 hover:shadow-sm sm:px-5"
+              class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm"
+              :class="row.coverUrl ? 'min-h-0' : 'min-h-[168px] px-4 pt-3.5 sm:px-5'"
               @click="row.kind === 'folder' ? openFolder(row.id) : openFile(row.id)"
             >
-              <div class="absolute right-5 top-4 z-10">
-                <input
-                  :checked="isRowSelected(row)"
-                  type="checkbox"
-                  class="h-5 w-5 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-300"
-                  @click.stop
-                  @change="toggleRowSelection(row)"
-                />
-              </div>
-              <div class="flex items-start gap-4">
-                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
-                  <Folder v-if="row.kind === 'folder'" class="h-7 w-7 text-blue-500" />
-                  <component v-else :is="fileIconComponent(row.extension)" class="h-7 w-7" />
+              <template v-if="row.coverUrl">
+                <div class="relative aspect-[16/10] min-h-[132px] w-full max-h-[220px] shrink-0 overflow-hidden bg-slate-100 sm:min-h-[148px] sm:max-h-[240px]">
+                  <img
+                    :src="row.coverUrl"
+                    :alt="`封面 ${row.name}`"
+                    class="absolute inset-0 h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                  <div class="absolute right-3 top-3 z-10 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm">
+                    <input
+                      :checked="isRowSelected(row)"
+                      type="checkbox"
+                      class="h-5 w-5 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-300"
+                      @click.stop
+                      @change="toggleRowSelection(row)"
+                    />
+                  </div>
                 </div>
-                <div class="min-w-0 flex-1 pr-10 pt-0.5">
-                  <h3 class="truncate text-base font-semibold leading-6 text-slate-900">{{ row.name }}</h3>
-                  <p v-if="row.kind === 'file' && row.description" class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500">
-                    {{ row.description }}
+                <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
+                  <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{{ row.name }}</h3>
+                  <p
+                    v-if="descriptionCardPreview(row.description)"
+                    class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500"
+                  >
+                    {{ descriptionCardPreview(row.description) }}
                   </p>
+                  <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                    <template v-if="row.kind === 'file'">
+                      <span class="inline-flex items-center gap-1.5">
+                        <Download class="h-3.5 w-3.5" />
+                        {{ row.downloadCount }}
+                      </span>
+                      <span>{{ row.sizeText }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="inline-flex items-center gap-1.5">
+                        <Download class="h-3.5 w-3.5" />
+                        {{ row.downloadCount }}
+                      </span>
+                      <span>{{ row.fileCount }} 个文件</span>
+                      <span>{{ row.sizeText }}</span>
+                    </template>
+                    <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                      <Clock3 class="h-3.5 w-3.5" />
+                      <span class="truncate">{{ row.updatedAt }}</span>
+                    </span>
+                  </div>
+                  <div class="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      @click.stop="openFeedbackModal({ id: row.id, type: row.kind, name: row.name })"
+                    >
+                      <Flag class="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      @click.stop="downloadResource(row)"
+                    >
+                      <Download class="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </template>
+              <template v-else>
+                <div class="absolute right-5 top-4 z-10">
+                  <input
+                    :checked="isRowSelected(row)"
+                    type="checkbox"
+                    class="h-5 w-5 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-300"
+                    @click.stop
+                    @change="toggleRowSelection(row)"
+                  />
+                </div>
+                <div class="flex items-start gap-4">
+                  <div
+                    class="flex h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-slate-100 text-slate-500"
+                    :class="row.coverUrl ? '' : 'items-center justify-center'"
+                  >
+                    <img
+                      v-if="row.coverUrl"
+                      :src="row.coverUrl"
+                      :alt="`封面 ${row.name}`"
+                      class="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <Folder v-else-if="row.kind === 'folder'" class="h-7 w-7 text-blue-500" />
+                    <component v-else :is="fileIconComponent(row.extension)" class="h-7 w-7" />
+                  </div>
+                  <div class="min-w-0 flex-1 pr-10 pt-0.5">
+                    <h3 class="truncate text-base font-semibold leading-6 text-slate-900">{{ row.name }}</h3>
+                    <p
+                      v-if="descriptionCardPreview(row.description)"
+                      class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500"
+                    >
+                      {{ descriptionCardPreview(row.description) }}
+                    </p>
+                  </div>
+                </div>
 
-              <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-                <template v-if="row.kind === 'file'">
-                  <span class="inline-flex items-center gap-1.5">
-                    <Download class="h-3.5 w-3.5" />
-                    {{ row.downloadCount }}
+                <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                  <template v-if="row.kind === 'file'">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Download class="h-3.5 w-3.5" />
+                      {{ row.downloadCount }}
+                    </span>
+                    <span>{{ row.sizeText }}</span>
+                  </template>
+                  <template v-else>
+                    <span class="inline-flex items-center gap-1.5">
+                      <Download class="h-3.5 w-3.5" />
+                      {{ row.downloadCount }}
+                    </span>
+                    <span>{{ row.fileCount }} 个文件</span>
+                    <span>{{ row.sizeText }}</span>
+                  </template>
+                  <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                    <Clock3 class="h-3.5 w-3.5" />
+                    <span class="truncate">{{ row.updatedAt }}</span>
                   </span>
-                  <span>{{ row.sizeText }}</span>
-                </template>
-                <template v-else>
-                  <span class="inline-flex items-center gap-1.5">
-                    <Download class="h-3.5 w-3.5" />
-                    {{ row.downloadCount }}
-                  </span>
-                  <span>{{ row.fileCount }} 个文件</span>
-                  <span>{{ row.sizeText }}</span>
-                </template>
-                <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
-                  <Clock3 class="h-3.5 w-3.5" />
-                  <span class="truncate">{{ row.updatedAt }}</span>
-                </span>
-              </div>
+                </div>
 
-              <div class="mt-auto flex items-center justify-between border-t border-slate-100 py-2.5">
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-                  @click.stop="openFeedbackModal({ id: row.id, type: row.kind, name: row.name })"
-                >
-                  <Flag class="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-                  @click.stop="downloadResource(row)"
-                >
-                  <Download class="h-4 w-4" />
-                </button>
-              </div>
+                <div class="mt-auto flex items-center justify-between border-t border-slate-100 py-2.5">
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    @click.stop="openFeedbackModal({ id: row.id, type: row.kind, name: row.name })"
+                  >
+                    <Flag class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    @click.stop="downloadResource(row)"
+                  >
+                    <Download class="h-4 w-4" />
+                  </button>
+                </div>
+              </template>
             </article>
           </div>
           <div v-else class="px-4 py-5 sm:px-6">
@@ -1524,14 +1692,28 @@ async function syncSessionReceiptCode() {
                       v-if="row.kind === 'folder'"
                       class="flex min-w-0 items-center gap-3 text-left"
                     >
-                      <Folder class="h-5 w-5 shrink-0 text-blue-500" />
+                      <img
+                        v-if="row.coverUrl"
+                        :src="row.coverUrl"
+                        alt=""
+                        class="h-5 w-5 shrink-0 rounded object-cover"
+                        loading="lazy"
+                      />
+                      <Folder v-else class="h-5 w-5 shrink-0 text-blue-500" />
                       <span class="truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
                     </div>
                     <div
                       v-else
                       class="flex min-w-0 items-center gap-3 text-left"
                     >
-                      <component :is="fileIconComponent(row.extension)" class="h-5 w-5 shrink-0 text-slate-500" />
+                      <img
+                        v-if="row.coverUrl"
+                        :src="row.coverUrl"
+                        alt=""
+                        class="h-5 w-5 shrink-0 rounded object-cover"
+                        loading="lazy"
+                      />
+                      <component v-else :is="fileIconComponent(row.extension)" class="h-5 w-5 shrink-0 text-slate-500" />
                       <span class="truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
                     </div>
                   </td>
@@ -1540,69 +1722,6 @@ async function syncSessionReceiptCode() {
                 </tr>
               </tbody>
             </table>
-          </div>
-
-          <div v-if="currentFolderDetail" class="border-t border-slate-200 px-4 py-5 sm:px-6">
-            <section>
-              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div class="min-w-0 flex-1 space-y-3">
-                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Folder Info</p>
-                  <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
-                    <div
-                      v-for="item in currentFolderStats"
-                      :key="item.label"
-                      class="inline-flex items-center gap-2"
-                    >
-                      <span>{{ item.label }}</span>
-                      <span class="font-medium text-slate-900">{{ item.value }}</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="flex flex-wrap items-start gap-3">
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary"
-                    @click="openFolderDescriptionEditor"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
-                    @click="openDeleteFolderDialog"
-                  >
-                    删除
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
-                    aria-label="反馈文件夹"
-                    @click="openFeedbackModal({ id: currentFolderDetail.id, type: 'folder', name: currentFolderDetail.name })"
-                  >
-                    <Flag class="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
-                    aria-label="下载文件夹"
-                    @click="downloadCurrentFolder"
-                  >
-                    <Download class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
-                <div
-                  v-if="currentFolderDescriptionHTML"
-                  class="markdown-content"
-                  v-html="currentFolderDescriptionHTML"
-                />
-                <p v-else class="text-sm text-slate-400">该文件夹暂无简介orz</p>
-              </div>
-            </section>
           </div>
 
         </div>

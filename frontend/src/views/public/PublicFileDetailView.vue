@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { Download, Flag } from "lucide-vue-next";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
+import { Clock, Download, FileVideo, Flag, Link2, Share2 } from "lucide-vue-next";
 
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
@@ -48,6 +48,143 @@ const feedbackError = ref("");
 const currentReceiptCode = ref("");
 const fileID = computed(() => String(route.params.fileID ?? ""));
 const downloadURL = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
+
+/** 含协议与域名的完整 URL，便于站外粘贴；下载接口与当前站点同源 */
+const absoluteDownloadURL = computed(() => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return new URL(downloadURL.value, window.location.origin).href;
+});
+
+const absoluteDetailPageURL = computed(() => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const path = router.resolve({
+    name: "public-file-detail",
+    params: { fileID: fileID.value },
+  }).href;
+  return new URL(path, window.location.origin).href;
+});
+
+/** 与哔哩哔哩等站点类似：`?t=328.2` 表示从该秒数开始播放（秒，可为小数） */
+function parseTimestampQuery(raw: unknown): number | null {
+  if (raw == null || raw === "") {
+    return null;
+  }
+  const s = Array.isArray(raw) ? raw[0] : raw;
+  const n = parseFloat(String(s));
+  if (!Number.isFinite(n) || n < 0) {
+    return null;
+  }
+  return n;
+}
+
+function formatTimestampParam(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "0";
+  }
+  const rounded = Math.round(seconds * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function buildAbsoluteDetailPageURL(query?: Record<string, string>): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const path = router.resolve({
+    name: "public-file-detail",
+    params: { fileID: fileID.value },
+    query: query ?? {},
+  }).href;
+  return new URL(path, window.location.origin).href;
+}
+
+const videoRef = ref<HTMLVideoElement | null>(null);
+
+function applySeekFromRouteQuery() {
+  const el = videoRef.value;
+  if (!el) {
+    return;
+  }
+  const t = parseTimestampQuery(route.query.t);
+  if (t == null) {
+    return;
+  }
+  const dur = el.duration;
+  const end = Number.isFinite(dur) && dur > 0 ? dur : Number.POSITIVE_INFINITY;
+  el.currentTime = Math.min(Math.max(0, t), Math.max(0, end - 0.05));
+}
+
+function onVideoLoadedMetadata() {
+  void nextTick(() => applySeekFromRouteQuery());
+}
+
+const linkCopyHint = ref("");
+let linkCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 与首页列表图标逻辑对齐，便于 mime 缺失时仍识别常见视频扩展名 */
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v", "ogv"]);
+
+function isVideoDetail(d: FileDetailResponse): boolean {
+  const mime = (d.mime_type ?? "").toLowerCase();
+  if (mime.startsWith("video/")) {
+    return true;
+  }
+  const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+const isVideo = computed(() => (detail.value ? isVideoDetail(detail.value) : false));
+
+const folderIdForPeers = computed(() => detail.value?.folder_id?.trim() ?? "");
+
+/** 有文件夹且为视频时拉取同目录列表，用于加宽布局 */
+const layoutWide = computed(() => isVideo.value && Boolean(folderIdForPeers.value));
+
+interface FolderFileListItem {
+  id: string;
+  name: string;
+  extension: string;
+}
+
+const folderVideoPeers = ref<Array<{ id: string; name: string }>>([]);
+const folderVideoPeersLoading = ref(false);
+
+function extensionOfListItem(item: FolderFileListItem): string {
+  const ext = (item.extension ?? "").replace(/^\./, "").toLowerCase();
+  if (ext) {
+    return ext;
+  }
+  const match = /\.([^.]+)$/.exec(item.name);
+  return match ? match[1].toLowerCase() : "";
+}
+
+async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
+  folderVideoPeersLoading.value = true;
+  folderVideoPeers.value = [];
+  try {
+    const params = new URLSearchParams({
+      page: "1",
+      page_size: "100",
+      sort: "name_asc",
+    });
+    const response = await httpClient.get<{ items: FolderFileListItem[] }>(
+      `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
+    );
+    const items = response.items ?? [];
+    folderVideoPeers.value = items
+      .filter((f) => f.id !== currentFileId)
+      .filter((f) => VIDEO_EXTENSIONS.has(extensionOfListItem(f)))
+      .map((f) => ({ id: f.id, name: f.name }));
+  } catch {
+    folderVideoPeers.value = [];
+  } finally {
+    folderVideoPeersLoading.value = false;
+  }
+}
+
 const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
 const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 const primaryDetailRows = computed(() => {
@@ -55,10 +192,7 @@ const primaryDetailRows = computed(() => {
     return [];
   }
 
-  return [
-    { label: "文件名", value: detail.value.name },
-    { label: "所属文件夹", value: detail.value.path || "主页根目录" },
-  ];
+  return [{ label: "所属文件夹", value: detail.value.path || "主页根目录" }];
 });
 const secondaryDetailRows = computed(() => {
   if (!detail.value) {
@@ -90,15 +224,36 @@ watch(fileID, () => {
   void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
 });
 
+watch(
+  () => [String(route.query.t ?? ""), fileID.value] as const,
+  () => {
+    void nextTick(() => {
+      const el = videoRef.value;
+      if (!el || el.readyState < HTMLMediaElement.HAVE_METADATA) {
+        return;
+      }
+      applySeekFromRouteQuery();
+    });
+  },
+);
+
 async function loadDetail() {
   loading.value = true;
   error.value = "";
   detail.value = null;
+  folderVideoPeers.value = [];
+  folderVideoPeersLoading.value = false;
   try {
     detail.value = await httpClient.get<FileDetailResponse>(`/public/files/${encodeURIComponent(fileID.value)}`);
     if (detail.value) {
       editFileName.value = detail.value.name;
       editDescription.value = detail.value.description;
+      if (isVideoDetail(detail.value)) {
+        const fid = detail.value.folder_id?.trim() ?? "";
+        if (fid) {
+          void loadFolderVideoPeers(fid, detail.value.id);
+        }
+      }
     }
   } catch (err: unknown) {
     if (err instanceof HttpError && err.status === 404) {
@@ -275,6 +430,36 @@ function goBack() {
   void router.push({ name: "public-home" });
 }
 
+function showLinkCopyHint(text: string) {
+  if (linkCopyTimer) {
+    clearTimeout(linkCopyTimer);
+  }
+  linkCopyHint.value = text;
+  linkCopyTimer = setTimeout(() => {
+    linkCopyHint.value = "";
+    linkCopyTimer = null;
+  }, 2800);
+}
+
+async function copyLink(label: string, url: string) {
+  if (!url) {
+    showLinkCopyHint("当前环境无法生成链接。");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showLinkCopyHint(`已复制${label}`);
+  } catch {
+    showLinkCopyHint("复制失败，请手动长按或右键复制地址栏。");
+  }
+}
+
+async function copyDetailLinkAtCurrentTime() {
+  const seconds = videoRef.value?.currentTime ?? 0;
+  const url = buildAbsoluteDetailPageURL({ t: formatTimestampParam(seconds) });
+  await copyLink("含时间戳的链接", url);
+}
+
 function downloadFile() {
   const link = document.createElement("a");
   link.href = downloadURL.value;
@@ -294,7 +479,7 @@ function downloadFile() {
 
 <template>
   <section class="app-container py-6 sm:py-8 sm:py-10">
-    <div class="mx-auto w-full max-w-4xl space-y-6">
+    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-6xl' : 'max-w-4xl'">
       <SurfaceCard>
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
 
@@ -308,13 +493,21 @@ function downloadFile() {
 
         <template v-else-if="detail">
           <p v-if="message" class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
+          <p
+            v-if="linkCopyHint"
+            class="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+          >
+            {{ linkCopyHint }}
+          </p>
 
           <section>
             <div class="space-y-4">
               <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div class="space-y-2">
                   <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
-                  <h3 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">文件详情</h3>
+                  <h3 class="break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl" :title="detail.name">
+                    {{ detail.name }}
+                  </h3>
                 </div>
                 <div class="flex flex-wrap items-start gap-3 sm:flex-nowrap lg:justify-end">
                   <button type="button" class="btn-secondary w-full sm:w-auto" @click="goBack">返回文件夹</button>
@@ -341,6 +534,34 @@ function downloadFile() {
                     @click="openFeedbackModal"
                   >
                     <Flag class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    title="复制下载直链（可直接下载或嵌入播放器）"
+                    aria-label="复制下载直链"
+                    @click="copyLink('下载直链', absoluteDownloadURL)"
+                  >
+                    <Link2 class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    title="复制本文件详情页链接（不含时间）"
+                    aria-label="复制详情页链接"
+                    @click="copyLink('详情页链接', absoluteDetailPageURL)"
+                  >
+                    <Share2 class="h-4 w-4" />
+                  </button>
+                  <button
+                    v-if="isVideo"
+                    type="button"
+                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    title="复制带 ?t=秒数 的详情页链接（当前播放进度，类似哔哩哔哩）"
+                    aria-label="复制含时间戳的详情页链接"
+                    @click="copyDetailLinkAtCurrentTime"
+                  >
+                    <Clock class="h-4 w-4" />
                   </button>
                   <button
                     type="button"
@@ -384,6 +605,59 @@ function downloadFile() {
                     </span>
                   </div>
                 </div>
+              </div>
+
+              <div
+                v-if="isVideo"
+                class="flex flex-col gap-4 lg:flex-row lg:items-stretch"
+              >
+                <div
+                  class="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
+                >
+                  <video
+                    :key="fileID"
+                    ref="videoRef"
+                    class="max-h-[min(70vh,720px)] w-full object-contain"
+                    controls
+                    playsinline
+                    preload="metadata"
+                    :src="downloadURL"
+                    @loadedmetadata="onVideoLoadedMetadata"
+                  >
+                    您的浏览器不支持内嵌视频播放，请使用上方下载按钮获取文件。
+                  </video>
+                </div>
+
+                <aside
+                  v-if="folderIdForPeers"
+                  class="flex w-full shrink-0 flex-col rounded-2xl border border-slate-200 bg-white lg:w-72 xl:w-80"
+                >
+                  <div class="border-b border-slate-100 px-4 py-3">
+                    <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Playlist</p>
+                    <p class="mt-1 text-sm font-medium text-slate-900">同文件夹视频</p>
+                  </div>
+                  <div
+                    class="min-h-[120px] max-h-[min(70vh,720px)] overflow-y-auto px-2 py-2"
+                  >
+                    <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
+                      加载列表…
+                    </p>
+                    <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <RouterLink
+                          :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                        >
+                          <FileVideo class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </RouterLink>
+                      </li>
+                    </ul>
+                    <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
+                      当前文件夹没有其他视频
+                    </p>
+                  </div>
+                </aside>
               </div>
             </div>
 
