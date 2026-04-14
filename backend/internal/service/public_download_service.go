@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -43,6 +44,10 @@ type PublicFileDetail struct {
 	Path          string    `json:"path"`
 	Description   string    `json:"description"`
 	MimeType      string    `json:"mime_type"`
+	PlaybackURL   string    `json:"playback_url"`
+	CoverURL      string    `json:"cover_url"`
+	// FolderDirectDownloadURL 由文件夹直链前缀 + 相对路径生成；不含 playback_url。前端优先使用 playback_url。
+	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
 	Size          int64     `json:"size"`
 	UploadedAt    time.Time `json:"uploaded_at"`
 	DownloadCount int64     `json:"download_count"`
@@ -131,10 +136,54 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		Path:          fullPath,
 		Description:   file.Description,
 		MimeType:      file.MimeType,
+		PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
+		CoverURL:      strings.TrimSpace(file.CoverURL),
+		FolderDirectDownloadURL: s.FolderDirectDownloadURLForFile(ctx, *file),
 		Size:          file.Size,
 		UploadedAt:    file.CreatedAt,
 		DownloadCount: file.DownloadCount,
 	}, nil
+}
+
+// FolderDirectDownloadURLForFile 仅根据祖先文件夹中「最靠近文件」的直链前缀拼接相对路径，不含文件单独配置的 playback_url。
+func (s *PublicDownloadService) FolderDirectDownloadURLForFile(ctx context.Context, file model.File) string {
+	if file.FolderID == nil {
+		return ""
+	}
+	chain, err := s.repository.ListFolderAncestorsFromLeaf(ctx, strings.TrimSpace(*file.FolderID))
+	if err != nil || len(chain) == 0 {
+		return ""
+	}
+	for i := 0; i < len(chain); i++ {
+		prefix := strings.TrimSpace(chain[i].DirectLinkPrefix)
+		if prefix == "" {
+			continue
+		}
+		return folderDirectFileURL(prefix, chain, i, file.Name)
+	}
+	return ""
+}
+
+func folderDirectFileURL(prefix string, chain []model.Folder, baseIndex int, fileName string) string {
+	var segments []string
+	if baseIndex > 0 {
+		for j := baseIndex - 1; j >= 0; j-- {
+			segments = append(segments, chain[j].Name)
+		}
+	}
+	segments = append(segments, fileName)
+	return joinURLPrefixWithPathSegments(prefix, segments)
+}
+
+func joinURLPrefixWithPathSegments(prefix string, segments []string) string {
+	p := strings.TrimRight(strings.TrimSpace(prefix), "/")
+	var b strings.Builder
+	b.WriteString(p)
+	for _, seg := range segments {
+		b.WriteString("/")
+		b.WriteString(url.PathEscape(seg))
+	}
+	return b.String()
 }
 
 func (s *PublicDownloadService) buildFilePath(ctx context.Context, file *model.File) (string, error) {

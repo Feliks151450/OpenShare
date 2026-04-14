@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"openshare/backend/internal/model"
 	"openshare/backend/internal/repository"
 )
 
@@ -41,11 +42,13 @@ const (
 //   - application-side relevance ranking
 type SearchService struct {
 	searchRepo *repository.SearchRepository
+	download   *PublicDownloadService
 }
 
-func NewSearchService(searchRepo *repository.SearchRepository) *SearchService {
+func NewSearchService(searchRepo *repository.SearchRepository, download *PublicDownloadService) *SearchService {
 	return &SearchService{
 		searchRepo: searchRepo,
+		download:   download,
 	}
 }
 
@@ -75,6 +78,9 @@ type SearchResultItem struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
 	Extension     string     `json:"extension,omitempty"`
+	CoverURL      string     `json:"cover_url,omitempty"`
+	PlaybackURL   string     `json:"playback_url,omitempty"`
+	FolderDirectDownloadURL string `json:"folder_direct_download_url,omitempty"`
 	Size          int64      `json:"size,omitempty"`
 	DownloadCount int64      `json:"download_count,omitempty"`
 	UploadedAt    *time.Time `json:"uploaded_at,omitempty"`
@@ -152,7 +158,7 @@ func (s *SearchService) Search(ctx context.Context, input SearchInput) (*SearchR
 
 	items := make([]SearchResultItem, 0, end-offset)
 	for _, candidate := range ranked[offset:end] {
-		items = append(items, candidateToResultItem(candidate.Candidate))
+		items = append(items, s.candidateToResultItem(ctx, candidate.Candidate))
 	}
 
 	return &SearchResult{
@@ -403,15 +409,26 @@ func searchDisplayName(candidate repository.SearchCandidate) string {
 	return strings.ToLower(candidate.Name)
 }
 
-func candidateToResultItem(candidate repository.SearchCandidate) SearchResultItem {
+func (s *SearchService) candidateToResultItem(ctx context.Context, candidate repository.SearchCandidate) SearchResultItem {
 	switch candidate.EntityType {
 	case "file":
 		uploadedAt := candidate.CreatedAt
+		fd := ""
+		if s.download != nil && candidate.FolderID != nil {
+			fd = s.download.FolderDirectDownloadURLForFile(ctx, model.File{
+				ID:       candidate.ID,
+				Name:     candidate.Name,
+				FolderID: candidate.FolderID,
+			})
+		}
 		return SearchResultItem{
 			EntityType:    "file",
 			ID:            candidate.ID,
 			Name:          candidate.Name,
 			Extension:     candidate.Extension,
+			CoverURL:      strings.TrimSpace(candidate.CoverURL),
+			PlaybackURL:   strings.TrimSpace(candidate.PlaybackURL),
+			FolderDirectDownloadURL: fd,
 			Size:          candidate.Size,
 			DownloadCount: candidate.DownloadCount,
 			UploadedAt:    &uploadedAt,

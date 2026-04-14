@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"gorm.io/gorm"
@@ -32,6 +33,14 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 		return ErrInvalidResourceEdit
 	}
 	description := normalizeTrimmedString(input.Description)
+	playbackURL, err := normalizeOptionalHTTPURL(input.PlaybackURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
+	coverURL, err := normalizeOptionalHTTPURL(input.CoverURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
 
 	if current.Name != name {
 		fileConflict, err := s.repo.FileNameExists(ctx, current.FolderID, name, current.ID)
@@ -67,11 +76,29 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, playbackURL, coverURL, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFileNotFound
 		}
 		return fmt.Errorf("update managed file: %w", err)
 	}
 	return nil
+}
+
+func normalizeOptionalHTTPURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("url must use http or https")
+	}
+	if strings.TrimSpace(u.Host) == "" {
+		return "", fmt.Errorf("url must include host")
+	}
+	return u.String(), nil
 }

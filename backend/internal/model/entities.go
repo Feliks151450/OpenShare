@@ -75,6 +75,8 @@ type Folder struct {
 	SourcePath    *string   `gorm:"column:source_path;type:text;uniqueIndex:ux_folders_source_path"`
 	Name          string    `gorm:"column:name;type:text;not null"`
 	Description   string    `gorm:"column:description;type:text;not null;default:''"`
+	// DirectLinkPrefix 为 http(s) 根地址时，其下文件直链为该前缀 + 相对路径（相对最内层已配置前缀的祖先文件夹）
+	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
 	FileCount     int64     `gorm:"column:file_count;type:integer;not null;default:0"`
 	TotalSize     int64     `gorm:"column:total_size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
@@ -95,6 +97,8 @@ type File struct {
 	Description   string    `gorm:"column:description;type:text;not null;default:''"`
 	Extension     string    `gorm:"column:extension;type:text;not null;default:''"`
 	MimeType      string    `gorm:"column:mime_type;type:text;not null;default:''"`
+	PlaybackURL   string    `gorm:"column:playback_url;type:text;not null;default:''"`
+	CoverURL      string    `gorm:"column:cover_url;type:text;not null;default:''"`
 	Size          int64     `gorm:"column:size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime;index:idx_files_created_at,sort:desc"`

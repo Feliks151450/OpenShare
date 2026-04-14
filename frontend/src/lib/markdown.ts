@@ -69,6 +69,19 @@ export function coverImageHrefFromDescription(description: string): string | nul
   return href || null;
 }
 
+/** 列表封面：优先使用后台填写的 `cover_url`，否则使用简介中 `![cover](...)` */
+export function fileCoverImageHrefFromFields(coverUrlField: string | undefined, description: string): string | null {
+  const direct = (coverUrlField ?? "").trim();
+  if (direct) {
+    if (!isSafeImageUrlForSrc(direct)) {
+      return null;
+    }
+    const href = resolveMarkdownImageUrlToHref(direct);
+    return href || null;
+  }
+  return coverImageHrefFromDescription(description);
+}
+
 function renderInlineMarkdown(value: string) {
   const escaped = escapeHtml(value);
   return escaped

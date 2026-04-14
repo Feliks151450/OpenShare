@@ -8,7 +8,8 @@ import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
-import { renderSimpleMarkdown } from "../../lib/markdown";
+import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
+import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
 
 interface FileDetailResponse {
   id: string;
@@ -18,6 +19,12 @@ interface FileDetailResponse {
   path: string;
   description: string;
   mime_type: string;
+  /** 非空时使用该 http(s) 地址作为播放器与复制下载直链，而非本站下载接口 */
+  playback_url?: string;
+  /** 非空时优先作为列表/详情封面，高于简介中 ![cover](...) */
+  cover_url?: string;
+  /** 由文件夹直链前缀生成，不含 playback_url；前端优先 playback */
+  folder_direct_download_url?: string;
   size: number;
   uploaded_at: string;
   download_count: number;
@@ -33,6 +40,8 @@ const saveError = ref("");
 const saving = ref(false);
 const editFileName = ref("");
 const editDescription = ref("");
+const editPlaybackUrl = ref("");
+const editCoverUrl = ref("");
 const descriptionEditorOpen = ref(false);
 const canManageResourceDescriptions = ref(false);
 const deleteDialogOpen = ref(false);
@@ -47,14 +56,30 @@ const feedbackMessage = ref("");
 const feedbackError = ref("");
 const currentReceiptCode = ref("");
 const fileID = computed(() => String(route.params.fileID ?? ""));
-const downloadURL = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
+const backendDownloadPath = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
 
-/** 含协议与域名的完整 URL，便于站外粘贴；下载接口与当前站点同源 */
+/** 播放器与「复制下载直链」：playback_url > 文件夹前缀直链 > 本站下载接口 */
+const mediaSourceURL = computed(() => {
+  if (!detail.value) {
+    return backendDownloadPath.value;
+  }
+  return fileEffectiveDownloadHref(
+    fileID.value,
+    detail.value.playback_url,
+    detail.value.folder_direct_download_url,
+  );
+});
+
+/** 含协议与域名的完整 URL，便于站外粘贴 */
 const absoluteDownloadURL = computed(() => {
   if (typeof window === "undefined") {
     return "";
   }
-  return new URL(downloadURL.value, window.location.origin).href;
+  const src = mediaSourceURL.value;
+  if (src.startsWith("http://") || src.startsWith("https://")) {
+    return src;
+  }
+  return new URL(src, window.location.origin).href;
 });
 
 const absoluteDetailPageURL = computed(() => {
@@ -186,6 +211,10 @@ async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
 }
 
 const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
+/** 详情页顶部封面：优先 cover_url，否则简介内 ![cover](...) */
+const detailCoverImageHref = computed(() =>
+  detail.value ? fileCoverImageHrefFromFields(detail.value.cover_url, detail.value.description ?? "") : null,
+);
 const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 const primaryDetailRows = computed(() => {
   if (!detail.value) {
@@ -212,7 +241,9 @@ const editorDirty = computed(() => {
 
   return (
     editFileName.value.trim() !== detail.value.name ||
-    editDescription.value.trim() !== (detail.value.description ?? "")
+    editDescription.value.trim() !== (detail.value.description ?? "") ||
+    editPlaybackUrl.value.trim() !== (detail.value.playback_url ?? "").trim() ||
+    editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim()
   );
 });
 
@@ -248,6 +279,8 @@ async function loadDetail() {
     if (detail.value) {
       editFileName.value = detail.value.name;
       editDescription.value = detail.value.description;
+      editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
+      editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       if (isVideoDetail(detail.value)) {
         const fid = detail.value.folder_id?.trim() ?? "";
         if (fid) {
@@ -273,6 +306,8 @@ async function loadAdminPermission() {
 function openDescriptionEditor() {
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
+  editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
+  editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   saveError.value = "";
   message.value = "";
   descriptionEditorOpen.value = true;
@@ -284,6 +319,8 @@ function closeDescriptionEditor() {
   saveError.value = "";
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
+  editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
+  editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
 }
 
 function openDeleteDialog() {
@@ -331,6 +368,8 @@ async function saveDescription() {
       body: {
         name: normalizedName,
         description: editDescription.value.trim(),
+        playback_url: editPlaybackUrl.value.trim(),
+        cover_url: editCoverUrl.value.trim(),
       },
     });
     message.value = "文件信息已更新。";
@@ -462,13 +501,17 @@ async function copyDetailLinkAtCurrentTime() {
 
 function downloadFile() {
   const link = document.createElement("a");
-  link.href = downloadURL.value;
+  link.href = mediaSourceURL.value;
   link.rel = "noopener";
+  if (mediaSourceURL.value.startsWith("http://") || mediaSourceURL.value.startsWith("https://")) {
+    link.target = "_blank";
+  }
   document.body.appendChild(link);
   link.click();
   link.remove();
 
-  if (detail.value) {
+  const usesBackendDownload = fileUsesBackendDownloadHref(mediaSourceURL.value);
+  if (detail.value && usesBackendDownload) {
     detail.value = {
       ...detail.value,
       download_count: detail.value.download_count + 1,
@@ -615,13 +658,13 @@ function downloadFile() {
                   class="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
                 >
                   <video
-                    :key="fileID"
+                    :key="`${fileID}:${mediaSourceURL}`"
                     ref="videoRef"
                     class="max-h-[min(70vh,720px)] w-full object-contain"
                     controls
                     playsinline
                     preload="metadata"
-                    :src="downloadURL"
+                    :src="mediaSourceURL"
                     @loadedmetadata="onVideoLoadedMetadata"
                   >
                     您的浏览器不支持内嵌视频播放，请使用上方下载按钮获取文件。
@@ -662,6 +705,18 @@ function downloadFile() {
             </div>
 
             <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
+              <div
+                v-if="detailCoverImageHref && !isVideo"
+                class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
+              >
+                <img
+                  :src="detailCoverImageHref"
+                  alt=""
+                  class="max-h-72 w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
               <div
                 v-if="descriptionHTML"
                 class="markdown-content"
@@ -812,6 +867,34 @@ function downloadFile() {
                 class="field-area"
                 placeholder="输入文件简介，简介支持简单 Markdown。"
               />
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">封面图地址（可选）</span>
+                <input
+                  v-model="editCoverUrl"
+                  type="url"
+                  class="field"
+                  placeholder="https://cdn.example.com/cover.jpg（留空则使用简介中 ![cover](...)）"
+                  autocomplete="off"
+                />
+                <p class="text-xs leading-5 text-slate-500">
+                  填写后优先作为首页列表与详情顶部封面；需以 http(s) 开头。清空并保存则回退到简介内封面语法。
+                </p>
+              </label>
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">播放 / 下载直链（可选）</span>
+                <input
+                  v-model="editPlaybackUrl"
+                  type="url"
+                  class="field"
+                  placeholder="https://cdn.example.com/path/video.mp4（留空则使用本站下载接口）"
+                  autocomplete="off"
+                />
+                <p class="text-xs leading-5 text-slate-500">
+                  填写后，详情页播放器与「复制下载直链」均使用该地址；需以 http(s) 开头。清空并保存可恢复为默认。
+                </p>
+              </label>
 
               <p v-if="saveError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {{ saveError }}

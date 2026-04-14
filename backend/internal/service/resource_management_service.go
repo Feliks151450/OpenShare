@@ -40,17 +40,20 @@ type ListManagedFilesInput struct {
 }
 
 type UpdateManagedFileInput struct {
-	Name        string
-	Description string
-	OperatorID  string
-	OperatorIP  string
+	Name         string
+	Description  string
+	PlaybackURL  string
+	CoverURL     string
+	OperatorID   string
+	OperatorIP   string
 }
 
 type UpdateManagedFolderDescriptionInput struct {
-	Name        string
-	Description string
-	OperatorID  string
-	OperatorIP  string
+	Name             string
+	Description      string
+	DirectLinkPrefix string
+	OperatorID       string
+	OperatorIP       string
 }
 
 func NewResourceManagementService(repo *repository.ResourceManagementRepository, storageService *storage.Service) *ResourceManagementService {

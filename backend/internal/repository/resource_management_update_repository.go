@@ -16,6 +16,8 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	name string,
 	extension string,
 	description string,
+	playbackURL string,
+	coverURL string,
 	operatorID string,
 	operatorIP string,
 	logID string,
@@ -26,6 +28,8 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"name":          name,
 			"extension":     extension,
 			"description":   description,
+			"playback_url":  playbackURL,
+			"cover_url":     coverURL,
 			"updated_at":    now,
 		})
 		if result.Error != nil {
@@ -44,6 +48,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	folderID string,
 	name string,
 	description string,
+	directLinkPrefix string,
 	operatorID string,
 	operatorIP string,
 	logID string,
@@ -51,9 +56,10 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(map[string]any{
-			"name":        name,
-			"description": description,
-			"updated_at":  now,
+			"name":               name,
+			"description":        description,
+			"direct_link_prefix": directLinkPrefix,
+			"updated_at":         now,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("update folder metadata: %w", result.Error)
@@ -71,6 +77,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	folderID string,
 	name string,
 	description string,
+	directLinkPrefix string,
 	folderSourcePaths map[string]string,
 	operatorID string,
 	operatorIP string,
@@ -79,9 +86,10 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		rootUpdates := map[string]any{
-			"name":        name,
-			"description": description,
-			"updated_at":  now,
+			"name":               name,
+			"description":        description,
+			"direct_link_prefix": directLinkPrefix,
+			"updated_at":         now,
 		}
 		if sourcePath, ok := folderSourcePaths[folderID]; ok {
 			rootUpdates["source_path"] = sourcePath

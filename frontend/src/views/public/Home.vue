@@ -30,9 +30,11 @@ import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/recei
 import { hasAdminPermission } from "../../lib/admin/session";
 import {
   coverImageHrefFromDescription,
+  fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
   stripCoverImageMarkdown,
 } from "../../lib/markdown";
+import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 
 interface AnnouncementItem {
@@ -66,6 +68,11 @@ interface PublicFileItem {
   name: string;
   description: string;
   extension: string;
+  /** 非空时优先作为卡片封面，高于简介中的 ![cover](...) */
+  cover_url?: string;
+  /** 由文件夹直链前缀生成；下载优先级低于 playback_url */
+  folder_direct_download_url?: string;
+  playback_url?: string;
   uploaded_at: string;
   download_count: number;
   size: number;
@@ -101,6 +108,9 @@ interface SearchResultResponse {
     id: string;
     name: string;
     extension?: string;
+    cover_url?: string;
+    playback_url?: string;
+    folder_direct_download_url?: string;
     size?: number;
     download_count?: number;
     uploaded_at?: string;
@@ -119,6 +129,8 @@ interface FolderDetailResponse {
   download_count: number;
   total_size: number;
   updated_at: string;
+  /** 子文件直链 = 此前缀 + 相对路径（最内层有前缀的祖先生效） */
+  direct_link_prefix?: string;
   breadcrumbs: Array<{
     id: string;
     name: string;
@@ -184,6 +196,7 @@ const canManageResourceDescriptions = ref(false);
 const folderDescriptionEditorOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
+const folderDirectPrefixDraft = ref("");
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
 const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
@@ -216,7 +229,7 @@ type DirectoryRow = {
   name: string;
   extension: string;
   description: string;
-  /** 由简介中 `![cover](url)` 解析，用于卡片/表格缩略图 */
+  /** 优先 `cover_url`，否则由简介中 `![cover](url)` 解析，用于卡片/表格缩略图 */
   coverUrl: string | null;
   downloadCount: number;
   fileCount: number;
@@ -251,12 +264,12 @@ const rows = computed<DirectoryRow[]>(() => [
           name: file.name,
           extension: file.extension || extractExtension(file.name),
           description: desc,
-          coverUrl: coverImageHrefFromDescription(desc),
+          coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
           downloadCount: file.download_count ?? 0,
           fileCount: 0,
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
-          downloadURL: `/api/public/files/${encodeURIComponent(file.id)}/download`,
+          downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
         };
       })
     : []),
@@ -279,7 +292,8 @@ const folderEditorDirty = computed(() => {
 
   return (
     folderNameDraft.value.trim() !== currentFolderDetail.value.name ||
-    folderDescriptionDraft.value.trim() !== (currentFolderDetail.value.description ?? "")
+    folderDescriptionDraft.value.trim() !== (currentFolderDetail.value.description ?? "") ||
+    folderDirectPrefixDraft.value.trim() !== (currentFolderDetail.value.direct_link_prefix ?? "").trim()
   );
 });
 const currentFolderStats = computed(() => {
@@ -310,6 +324,9 @@ function downloadResource(row: DirectoryRow) {
   const link = document.createElement("a");
   link.href = row.downloadURL;
   link.rel = "noopener";
+  if (row.downloadURL.startsWith("http://") || row.downloadURL.startsWith("https://")) {
+    link.target = "_blank";
+  }
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -611,11 +628,13 @@ async function loadDirectory() {
       currentFolderDetail.value = detail;
       folderNameDraft.value = detail.name;
       folderDescriptionDraft.value = detail.description ?? "";
+      folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
       breadcrumbs.value = detail.breadcrumbs ?? [];
     } else {
       currentFolderDetail.value = null;
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
+      folderDirectPrefixDraft.value = "";
       breadcrumbs.value = [];
     }
   } catch (err: unknown) {
@@ -625,6 +644,7 @@ async function loadDirectory() {
     currentFolderDetail.value = null;
     folderNameDraft.value = "";
     folderDescriptionDraft.value = "";
+    folderDirectPrefixDraft.value = "";
     if (err instanceof HttpError && err.status === 404) {
       error.value = "目录不存在或未公开。";
     } else {
@@ -771,13 +791,16 @@ async function runSearch(keyword: string) {
       name: item.name,
       extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
       description: "",
-      coverUrl: null,
+      coverUrl:
+        item.entity_type === "file"
+          ? fileCoverImageHrefFromFields(item.cover_url, "")
+          : null,
       downloadCount: item.download_count ?? 0,
       fileCount: 0,
       sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
       updatedAt: item.uploaded_at ? formatDateTime(item.uploaded_at) : "-",
       downloadURL: item.entity_type === "file"
-        ? `/api/public/files/${encodeURIComponent(item.id)}/download`
+        ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
         : `/api/public/folders/${encodeURIComponent(item.id)}/download`,
     }));
   } catch (err: unknown) {
@@ -921,6 +944,9 @@ async function submitUpload() {
 
 function applyDownloadCountUpdate(row: DirectoryRow) {
   if (row.kind === "file") {
+    if (!fileUsesBackendDownloadHref(row.downloadURL)) {
+      return;
+    }
     files.value = files.value.map((item) => {
       if (item.id !== row.id) {
         return item;
@@ -1037,6 +1063,7 @@ function closeFeedbackSuccessModal() {
 function openFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
+  folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDescriptionError.value = "";
   folderDescriptionEditorOpen.value = true;
   syncBodyScrollLock();
@@ -1048,6 +1075,7 @@ function closeFolderDescriptionEditor() {
   folderDescriptionError.value = "";
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
+  folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   syncBodyScrollLock();
 }
 
@@ -1064,12 +1092,14 @@ async function saveFolderDescription() {
       body: {
         name: folderNameDraft.value.trim(),
         description: folderDescriptionDraft.value.trim(),
+        direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       },
     });
     currentFolderDetail.value = {
       ...currentFolderDetail.value,
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
+      direct_link_prefix: folderDirectPrefixDraft.value.trim(),
     };
     breadcrumbs.value = breadcrumbs.value.map((item, index) => (
       index === breadcrumbs.value.length - 1
@@ -2155,6 +2185,20 @@ async function syncSessionReceiptCode() {
               class="field-area"
               placeholder="输入文件夹简介，简介支持简单 Markdown。"
             />
+
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">子文件直链前缀（可选）</span>
+              <input
+                v-model="folderDirectPrefixDraft"
+                type="url"
+                class="field"
+                placeholder="https://file.test.cn/（其下文件直链 = 此前缀 + 相对路径；最内层有前缀的文件夹优先生效）"
+                autocomplete="off"
+              />
+              <p class="text-xs leading-5 text-slate-500">
+                单个文件若配置了播放/下载直链，仍优先使用该链接。留空则回退本站下载。需以 http(s) 开头。
+              </p>
+            </label>
 
             <p v-if="folderDescriptionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ folderDescriptionError }}

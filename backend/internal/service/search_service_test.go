@@ -13,7 +13,7 @@ import (
 
 func TestSearchPrefersNameMatchesOverDescription(t *testing.T) {
 	db := newTestSQLite(t)
-	service := NewSearchService(repository.NewSearchRepository(db))
+	service := NewSearchService(repository.NewSearchRepository(db), nil)
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	mustCreateSearchFile(t, db, model.File{
@@ -59,7 +59,7 @@ func TestSearchPrefersNameMatchesOverDescription(t *testing.T) {
 
 func TestSearchRequiresAllTerms(t *testing.T) {
 	db := newTestSQLite(t)
-	service := NewSearchService(repository.NewSearchRepository(db))
+	service := NewSearchService(repository.NewSearchRepository(db), nil)
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	mustCreateSearchFile(t, db, model.File{
@@ -105,7 +105,7 @@ func TestSearchRequiresAllTerms(t *testing.T) {
 
 func TestSearchPrefersDirectFolderMatchesWithinScope(t *testing.T) {
 	db := newTestSQLite(t)
-	service := NewSearchService(repository.NewSearchRepository(db))
+	service := NewSearchService(repository.NewSearchRepository(db), nil)
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	rootID := "folder-root"
@@ -166,7 +166,7 @@ func TestSearchPrefersDirectFolderMatchesWithinScope(t *testing.T) {
 
 func TestSearchEscapesLikeWildcards(t *testing.T) {
 	db := newTestSQLite(t)
-	service := NewSearchService(repository.NewSearchRepository(db))
+	service := NewSearchService(repository.NewSearchRepository(db), nil)
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	mustCreateSearchFile(t, db, model.File{

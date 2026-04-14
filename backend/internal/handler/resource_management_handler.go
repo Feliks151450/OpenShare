@@ -16,13 +16,16 @@ type ResourceManagementHandler struct {
 }
 
 type updateManagedFileRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	PlaybackURL  string `json:"playback_url"`
+	CoverURL     string `json:"cover_url"`
 }
 
 type updateManagedFolderDescriptionRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	DirectLinkPrefix string `json:"direct_link_prefix"`
 }
 
 type deleteManagedResourceRequest struct {
@@ -58,10 +61,12 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 	}
 
 	err := h.service.UpdateFile(ctx.Request.Context(), ctx.Param("fileID"), service.UpdateManagedFileInput{
-		Name:        req.Name,
-		Description: req.Description,
-		OperatorID:  identity.AdminID,
-		OperatorIP:  ctx.ClientIP(),
+		Name:         req.Name,
+		Description:  req.Description,
+		PlaybackURL:  req.PlaybackURL,
+		CoverURL:     req.CoverURL,
+		OperatorID:   identity.AdminID,
+		OperatorIP:   ctx.ClientIP(),
 	})
 	if err != nil {
 		switch {
@@ -93,10 +98,11 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 	}
 
 	err := h.service.UpdateFolderDescription(ctx.Request.Context(), ctx.Param("folderID"), service.UpdateManagedFolderDescriptionInput{
-		Name:        req.Name,
-		Description: req.Description,
-		OperatorID:  identity.AdminID,
-		OperatorIP:  ctx.ClientIP(),
+		Name:             req.Name,
+		Description:      req.Description,
+		DirectLinkPrefix: req.DirectLinkPrefix,
+		OperatorID:       identity.AdminID,
+		OperatorIP:       ctx.ClientIP(),
 	})
 	if err != nil {
 		switch {

@@ -35,6 +35,8 @@ type SearchCandidate struct {
 	ID            string
 	Name          string
 	Description   string
+	CoverURL      string
+	PlaybackURL   string
 	Extension     string
 	Size          int64
 	DownloadCount int64
@@ -65,6 +67,8 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			ID:            file.ID,
 			Name:          file.Name,
 			Description:   file.Description,
+			CoverURL:      strings.TrimSpace(file.CoverURL),
+			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
 			Extension:     file.Extension,
 			Size:          file.Size,
 			DownloadCount: file.DownloadCount,

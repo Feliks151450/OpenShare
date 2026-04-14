@@ -24,6 +24,7 @@ const (
 
 type PublicCatalogService struct {
 	repository *repository.PublicCatalogRepository
+	download   *PublicDownloadService
 }
 
 type PublicFolderFileListInput struct {
@@ -49,6 +50,9 @@ type PublicFileItem struct {
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
 	Extension     string    `json:"extension"`
+	CoverURL      string    `json:"cover_url"`
+	PlaybackURL   string    `json:"playback_url"`
+	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
 	UploadedAt    time.Time `json:"uploaded_at"`
 	DownloadCount int64     `json:"download_count"`
 	Size          int64     `json:"size"`
@@ -79,10 +83,11 @@ type PublicFolderDetail struct {
 	DownloadCount int64                        `json:"download_count"`
 	TotalSize     int64                        `json:"total_size"`
 	UpdatedAt     time.Time                    `json:"updated_at"`
+	DirectLinkPrefix string                    `json:"direct_link_prefix"`
 }
 
-func NewPublicCatalogService(repository *repository.PublicCatalogRepository) *PublicCatalogService {
-	return &PublicCatalogService{repository: repository}
+func NewPublicCatalogService(repository *repository.PublicCatalogRepository, download *PublicDownloadService) *PublicCatalogService {
+	return &PublicCatalogService{repository: repository, download: download}
 }
 
 func (s *PublicCatalogService) ListPublicFolderFiles(ctx context.Context, input PublicFolderFileListInput) (*PublicFolderFileListResult, error) {
@@ -110,7 +115,7 @@ func (s *PublicCatalogService) ListPublicFolderFiles(ctx context.Context, input 
 	}
 
 	return &PublicFolderFileListResult{
-		Items:    mapPublicFileItems(files),
+		Items:    s.mapPublicFileItems(ctx, files),
 		Page:     normalized.Page,
 		PageSize: normalized.PageSize,
 		Total:    total,
@@ -135,7 +140,7 @@ func (s *PublicCatalogService) ListHotFiles(ctx context.Context, limit int) (*Pu
 	}
 
 	return &PublicFileFeedResult{
-		Items: mapPublicFileItems(files),
+		Items: s.mapPublicFileItems(ctx, files),
 	}, nil
 }
 
@@ -222,6 +227,7 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		DownloadCount: current.DownloadCount,
 		TotalSize:     current.TotalSize,
 		UpdatedAt:     current.UpdatedAt,
+		DirectLinkPrefix: strings.TrimSpace(current.DirectLinkPrefix),
 	}, nil
 }
 
@@ -298,18 +304,25 @@ func (s *PublicCatalogService) listManagedFileFeed(ctx context.Context, limit in
 	}
 
 	return &PublicFileFeedResult{
-		Items: mapPublicFileItems(files),
+		Items: s.mapPublicFileItems(ctx, files),
 	}, nil
 }
 
-func mapPublicFileItems(files []model.File) []PublicFileItem {
+func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []model.File) []PublicFileItem {
 	items := make([]PublicFileItem, 0, len(files))
 	for _, file := range files {
+		fd := ""
+		if s.download != nil {
+			fd = s.download.FolderDirectDownloadURLForFile(ctx, file)
+		}
 		items = append(items, PublicFileItem{
 			ID:            file.ID,
 			Name:          file.Name,
 			Description:   file.Description,
 			Extension:     file.Extension,
+			CoverURL:      strings.TrimSpace(file.CoverURL),
+			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
+			FolderDirectDownloadURL: fd,
 			UploadedAt:    file.CreatedAt,
 			DownloadCount: file.DownloadCount,
 			Size:          file.Size,

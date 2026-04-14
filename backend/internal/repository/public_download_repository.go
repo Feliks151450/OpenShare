@@ -46,6 +46,31 @@ func (r *PublicDownloadRepository) FindManagedFileByID(ctx context.Context, file
 	return &file, nil
 }
 
+// ListFolderAncestorsFromLeaf returns folders from the leaf (file's folder) up to the root, [leaf, parent, ..., root].
+func (r *PublicDownloadRepository) ListFolderAncestorsFromLeaf(ctx context.Context, leafFolderID string) ([]model.Folder, error) {
+	leafFolderID = strings.TrimSpace(leafFolderID)
+	if leafFolderID == "" {
+		return nil, nil
+	}
+	var chain []model.Folder
+	curID := leafFolderID
+	for curID != "" {
+		f, err := r.FindManagedFolderByID(ctx, curID)
+		if err != nil {
+			return nil, err
+		}
+		if f == nil {
+			return nil, fmt.Errorf("folder %s not found", curID)
+		}
+		chain = append(chain, *f)
+		if f.ParentID == nil || strings.TrimSpace(*f.ParentID) == "" {
+			break
+		}
+		curID = strings.TrimSpace(*f.ParentID)
+	}
+	return chain, nil
+}
+
 func (r *PublicDownloadRepository) FindManagedFolderByID(ctx context.Context, folderID string) (*model.Folder, error) {
 	var folder model.Folder
 	err := r.db.WithContext(ctx).

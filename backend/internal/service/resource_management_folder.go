@@ -52,8 +52,12 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 	}
 
 	description := strings.TrimSpace(input.Description)
+	prefix, err := normalizeOptionalHTTPURL(input.DirectLinkPrefix)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
 	if current.SourcePath == nil || strings.TrimSpace(*current.SourcePath) == "" || current.Name == name {
-		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, prefix, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrManagedFolderNotFound
 			}
@@ -94,7 +98,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		folderSourcePaths[folder.ID] = filepath.Join(newRootPath, relative)
 	}
 
-	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, prefix, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFolderNotFound
 		}
