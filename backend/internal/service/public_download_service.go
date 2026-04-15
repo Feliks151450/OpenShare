@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ var (
 	ErrDownloadFolderNotFound  = errors.New("download folder not found")
 	ErrDownloadFileUnavailable = errors.New("download file unavailable")
 	ErrBatchDownloadInvalid    = errors.New("invalid batch download request")
+	ErrDownloadForbidden       = errors.New("download not allowed")
 )
 
 type PublicDownloadService struct {
@@ -34,6 +36,8 @@ type DownloadableFile struct {
 	Size     int64
 	ModTime  time.Time
 	Content  *os.File
+	// PlaybackInlineOnly 为 true 时表示策略禁止「下载」，但仍允许浏览器内嵌播放音/视频（inline），不计入下载次数。
+	PlaybackInlineOnly bool
 }
 
 type PublicFileDetail struct {
@@ -45,10 +49,14 @@ type PublicFileDetail struct {
 	Description   string    `json:"description"`
 	MimeType      string    `json:"mime_type"`
 	PlaybackURL   string    `json:"playback_url"`
+	PlaybackFallbackURL string `json:"playback_fallback_url"`
 	CoverURL      string    `json:"cover_url"`
 	// FolderDirectDownloadURL 由文件夹直链前缀 + 相对路径生成；不含 playback_url。前端优先使用 playback_url。
 	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
-	Size          int64     `json:"size"`
+	DownloadAllowed         bool   `json:"download_allowed"`
+	// DownloadPolicy 本节点存储：inherit | allow | deny（不含继承解析）
+	DownloadPolicy string `json:"download_policy"`
+	Size           int64  `json:"size"`
 	UploadedAt    time.Time `json:"uploaded_at"`
 	DownloadCount int64     `json:"download_count"`
 }
@@ -73,6 +81,76 @@ func NewPublicDownloadService(repository *repository.PublicDownloadRepository, s
 	}
 }
 
+// DownloadPolicyString 将库中的可空布尔转为管理端/前端三态字符串。
+func DownloadPolicyString(p *bool) string {
+	if p == nil {
+		return "inherit"
+	}
+	if *p {
+		return "allow"
+	}
+	return "deny"
+}
+
+// inlinePlaybackAllowedWhenDownloadForbidden 策略禁止下载时仍允许通过本站 URL 内嵌播放的常见音/视频。
+func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool {
+	mt := strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(mt, "video/") || strings.HasPrefix(mt, "audio/") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(fileName))
+	switch ext {
+	case ".mp4", ".webm", ".mov", ".m4v", ".ogv", ".mkv", ".avi",
+		".mp3", ".wav", ".aac", ".m4a", ".oga", ".ogg", ".opus", ".flac":
+		return true
+	default:
+		return false
+	}
+}
+
+// EffectiveDownloadAllowedForFile 解析文件是否允许下载：文件单独设置优先，否则自文件所在文件夹向根查找，均未设置则默认允许。
+func (s *PublicDownloadService) EffectiveDownloadAllowedForFile(ctx context.Context, file *model.File) (bool, error) {
+	if file == nil {
+		return true, nil
+	}
+	if file.AllowDownload != nil {
+		return *file.AllowDownload, nil
+	}
+	if file.FolderID == nil || strings.TrimSpace(*file.FolderID) == "" {
+		return true, nil
+	}
+	chain, err := s.repository.ListFolderAncestorsFromLeaf(ctx, strings.TrimSpace(*file.FolderID))
+	if err != nil {
+		return false, err
+	}
+	for i := range chain {
+		if chain[i].AllowDownload != nil {
+			return *chain[i].AllowDownload, nil
+		}
+	}
+	return true, nil
+}
+
+// EffectiveDownloadAllowedForFolder 解析文件夹是否允许打包下载：本文件夹设置优先，否则向上查找祖先，均未设置则默认允许。
+func (s *PublicDownloadService) EffectiveDownloadAllowedForFolder(ctx context.Context, folder *model.Folder) (bool, error) {
+	if folder == nil {
+		return true, nil
+	}
+	if folder.AllowDownload != nil {
+		return *folder.AllowDownload, nil
+	}
+	chain, err := s.repository.ListFolderAncestorsFromLeaf(ctx, folder.ID)
+	if err != nil {
+		return false, err
+	}
+	for i := range chain {
+		if chain[i].AllowDownload != nil {
+			return *chain[i].AllowDownload, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID string) (*DownloadableFile, error) {
 	fileID = strings.TrimSpace(fileID)
 	if fileID == "" {
@@ -85,6 +163,18 @@ func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID stri
 	}
 	if file == nil {
 		return nil, ErrDownloadFileNotFound
+	}
+
+	allowed, err := s.EffectiveDownloadAllowedForFile(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	playbackInlineOnly := false
+	if !allowed {
+		if !inlinePlaybackAllowedWhenDownloadForbidden(file.MimeType, file.Name) {
+			return nil, ErrDownloadForbidden
+		}
+		playbackInlineOnly = true
 	}
 
 	diskPath, err := s.resolveManagedFilePath(ctx, file)
@@ -101,12 +191,13 @@ func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID stri
 	}
 
 	return &DownloadableFile{
-		FileID:   file.ID,
-		FileName: file.Name,
-		MimeType: file.MimeType,
-		Size:     opened.Info.Size(),
-		ModTime:  opened.Info.ModTime(),
-		Content:  opened.File,
+		FileID:             file.ID,
+		FileName:           file.Name,
+		MimeType:           file.MimeType,
+		Size:               opened.Info.Size(),
+		ModTime:            opened.Info.ModTime(),
+		Content:            opened.File,
+		PlaybackInlineOnly: playbackInlineOnly,
 	}, nil
 }
 
@@ -128,6 +219,11 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		return nil, fmt.Errorf("build public file path: %w", err)
 	}
 
+	dlAllowed, err := s.EffectiveDownloadAllowedForFile(ctx, file)
+	if err != nil {
+		return nil, fmt.Errorf("resolve download policy: %w", err)
+	}
+
 	return &PublicFileDetail{
 		ID:            file.ID,
 		Name:          file.Name,
@@ -137,11 +233,14 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		Description:   file.Description,
 		MimeType:      file.MimeType,
 		PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
+		PlaybackFallbackURL: strings.TrimSpace(file.PlaybackFallbackURL),
 		CoverURL:      strings.TrimSpace(file.CoverURL),
 		FolderDirectDownloadURL: s.FolderDirectDownloadURLForFile(ctx, *file),
-		Size:          file.Size,
-		UploadedAt:    file.CreatedAt,
-		DownloadCount: file.DownloadCount,
+		DownloadAllowed:       dlAllowed,
+		DownloadPolicy:        DownloadPolicyString(file.AllowDownload),
+		Size:                  file.Size,
+		UploadedAt:            file.CreatedAt,
+		DownloadCount:         file.DownloadCount,
 	}, nil
 }
 
@@ -301,6 +400,16 @@ func (s *PublicDownloadService) PrepareBatchDownload(ctx context.Context, fileID
 		return nil, ErrDownloadFileNotFound
 	}
 
+	for i := range files {
+		allowed, err := s.EffectiveDownloadAllowedForFile(ctx, &files[i])
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, ErrDownloadForbidden
+		}
+	}
+
 	folderByID, err := s.folderMapForFiles(ctx, files)
 	if err != nil {
 		return nil, fmt.Errorf("load folder download paths: %w", err)
@@ -377,6 +486,14 @@ func (s *PublicDownloadService) PrepareFolderDownload(ctx context.Context, folde
 		return nil, ErrDownloadFolderNotFound
 	}
 
+	allowed, err := s.EffectiveDownloadAllowedForFolder(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrDownloadForbidden
+	}
+
 	parentByFolder := map[string]string{root.ID: ""}
 	nameByFolder := map[string]string{root.ID: root.Name}
 	folderByID := map[string]repository.ManagedFolderNode{
@@ -416,6 +533,14 @@ func (s *PublicDownloadService) PrepareFolderDownload(ctx context.Context, folde
 
 	items := make([]BatchDownloadFile, 0, len(files))
 	for _, file := range files {
+		allowedFile, err := s.EffectiveDownloadAllowedForFile(ctx, &file)
+		if err != nil {
+			return nil, err
+		}
+		if !allowedFile {
+			continue
+		}
+
 		filePath, err := s.resolveManagedFilePathFromFolderMap(file, folderByID)
 		if err != nil {
 			return nil, err
@@ -436,6 +561,10 @@ func (s *PublicDownloadService) PrepareFolderDownload(ctx context.Context, folde
 			DiskPath: filePath,
 			ZipPath:  buildFolderZipPath(file.Name, file.FolderID, parentByFolder, nameByFolder),
 		})
+	}
+
+	if len(items) == 0 && len(files) > 0 {
+		return nil, ErrDownloadForbidden
 	}
 
 	return &FolderDownload{

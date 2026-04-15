@@ -81,6 +81,7 @@ type SearchResultItem struct {
 	CoverURL      string     `json:"cover_url,omitempty"`
 	PlaybackURL   string     `json:"playback_url,omitempty"`
 	FolderDirectDownloadURL string `json:"folder_direct_download_url,omitempty"`
+	DownloadAllowed bool     `json:"download_allowed"`
 	Size          int64      `json:"size,omitempty"`
 	DownloadCount int64      `json:"download_count,omitempty"`
 	UploadedAt    *time.Time `json:"uploaded_at,omitempty"`
@@ -158,7 +159,11 @@ func (s *SearchService) Search(ctx context.Context, input SearchInput) (*SearchR
 
 	items := make([]SearchResultItem, 0, end-offset)
 	for _, candidate := range ranked[offset:end] {
-		items = append(items, s.candidateToResultItem(ctx, candidate.Candidate))
+		row, err := s.candidateToResultItem(ctx, candidate.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, row)
 	}
 
 	return &SearchResult{
@@ -409,17 +414,32 @@ func searchDisplayName(candidate repository.SearchCandidate) string {
 	return strings.ToLower(candidate.Name)
 }
 
-func (s *SearchService) candidateToResultItem(ctx context.Context, candidate repository.SearchCandidate) SearchResultItem {
+func (s *SearchService) candidateToResultItem(ctx context.Context, candidate repository.SearchCandidate) (SearchResultItem, error) {
 	switch candidate.EntityType {
 	case "file":
 		uploadedAt := candidate.CreatedAt
 		fd := ""
 		if s.download != nil && candidate.FolderID != nil {
 			fd = s.download.FolderDirectDownloadURLForFile(ctx, model.File{
-				ID:       candidate.ID,
-				Name:     candidate.Name,
-				FolderID: candidate.FolderID,
+				ID:            candidate.ID,
+				Name:          candidate.Name,
+				FolderID:      candidate.FolderID,
+				AllowDownload: candidate.AllowDownload,
 			})
+		}
+		dl := true
+		if s.download != nil {
+			f := model.File{
+				ID:            candidate.ID,
+				Name:          candidate.Name,
+				FolderID:      candidate.FolderID,
+				AllowDownload: candidate.AllowDownload,
+			}
+			var err error
+			dl, err = s.download.EffectiveDownloadAllowedForFile(ctx, &f)
+			if err != nil {
+				return SearchResultItem{}, err
+			}
 		}
 		return SearchResultItem{
 			EntityType:    "file",
@@ -429,16 +449,32 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			CoverURL:      strings.TrimSpace(candidate.CoverURL),
 			PlaybackURL:   strings.TrimSpace(candidate.PlaybackURL),
 			FolderDirectDownloadURL: fd,
-			Size:          candidate.Size,
-			DownloadCount: candidate.DownloadCount,
-			UploadedAt:    &uploadedAt,
-		}
+			DownloadAllowed:         dl,
+			Size:                    candidate.Size,
+			DownloadCount:           candidate.DownloadCount,
+			UploadedAt:              &uploadedAt,
+		}, nil
 	default:
-		return SearchResultItem{
-			EntityType: "folder",
-			ID:         candidate.ID,
-			Name:       candidate.Name,
+		dl := true
+		if s.download != nil {
+			fol := model.Folder{
+				ID:            candidate.ID,
+				ParentID:      candidate.ParentID,
+				Name:          candidate.Name,
+				AllowDownload: candidate.AllowDownload,
+			}
+			var err error
+			dl, err = s.download.EffectiveDownloadAllowedForFolder(ctx, &fol)
+			if err != nil {
+				return SearchResultItem{}, err
+			}
 		}
+		return SearchResultItem{
+			EntityType:      "folder",
+			ID:              candidate.ID,
+			Name:            candidate.Name,
+			DownloadAllowed: dl,
+		}, nil
 	}
 }
 

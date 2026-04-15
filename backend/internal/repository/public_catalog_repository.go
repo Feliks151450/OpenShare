@@ -32,14 +32,15 @@ type PublicHotFileFeedQuery struct {
 }
 
 type PublicFolderRow struct {
-	ID            string
-	ParentID      *string
-	Name          string
-	Description   string
-	UpdatedAt     time.Time
-	FileCount     int64
-	DownloadCount int64
-	TotalSize     int64
+	ID             string
+	ParentID       *string
+	Name           string
+	Description    string
+	AllowDownload  *bool
+	UpdatedAt      time.Time
+	FileCount      int64
+	DownloadCount  int64
+	TotalSize      int64
 }
 
 func NewPublicCatalogRepository(db *gorm.DB) *PublicCatalogRepository {
@@ -121,7 +122,7 @@ func (r *PublicCatalogRepository) FolderExists(ctx context.Context, folderID str
 func (r *PublicCatalogRepository) ListPublicFolders(ctx context.Context, parentID *string) ([]PublicFolderRow, error) {
 	query := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, description, updated_at, file_count, download_count, total_size")
+		Select("id, parent_id, name, description, allow_download, updated_at, file_count, download_count, total_size")
 
 	if parentID == nil {
 		query = query.Where("parent_id IS NULL")

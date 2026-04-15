@@ -16,16 +16,19 @@ type ResourceManagementHandler struct {
 }
 
 type updateManagedFileRequest struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	PlaybackURL  string `json:"playback_url"`
-	CoverURL     string `json:"cover_url"`
+	Name                string  `json:"name"`
+	Description         string  `json:"description"`
+	PlaybackURL         string  `json:"playback_url"`
+	PlaybackFallbackURL string  `json:"playback_fallback_url"`
+	CoverURL            string  `json:"cover_url"`
+	DownloadPolicy      *string `json:"download_policy"`
 }
 
 type updateManagedFolderDescriptionRequest struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	DirectLinkPrefix string `json:"direct_link_prefix"`
+	Name             string  `json:"name"`
+	Description      string  `json:"description"`
+	DirectLinkPrefix string  `json:"direct_link_prefix"`
+	DownloadPolicy   *string `json:"download_policy"`
 }
 
 type deleteManagedResourceRequest struct {
@@ -61,12 +64,14 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 	}
 
 	err := h.service.UpdateFile(ctx.Request.Context(), ctx.Param("fileID"), service.UpdateManagedFileInput{
-		Name:         req.Name,
-		Description:  req.Description,
-		PlaybackURL:  req.PlaybackURL,
-		CoverURL:     req.CoverURL,
-		OperatorID:   identity.AdminID,
-		OperatorIP:   ctx.ClientIP(),
+		Name:                req.Name,
+		Description:         req.Description,
+		PlaybackURL:         req.PlaybackURL,
+		PlaybackFallbackURL: req.PlaybackFallbackURL,
+		CoverURL:            req.CoverURL,
+		DownloadPolicy:      req.DownloadPolicy,
+		OperatorID:          identity.AdminID,
+		OperatorIP:          ctx.ClientIP(),
 	})
 	if err != nil {
 		switch {
@@ -101,6 +106,7 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 		Name:             req.Name,
 		Description:      req.Description,
 		DirectLinkPrefix: req.DirectLinkPrefix,
+		DownloadPolicy:   req.DownloadPolicy,
 		OperatorID:       identity.AdminID,
 		OperatorIP:       ctx.ClientIP(),
 	})

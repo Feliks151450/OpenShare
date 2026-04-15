@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
-import { Clock, Download, FileVideo, Flag, Link2, Share2 } from "lucide-vue-next";
+import { ChevronLeft, Clock, Download, FileText, FileVideo, Flag, Link2, Share2 } from "lucide-vue-next";
 
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
@@ -25,6 +25,12 @@ interface FileDetailResponse {
   cover_url?: string;
   /** 由文件夹直链前缀生成，不含 playback_url；前端优先 playback */
   folder_direct_download_url?: string;
+  /** 解析继承后的站点下载策略；为 false 时隐藏下载与「复制下载直链」 */
+  download_allowed?: boolean;
+  /** 本文件在库中的三态：inherit | allow | deny（管理端编辑用） */
+  download_policy?: "inherit" | "allow" | "deny";
+  /** 仅视频：主直链失效时依次尝试；需已配置主直链才有意义 */
+  playback_fallback_url?: string;
   size: number;
   uploaded_at: string;
   download_count: number;
@@ -41,7 +47,9 @@ const saving = ref(false);
 const editFileName = ref("");
 const editDescription = ref("");
 const editPlaybackUrl = ref("");
+const editPlaybackFallbackUrl = ref("");
 const editCoverUrl = ref("");
+const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
 const canManageResourceDescriptions = ref(false);
 const deleteDialogOpen = ref(false);
@@ -57,6 +65,8 @@ const feedbackError = ref("");
 const currentReceiptCode = ref("");
 const fileID = computed(() => String(route.params.fileID ?? ""));
 const backendDownloadPath = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
+
+const downloadActionsAllowed = computed(() => detail.value?.download_allowed !== false);
 
 /** 播放器与「复制下载直链」：playback_url > 文件夹前缀直链 > 本站下载接口 */
 const mediaSourceURL = computed(() => {
@@ -127,6 +137,66 @@ function buildAbsoluteDetailPageURL(query?: Record<string, string>): string {
 }
 
 const videoRef = ref<HTMLVideoElement | null>(null);
+/** 视频播放用：主直链 → 备用 → 文件夹前缀 → 本站；与复制下载的 mediaSourceURL 独立 */
+const videoPlaybackStep = ref(0);
+
+/** 内嵌播放器完整回退链；禁止下载时仅隐藏下载类 UI，音/视频仍可用本站 /download 以 inline 方式播放（与详情接口 download_allowed 一致）。 */
+function buildVideoPlaybackUrlQueue(fileId: string, d: FileDetailResponse): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string) => {
+    const t = u.trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  const playback = (d.playback_url ?? "").trim();
+  const fallback = (d.playback_fallback_url ?? "").trim();
+  const folder = (d.folder_direct_download_url ?? "").trim();
+  const backend = `/api/public/files/${encodeURIComponent(fileId)}/download`;
+
+  if (playback) {
+    add(playback);
+    if (fallback) {
+      add(fallback);
+    }
+  }
+  if (folder) {
+    add(folder);
+  }
+  add(backend);
+  return out;
+}
+
+const videoPlaybackUrlQueue = computed(() =>
+  detail.value ? buildVideoPlaybackUrlQueue(fileID.value, detail.value) : [],
+);
+
+const videoPlaybackActiveSrc = computed(() => {
+  const q = videoPlaybackUrlQueue.value;
+  if (q.length === 0) {
+    return "";
+  }
+  const i = Math.min(videoPlaybackStep.value, q.length - 1);
+  return q[i] ?? "";
+});
+
+watch(
+  () =>
+    detail.value
+      ? `${fileID.value}|${detail.value.playback_url ?? ""}|${detail.value.playback_fallback_url ?? ""}|${detail.value.folder_direct_download_url ?? ""}`
+      : "",
+  () => {
+    videoPlaybackStep.value = 0;
+  },
+);
+
+function onVideoPlaybackError() {
+  const q = videoPlaybackUrlQueue.value;
+  if (videoPlaybackStep.value < q.length - 1) {
+    videoPlaybackStep.value++;
+  }
+}
 
 function applySeekFromRouteQuery() {
   const el = videoRef.value;
@@ -176,6 +246,9 @@ interface FolderFileListItem {
 
 const folderVideoPeers = ref<Array<{ id: string; name: string }>>([]);
 const folderVideoPeersLoading = ref(false);
+
+/** 视频详情页默认折叠「所属文件夹、下载量」等元数据，由用户点击「文件信息」展开 */
+const videoFileMetaVisible = ref(false);
 
 function extensionOfListItem(item: FolderFileListItem): string {
   const ext = (item.extension ?? "").replace(/^\./, "").toLowerCase();
@@ -243,7 +316,9 @@ const editorDirty = computed(() => {
     editFileName.value.trim() !== detail.value.name ||
     editDescription.value.trim() !== (detail.value.description ?? "") ||
     editPlaybackUrl.value.trim() !== (detail.value.playback_url ?? "").trim() ||
-    editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim()
+    editPlaybackFallbackUrl.value.trim() !== (detail.value.playback_fallback_url ?? "").trim() ||
+    editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim() ||
+    editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
 });
 
@@ -252,6 +327,7 @@ onMounted(() => {
 });
 
 watch(fileID, () => {
+  videoFileMetaVisible.value = false;
   void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
 });
 
@@ -280,7 +356,9 @@ async function loadDetail() {
       editFileName.value = detail.value.name;
       editDescription.value = detail.value.description;
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
+      editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
+      editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       if (isVideoDetail(detail.value)) {
         const fid = detail.value.folder_id?.trim() ?? "";
         if (fid) {
@@ -307,7 +385,9 @@ function openDescriptionEditor() {
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
+  editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
+  editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
   message.value = "";
   descriptionEditorOpen.value = true;
@@ -320,7 +400,9 @@ function closeDescriptionEditor() {
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
+  editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
+  editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
 }
 
 function openDeleteDialog() {
@@ -369,7 +451,9 @@ async function saveDescription() {
         name: normalizedName,
         description: editDescription.value.trim(),
         playback_url: editPlaybackUrl.value.trim(),
+        playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
         cover_url: editCoverUrl.value.trim(),
+        download_policy: editDownloadPolicy.value,
       },
     });
     message.value = "文件信息已更新。";
@@ -500,6 +584,9 @@ async function copyDetailLinkAtCurrentTime() {
 }
 
 function downloadFile() {
+  if (!downloadActionsAllowed.value) {
+    return;
+  }
   const link = document.createElement("a");
   link.href = mediaSourceURL.value;
   link.rel = "noopener";
@@ -521,7 +608,7 @@ function downloadFile() {
 </script>
 
 <template>
-  <section class="app-container py-6 sm:py-8 sm:py-10">
+  <section class="app-container py-2 sm:py-8 lg:py-10">
     <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-6xl' : 'max-w-4xl'">
       <SurfaceCard>
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
@@ -547,17 +634,40 @@ function downloadFile() {
             <div class="space-y-4">
               <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div class="space-y-2">
-                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      aria-label="返回"
+                      @click="goBack"
+                    >
+                      <ChevronLeft class="h-4 w-4" />
+                    </button>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
+                  </div>
                   <h3 class="break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl" :title="detail.name">
                     {{ detail.name }}
                   </h3>
                 </div>
-                <div class="flex flex-wrap items-start gap-3 sm:flex-nowrap lg:justify-end">
-                  <button type="button" class="btn-secondary w-full sm:w-auto" @click="goBack">返回文件夹</button>
+                <div class="min-w-0 max-w-full">
+                  <div
+                    class="flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto py-2 [scrollbar-width:thin] sm:gap-3 lg:justify-end"
+                  >
+                  <button
+                    v-if="isVideo"
+                    type="button"
+                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    :aria-label="videoFileMetaVisible ? '收起信息' : '文件信息'"
+                    :aria-expanded="videoFileMetaVisible"
+                    aria-controls="video-file-meta-panel"
+                    @click="videoFileMetaVisible = !videoFileMetaVisible"
+                  >
+                    <FileText class="h-4 w-4" />
+                  </button>
                   <button
                     v-if="canManageResourceDescriptions"
                     type="button"
-                    class="btn-secondary w-full sm:w-auto"
+                    class="btn-secondary shrink-0 whitespace-nowrap"
                     @click="openDescriptionEditor"
                   >
                     编辑
@@ -565,7 +675,7 @@ function downloadFile() {
                   <button
                     v-if="canManageResourceDescriptions"
                     type="button"
-                    class="btn-secondary w-full text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 sm:w-auto"
+                    class="btn-secondary shrink-0 whitespace-nowrap text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                     @click="openDeleteDialog"
                   >
                     删除
@@ -579,6 +689,7 @@ function downloadFile() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <button
+                    v-if="downloadActionsAllowed"
                     type="button"
                     class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     title="复制下载直链（可直接下载或嵌入播放器）"
@@ -607,6 +718,7 @@ function downloadFile() {
                     <Clock class="h-4 w-4" />
                   </button>
                   <button
+                    v-if="downloadActionsAllowed"
                     type="button"
                     class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     aria-label="下载文件"
@@ -614,10 +726,15 @@ function downloadFile() {
                   >
                     <Download class="h-4 w-4" />
                   </button>
+                  </div>
                 </div>
               </div>
 
-              <div class="min-w-0 space-y-3">
+              <div
+                v-show="!isVideo || videoFileMetaVisible"
+                id="video-file-meta-panel"
+                class="min-w-0 space-y-3"
+              >
                 <div class="grid gap-x-8 gap-y-3 lg:grid-cols-2">
                   <div
                     v-for="item in primaryDetailRows"
@@ -658,13 +775,14 @@ function downloadFile() {
                   class="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
                 >
                   <video
-                    :key="`${fileID}:${mediaSourceURL}`"
+                    :key="`${fileID}:${videoPlaybackStep}:${videoPlaybackActiveSrc}`"
                     ref="videoRef"
                     class="max-h-[min(70vh,720px)] w-full object-contain"
                     controls
                     playsinline
                     preload="metadata"
-                    :src="mediaSourceURL"
+                    :src="videoPlaybackActiveSrc"
+                    @error="onVideoPlaybackError"
                     @loadedmetadata="onVideoLoadedMetadata"
                   >
                     您的浏览器不支持内嵌视频播放，请使用上方下载按钮获取文件。
@@ -893,6 +1011,32 @@ function downloadFile() {
                 />
                 <p class="text-xs leading-5 text-slate-500">
                   填写后，详情页播放器与「复制下载直链」均使用该地址；需以 http(s) 开头。清空并保存可恢复为默认。
+                </p>
+              </label>
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">是否允许下载</span>
+                <select v-model="editDownloadPolicy" class="field">
+                  <option value="inherit">继承所在文件夹设置</option>
+                  <option value="allow">允许下载</option>
+                  <option value="deny">禁止下载</option>
+                </select>
+                <p class="text-xs leading-5 text-slate-500">
+                  「继承」时随文件夹策略；未单独设置文件与文件夹时默认允许下载。
+                </p>
+              </label>
+
+              <label v-if="editPlaybackUrl.trim()" class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">备用播放直链（可选）</span>
+                <input
+                  v-model="editPlaybackFallbackUrl"
+                  type="url"
+                  class="field"
+                  placeholder="主直链失效时播放器会优先尝试此地址，再回退文件夹前缀与本站下载"
+                  autocomplete="off"
+                />
+                <p class="text-xs leading-5 text-slate-500">
+                  仅用于内嵌播放器；复制下载仍使用上方主直链逻辑。需以 http(s) 开头；无单独配置主直链时不可填。
                 </p>
               </label>
 

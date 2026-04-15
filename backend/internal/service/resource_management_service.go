@@ -40,20 +40,25 @@ type ListManagedFilesInput struct {
 }
 
 type UpdateManagedFileInput struct {
-	Name         string
-	Description  string
-	PlaybackURL  string
-	CoverURL     string
-	OperatorID   string
-	OperatorIP   string
+	Name                string
+	Description         string
+	PlaybackURL         string
+	PlaybackFallbackURL string
+	CoverURL            string
+	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
+	DownloadPolicy *string
+	OperatorID     string
+	OperatorIP     string
 }
 
 type UpdateManagedFolderDescriptionInput struct {
 	Name             string
 	Description      string
 	DirectLinkPrefix string
-	OperatorID       string
-	OperatorIP       string
+	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
+	DownloadPolicy *string
+	OperatorID     string
+	OperatorIP     string
 }
 
 func NewResourceManagementService(repo *repository.ResourceManagementRepository, storageService *storage.Service) *ResourceManagementService {

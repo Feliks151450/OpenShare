@@ -39,6 +39,8 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		case errors.Is(err, service.ErrDownloadFileUnavailable):
 			ctx.JSON(http.StatusGone, gin.H{"error": "file is unavailable"})
+		case errors.Is(err, service.ErrDownloadForbidden):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "download not allowed"})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to download file"})
 		}
@@ -49,12 +51,18 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 	if download.MimeType != "" {
 		ctx.Header("Content-Type", download.MimeType)
 	}
-	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FileName))
+	if download.PlaybackInlineOnly {
+		ctx.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", download.FileName))
+	} else {
+		ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FileName))
+	}
 	ctx.Header("Content-Length", strconv.FormatInt(download.Size, 10))
 
-	if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-		return
+	if !download.PlaybackInlineOnly {
+		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
+			return
+		}
 	}
 
 	http.ServeContent(ctx.Writer, ctx.Request, download.FileName, download.ModTime, download.Content)
@@ -68,6 +76,8 @@ func (h *PublicDownloadHandler) DownloadFolder(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
 		case errors.Is(err, service.ErrDownloadFileUnavailable):
 			ctx.JSON(http.StatusGone, gin.H{"error": "one or more files are unavailable"})
+		case errors.Is(err, service.ErrDownloadForbidden):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "download not allowed"})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to download folder"})
 		}
@@ -142,6 +152,8 @@ func (h *PublicDownloadHandler) DownloadBatch(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "one or more files were not found"})
 		case errors.Is(err, service.ErrDownloadFileUnavailable):
 			ctx.JSON(http.StatusGone, gin.H{"error": "one or more files are unavailable"})
+		case errors.Is(err, service.ErrDownloadForbidden):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "download not allowed"})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare batch download"})
 		}
@@ -202,6 +214,8 @@ func (h *PublicDownloadHandler) DownloadResourceBatch(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "one or more resources were not found"})
 		case errors.Is(err, service.ErrDownloadFileUnavailable):
 			ctx.JSON(http.StatusGone, gin.H{"error": "one or more files are unavailable"})
+		case errors.Is(err, service.ErrDownloadForbidden):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "download not allowed"})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare batch download"})
 		}

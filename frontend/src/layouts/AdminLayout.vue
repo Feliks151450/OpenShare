@@ -148,7 +148,10 @@ async function trackVisit() {
       <p class="text-sm text-slate-500">正在加载管理后台…</p>
     </div>
 
-    <div v-else-if="!sessionStore.authenticated" class="app-container flex min-h-screen items-center justify-center py-10 sm:py-16">
+    <div
+      v-else-if="!sessionStore.authenticated"
+      class="mx-auto flex min-h-screen w-full max-w-[1360px] items-center justify-center px-4 py-10 sm:px-6 sm:py-16"
+    >
       <section class="panel w-full max-w-[420px] p-5 sm:p-8">
         <div class="space-y-2">
           <p class="text-sm font-semibold text-slate-600 dark:text-slate-400">OpenShare Admin</p>

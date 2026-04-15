@@ -53,19 +53,21 @@ type PublicFileItem struct {
 	CoverURL      string    `json:"cover_url"`
 	PlaybackURL   string    `json:"playback_url"`
 	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
+	DownloadAllowed bool    `json:"download_allowed"`
 	UploadedAt    time.Time `json:"uploaded_at"`
 	DownloadCount int64     `json:"download_count"`
 	Size          int64     `json:"size"`
 }
 
 type PublicFolderItem struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	FileCount     int64     `json:"file_count"`
-	DownloadCount int64     `json:"download_count"`
-	TotalSize     int64     `json:"total_size"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	DownloadAllowed bool      `json:"download_allowed"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	FileCount       int64     `json:"file_count"`
+	DownloadCount   int64     `json:"download_count"`
+	TotalSize       int64     `json:"total_size"`
 }
 
 type PublicFolderBreadcrumbItem struct {
@@ -84,6 +86,8 @@ type PublicFolderDetail struct {
 	TotalSize     int64                        `json:"total_size"`
 	UpdatedAt     time.Time                    `json:"updated_at"`
 	DirectLinkPrefix string                    `json:"direct_link_prefix"`
+	DownloadAllowed bool                       `json:"download_allowed"`
+	DownloadPolicy  string                     `json:"download_policy"`
 }
 
 func NewPublicCatalogService(repository *repository.PublicCatalogRepository, download *PublicDownloadService) *PublicCatalogService {
@@ -114,8 +118,12 @@ func (s *PublicCatalogService) ListPublicFolderFiles(ctx context.Context, input 
 		return nil, fmt.Errorf("list public folder files: %w", err)
 	}
 
+	mapped, err := s.mapPublicFileItems(ctx, files)
+	if err != nil {
+		return nil, err
+	}
 	return &PublicFolderFileListResult{
-		Items:    s.mapPublicFileItems(ctx, files),
+		Items:    mapped,
 		Page:     normalized.Page,
 		PageSize: normalized.PageSize,
 		Total:    total,
@@ -139,8 +147,12 @@ func (s *PublicCatalogService) ListHotFiles(ctx context.Context, limit int) (*Pu
 		return nil, fmt.Errorf("list recent hot managed files: %w", err)
 	}
 
+	mapped, err := s.mapPublicFileItems(ctx, files)
+	if err != nil {
+		return nil, err
+	}
 	return &PublicFileFeedResult{
-		Items: s.mapPublicFileItems(ctx, files),
+		Items: mapped,
 	}, nil
 }
 
@@ -168,14 +180,29 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 
 	items := make([]PublicFolderItem, 0, len(rows))
 	for _, row := range rows {
+		allowed := true
+		if s.download != nil {
+			f := model.Folder{
+				ID:            row.ID,
+				ParentID:      row.ParentID,
+				Name:          row.Name,
+				AllowDownload: row.AllowDownload,
+			}
+			var err error
+			allowed, err = s.download.EffectiveDownloadAllowedForFolder(ctx, &f)
+			if err != nil {
+				return nil, fmt.Errorf("resolve folder download policy: %w", err)
+			}
+		}
 		items = append(items, PublicFolderItem{
-			ID:            row.ID,
-			Name:          row.Name,
-			Description:   row.Description,
-			UpdatedAt:     row.UpdatedAt,
-			FileCount:     row.FileCount,
-			DownloadCount: row.DownloadCount,
-			TotalSize:     row.TotalSize,
+			ID:              row.ID,
+			Name:            row.Name,
+			Description:     row.Description,
+			DownloadAllowed: allowed,
+			UpdatedAt:       row.UpdatedAt,
+			FileCount:       row.FileCount,
+			DownloadCount:   row.DownloadCount,
+			TotalSize:       row.TotalSize,
 		})
 	}
 
@@ -217,6 +244,15 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		breadcrumbs[i], breadcrumbs[j] = breadcrumbs[j], breadcrumbs[i]
 	}
 
+	dlAllowed := true
+	if s.download != nil {
+		var err error
+		dlAllowed, err = s.download.EffectiveDownloadAllowedForFolder(ctx, current)
+		if err != nil {
+			return nil, fmt.Errorf("resolve folder download policy: %w", err)
+		}
+	}
+
 	return &PublicFolderDetail{
 		ID:            current.ID,
 		Name:          current.Name,
@@ -228,6 +264,8 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		TotalSize:     current.TotalSize,
 		UpdatedAt:     current.UpdatedAt,
 		DirectLinkPrefix: strings.TrimSpace(current.DirectLinkPrefix),
+		DownloadAllowed:  dlAllowed,
+		DownloadPolicy:   DownloadPolicyString(current.AllowDownload),
 	}, nil
 }
 
@@ -303,17 +341,30 @@ func (s *PublicCatalogService) listManagedFileFeed(ctx context.Context, limit in
 		return nil, fmt.Errorf("list managed file feed: %w", err)
 	}
 
+	mapped, err := s.mapPublicFileItems(ctx, files)
+	if err != nil {
+		return nil, err
+	}
 	return &PublicFileFeedResult{
-		Items: s.mapPublicFileItems(ctx, files),
+		Items: mapped,
 	}, nil
 }
 
-func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []model.File) []PublicFileItem {
+func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []model.File) ([]PublicFileItem, error) {
 	items := make([]PublicFileItem, 0, len(files))
 	for _, file := range files {
 		fd := ""
 		if s.download != nil {
 			fd = s.download.FolderDirectDownloadURLForFile(ctx, file)
+		}
+		allowed := true
+		if s.download != nil {
+			f := file
+			var err error
+			allowed, err = s.download.EffectiveDownloadAllowedForFile(ctx, &f)
+			if err != nil {
+				return nil, err
+			}
 		}
 		items = append(items, PublicFileItem{
 			ID:            file.ID,
@@ -323,10 +374,11 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			CoverURL:      strings.TrimSpace(file.CoverURL),
 			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
 			FolderDirectDownloadURL: fd,
-			UploadedAt:    file.CreatedAt,
-			DownloadCount: file.DownloadCount,
-			Size:          file.Size,
+			DownloadAllowed:         allowed,
+			UploadedAt:              file.CreatedAt,
+			DownloadCount:           file.DownloadCount,
+			Size:                    file.Size,
 		})
 	}
-	return items
+	return items, nil
 }

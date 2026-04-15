@@ -179,7 +179,7 @@ function statusBadgeClass(status: string) {
 </script>
 
 <template>
-  <div class="app-container py-8 sm:py-10">
+  <div class="app-container py-3 sm:py-10">
     <div class="mx-auto w-full max-w-4xl">
       <SurfaceCard>
         <PageHeader

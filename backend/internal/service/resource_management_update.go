@@ -37,7 +37,19 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}
+	playbackFallbackURL, err := normalizeOptionalHTTPURL(input.PlaybackFallbackURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
+	if playbackFallbackURL != "" && playbackURL == "" {
+		return ErrInvalidResourceEdit
+	}
 	coverURL, err := normalizeOptionalHTTPURL(input.CoverURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
+
+	applyDl, allowDl, err := parseDownloadPolicy(input.DownloadPolicy)
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}
@@ -76,13 +88,36 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, playbackURL, coverURL, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, playbackURL, playbackFallbackURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFileNotFound
 		}
 		return fmt.Errorf("update managed file: %w", err)
 	}
 	return nil
+}
+
+// parseDownloadPolicy 解析管理端 download_policy：nil 表示不改数据库字段；inherit 写入 NULL。
+func parseDownloadPolicy(raw *string) (apply bool, allowDownload *bool, err error) {
+	if raw == nil {
+		return false, nil, nil
+	}
+	s := strings.ToLower(strings.TrimSpace(*raw))
+	if s == "" {
+		return false, nil, nil
+	}
+	switch s {
+	case "inherit":
+		return true, nil, nil
+	case "allow":
+		v := true
+		return true, &v, nil
+	case "deny":
+		v := false
+		return true, &v, nil
+	default:
+		return false, nil, ErrInvalidResourceEdit
+	}
 }
 
 func normalizeOptionalHTTPURL(raw string) (string, error) {

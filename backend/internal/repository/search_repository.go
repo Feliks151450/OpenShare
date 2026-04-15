@@ -44,6 +44,7 @@ type SearchCandidate struct {
 	UpdatedAt     time.Time
 	FolderID      *string
 	ParentID      *string
+	AllowDownload *bool
 }
 
 // SearchCandidates recalls managed file and folder candidates using parameterized
@@ -75,6 +76,7 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			CreatedAt:     file.CreatedAt,
 			UpdatedAt:     file.UpdatedAt,
 			FolderID:      file.FolderID,
+			AllowDownload: file.AllowDownload,
 		})
 	}
 
@@ -89,6 +91,7 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			CreatedAt:     folder.CreatedAt,
 			UpdatedAt:     folder.UpdatedAt,
 			ParentID:      folder.ParentID,
+			AllowDownload: folder.AllowDownload,
 		})
 	}
 

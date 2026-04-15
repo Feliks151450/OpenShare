@@ -10,6 +10,17 @@ import (
 	"openshare/backend/internal/model"
 )
 
+func appendAllowDownloadUpdate(updates map[string]any, apply bool, allowPtr *bool) {
+	if !apply {
+		return
+	}
+	if allowPtr == nil {
+		updates["allow_download"] = gorm.Expr("NULL")
+	} else {
+		updates["allow_download"] = *allowPtr
+	}
+}
+
 func (r *ResourceManagementRepository) UpdateFileMetadata(
 	ctx context.Context,
 	fileID string,
@@ -17,21 +28,27 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	extension string,
 	description string,
 	playbackURL string,
+	playbackFallbackURL string,
 	coverURL string,
+	applyAllowDownload bool,
+	allowDownload *bool,
 	operatorID string,
 	operatorIP string,
 	logID string,
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(map[string]any{
-			"name":          name,
-			"extension":     extension,
-			"description":   description,
-			"playback_url":  playbackURL,
-			"cover_url":     coverURL,
-			"updated_at":    now,
-		})
+		updates := map[string]any{
+			"name":                  name,
+			"extension":             extension,
+			"description":           description,
+			"playback_url":          playbackURL,
+			"playback_fallback_url": playbackFallbackURL,
+			"cover_url":             coverURL,
+			"updated_at":            now,
+		}
+		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
+		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update file metadata: %w", result.Error)
 		}
@@ -49,18 +66,22 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	name string,
 	description string,
 	directLinkPrefix string,
+	applyAllowDownload bool,
+	allowDownload *bool,
 	operatorID string,
 	operatorIP string,
 	logID string,
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(map[string]any{
+		updates := map[string]any{
 			"name":               name,
 			"description":        description,
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
-		})
+		}
+		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
+		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update folder metadata: %w", result.Error)
 		}
@@ -78,6 +99,8 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	name string,
 	description string,
 	directLinkPrefix string,
+	applyAllowDownload bool,
+	allowDownload *bool,
 	folderSourcePaths map[string]string,
 	operatorID string,
 	operatorIP string,
@@ -91,6 +114,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
 		}
+		appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)
 		if sourcePath, ok := folderSourcePaths[folderID]; ok {
 			rootUpdates["source_path"] = sourcePath
 		}

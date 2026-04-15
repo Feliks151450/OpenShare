@@ -6,6 +6,9 @@ import Navbar from "../components/layout/Navbar.vue";
 import { httpClient } from "../lib/http/client";
 
 const route = useRoute();
+
+const showPublicNavbar = computed(() => route.name !== "public-file-detail");
+
 const viewKey = computed(() => {
   if (route.name === "public-file-detail") {
     return `file:${String(route.params.fileID ?? "")}`;
@@ -40,12 +43,13 @@ async function trackVisit() {
 <template>
   <div class="app-shell">
     <Navbar
+      v-if="showPublicNavbar"
       :items="links"
       :current-path="route.path"
       github-href="https://github.com/zzzzquan/OpenShare"
     />
 
-    <main class="pt-16">
+    <main :class="showPublicNavbar ? 'pt-16' : 'pt-0'">
       <RouterView :key="viewKey" />
     </main>
   </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ChevronLeft,
@@ -57,6 +57,8 @@ interface PublicFolderItem {
   id: string;
   name: string;
   description?: string;
+  /** 解析继承后的是否允许打包下载 */
+  download_allowed?: boolean;
   updated_at: string;
   file_count: number;
   download_count: number;
@@ -73,6 +75,7 @@ interface PublicFileItem {
   /** 由文件夹直链前缀生成；下载优先级低于 playback_url */
   folder_direct_download_url?: string;
   playback_url?: string;
+  download_allowed?: boolean;
   uploaded_at: string;
   download_count: number;
   size: number;
@@ -111,6 +114,7 @@ interface SearchResultResponse {
     cover_url?: string;
     playback_url?: string;
     folder_direct_download_url?: string;
+    download_allowed?: boolean;
     size?: number;
     download_count?: number;
     uploaded_at?: string;
@@ -131,6 +135,8 @@ interface FolderDetailResponse {
   updated_at: string;
   /** 子文件直链 = 此前缀 + 相对路径（最内层有前缀的祖先生效） */
   direct_link_prefix?: string;
+  download_allowed?: boolean;
+  download_policy?: "inherit" | "allow" | "deny";
   breadcrumbs: Array<{
     id: string;
     name: string;
@@ -197,6 +203,7 @@ const folderDescriptionEditorOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
 const folderDirectPrefixDraft = ref("");
+const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
 const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
@@ -236,6 +243,8 @@ type DirectoryRow = {
   sizeText: string;
   updatedAt: string;
   downloadURL: string;
+  /** 解析继承后是否允许下载（列表/搜索行内） */
+  downloadAllowed: boolean;
 };
 
 const rows = computed<DirectoryRow[]>(() => [
@@ -253,6 +262,7 @@ const rows = computed<DirectoryRow[]>(() => [
       sizeText: formatSize(folder.total_size ?? 0),
       updatedAt: formatDateTime(folder.updated_at),
       downloadURL: `/api/public/folders/${encodeURIComponent(folder.id)}/download`,
+      downloadAllowed: folder.download_allowed !== false,
     };
   }),
   ...(currentFolderID.value
@@ -270,6 +280,7 @@ const rows = computed<DirectoryRow[]>(() => [
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
           downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
+          downloadAllowed: file.download_allowed !== false,
         };
       })
     : []),
@@ -283,8 +294,77 @@ const sortedRows = computed(() => {
 });
 const selectedRows = computed(() => sortedRows.value.filter((row) => selectedResourceKeys.value.includes(selectionKey(row))));
 const hasSelectedRows = computed(() => selectedRows.value.length > 0);
+const selectedRowsDownloadAllowed = computed(() => selectedRows.value.every((row) => row.downloadAllowed));
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
 const currentFolderDescriptionHTML = computed(() => renderSimpleMarkdown(currentFolderDetail.value?.description ?? ""));
+
+/** 文件夹简介区域：默认限高，可展开全文（仅影响首页目录卡片，不作用于文件详情页）。 */
+const folderMarkdownExpanded = ref(false);
+const folderMarkdownClampRef = ref<HTMLElement | null>(null);
+/** 需要显示「展开 / 收起」时包含：折叠且内容被裁切，或已展开（显示收起） */
+const folderMarkdownFooterVisible = ref(false);
+
+function updateFolderMarkdownClampUI() {
+  const el = folderMarkdownClampRef.value;
+  if (!el) {
+    folderMarkdownFooterVisible.value = false;
+    return;
+  }
+  if (!currentFolderDescriptionHTML.value) {
+    folderMarkdownFooterVisible.value = false;
+    return;
+  }
+  if (folderMarkdownExpanded.value) {
+    folderMarkdownFooterVisible.value = true;
+    return;
+  }
+  folderMarkdownFooterVisible.value = el.scrollHeight > el.clientHeight + 2;
+}
+
+const folderMarkdownResizeObserver =
+  typeof ResizeObserver !== "undefined"
+    ? new ResizeObserver(() => {
+        updateFolderMarkdownClampUI();
+      })
+    : null;
+
+watch(
+  folderMarkdownClampRef,
+  (el, prev) => {
+    if (!folderMarkdownResizeObserver) {
+      return;
+    }
+    if (prev) {
+      folderMarkdownResizeObserver.unobserve(prev);
+    }
+    if (el) {
+      folderMarkdownResizeObserver.observe(el);
+    }
+  },
+  { flush: "post" },
+);
+
+watch(
+  () => [
+    currentFolderID.value,
+    currentFolderDetail.value?.description,
+    currentFolderDescriptionHTML.value,
+    folderMarkdownExpanded.value,
+  ],
+  async () => {
+    await nextTick();
+    requestAnimationFrame(() => {
+      updateFolderMarkdownClampUI();
+    });
+  },
+);
+
+watch(
+  () => currentFolderID.value,
+  () => {
+    folderMarkdownExpanded.value = false;
+  },
+);
 const folderEditorDirty = computed(() => {
   if (!currentFolderDetail.value) {
     return false;
@@ -293,7 +373,8 @@ const folderEditorDirty = computed(() => {
   return (
     folderNameDraft.value.trim() !== currentFolderDetail.value.name ||
     folderDescriptionDraft.value.trim() !== (currentFolderDetail.value.description ?? "") ||
-    folderDirectPrefixDraft.value.trim() !== (currentFolderDetail.value.direct_link_prefix ?? "").trim()
+    folderDirectPrefixDraft.value.trim() !== (currentFolderDetail.value.direct_link_prefix ?? "").trim() ||
+    folderDownloadPolicyDraft.value !== (currentFolderDetail.value.download_policy ?? "inherit")
   );
 });
 const currentFolderStats = computed(() => {
@@ -316,6 +397,10 @@ const canUseBackButton = computed(() => searchKeyword.value.length > 0 || canGoU
 function downloadResource(row: DirectoryRow) {
   actionMessage.value = "";
   actionError.value = "";
+  if (!row.downloadAllowed) {
+    showTransientWarning("该资源不允许下载。");
+    return;
+  }
   if (!allowDownloadRequest()) {
     showTransientWarning("下载请求过于频繁，请稍后再试。");
     return;
@@ -370,6 +455,10 @@ function toggleSelectAllVisibleRows() {
 
 async function downloadSelectedResources() {
   if (!hasSelectedRows.value || batchDownloadSubmitting.value) {
+    return;
+  }
+  if (!selectedRowsDownloadAllowed.value) {
+    showTransientWarning("所选项目中包含不允许下载的项。");
     return;
   }
 
@@ -457,6 +546,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  folderMarkdownResizeObserver?.disconnect();
   if (transientWarningTimer.value !== null) {
     window.clearTimeout(transientWarningTimer.value);
   }
@@ -629,12 +719,14 @@ async function loadDirectory() {
       folderNameDraft.value = detail.name;
       folderDescriptionDraft.value = detail.description ?? "";
       folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
+      folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
       breadcrumbs.value = detail.breadcrumbs ?? [];
     } else {
       currentFolderDetail.value = null;
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
       folderDirectPrefixDraft.value = "";
+      folderDownloadPolicyDraft.value = "inherit";
       breadcrumbs.value = [];
     }
   } catch (err: unknown) {
@@ -645,6 +737,7 @@ async function loadDirectory() {
     folderNameDraft.value = "";
     folderDescriptionDraft.value = "";
     folderDirectPrefixDraft.value = "";
+    folderDownloadPolicyDraft.value = "inherit";
     if (err instanceof HttpError && err.status === 404) {
       error.value = "目录不存在或未公开。";
     } else {
@@ -697,6 +790,10 @@ function downloadCurrentFolder() {
   if (!currentFolderDetail.value) {
     return;
   }
+  if (currentFolderDetail.value.download_allowed === false) {
+    showTransientWarning("该文件夹不允许下载。");
+    return;
+  }
   downloadResource({
     id: currentFolderDetail.value.id,
     kind: "folder",
@@ -709,6 +806,7 @@ function downloadCurrentFolder() {
     sizeText: formatSize(currentFolderDetail.value.total_size ?? 0),
     updatedAt: formatDateTime(currentFolderDetail.value.updated_at),
     downloadURL: `/api/public/folders/${encodeURIComponent(currentFolderDetail.value.id)}/download`,
+    downloadAllowed: true,
   });
 }
 
@@ -802,6 +900,7 @@ async function runSearch(keyword: string) {
       downloadURL: item.entity_type === "file"
         ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
         : `/api/public/folders/${encodeURIComponent(item.id)}/download`,
+      downloadAllowed: item.download_allowed !== false,
     }));
   } catch (err: unknown) {
     searchRows.value = [];
@@ -1064,6 +1163,7 @@ function openFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
+  folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderDescriptionError.value = "";
   folderDescriptionEditorOpen.value = true;
   syncBodyScrollLock();
@@ -1076,6 +1176,7 @@ function closeFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
+  folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   syncBodyScrollLock();
 }
 
@@ -1093,6 +1194,7 @@ async function saveFolderDescription() {
         name: folderNameDraft.value.trim(),
         description: folderDescriptionDraft.value.trim(),
         direct_link_prefix: folderDirectPrefixDraft.value.trim(),
+        download_policy: folderDownloadPolicyDraft.value,
       },
     });
     currentFolderDetail.value = {
@@ -1100,6 +1202,7 @@ async function saveFolderDescription() {
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
+      download_policy: folderDownloadPolicyDraft.value,
     };
     breadcrumbs.value = breadcrumbs.value.map((item, index) => (
       index === breadcrumbs.value.length - 1
@@ -1108,6 +1211,7 @@ async function saveFolderDescription() {
     ));
     folderDescriptionEditorOpen.value = false;
     syncBodyScrollLock();
+    await loadDirectory();
   } catch (err: unknown) {
     folderDescriptionError.value = readApiError(err, "更新文件夹简介失败。");
   } finally {
@@ -1263,7 +1367,7 @@ async function syncSessionReceiptCode() {
     </div>
   </Teleport>
 
-  <main class="app-container py-6 sm:py-8 lg:py-10">
+  <main class="app-container py-2 sm:py-8 lg:py-10">
     <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
       <section class="order-1 min-w-0">
         <div class="panel overflow-hidden">
@@ -1333,6 +1437,7 @@ async function syncSessionReceiptCode() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <button
+                    v-if="currentFolderDetail.download_allowed !== false"
                     type="button"
                     class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     aria-label="下载文件夹"
@@ -1343,12 +1448,31 @@ async function syncSessionReceiptCode() {
                 </div>
               </div>
 
-              <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
-                <div
-                  v-if="currentFolderDescriptionHTML"
-                  class="markdown-content"
-                  v-html="currentFolderDescriptionHTML"
-                />
+              <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5 dark:border-slate-800 dark:bg-slate-900/40">
+                <div v-if="currentFolderDescriptionHTML" class="space-y-3">
+                  <div class="relative">
+                    <div
+                      ref="folderMarkdownClampRef"
+                      class="markdown-content"
+                      :class="!folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                      v-html="currentFolderDescriptionHTML"
+                    />
+                    <div
+                      v-if="!folderMarkdownExpanded && folderMarkdownFooterVisible"
+                      class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent dark:from-slate-900"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div v-if="folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
+                    <button
+                      type="button"
+                      class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:ring-white/[0.06] dark:hover:border-slate-500 dark:hover:bg-slate-800/90"
+                      @click="folderMarkdownExpanded = !folderMarkdownExpanded"
+                    >
+                      {{ folderMarkdownExpanded ? "收起简介" : "展开全文" }}
+                    </button>
+                  </div>
+                </div>
                 <p v-else class="text-sm text-slate-400">该文件夹暂无简介orz</p>
               </div>
             </section>
@@ -1573,6 +1697,7 @@ async function syncSessionReceiptCode() {
                       <Flag class="h-4 w-4" />
                     </button>
                     <button
+                      v-if="row.downloadAllowed"
                       type="button"
                       class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
                       @click.stop="downloadResource(row)"
@@ -1649,6 +1774,7 @@ async function syncSessionReceiptCode() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <button
+                    v-if="row.downloadAllowed"
                     type="button"
                     class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
                     @click.stop="downloadResource(row)"
@@ -1778,7 +1904,8 @@ async function syncSessionReceiptCode() {
             <button
               type="button"
               class="inline-flex h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              :disabled="batchDownloadSubmitting"
+              :disabled="batchDownloadSubmitting || !selectedRowsDownloadAllowed"
+              :title="!selectedRowsDownloadAllowed ? '所选项目中包含不允许下载的项' : undefined"
               @click="downloadSelectedResources"
             >
               {{ batchDownloadSubmitting ? "打包中…" : "批量下载" }}
@@ -2197,6 +2324,18 @@ async function syncSessionReceiptCode() {
               />
               <p class="text-xs leading-5 text-slate-500">
                 单个文件若配置了播放/下载直链，仍优先使用该链接。留空则回退本站下载。需以 http(s) 开头。
+              </p>
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">是否允许下载</span>
+              <select v-model="folderDownloadPolicyDraft" class="field">
+                <option value="inherit">继承上层文件夹设置</option>
+                <option value="allow">允许下载</option>
+                <option value="deny">禁止下载</option>
+              </select>
+              <p class="text-xs leading-5 text-slate-500">
+                「继承」时随上层文件夹策略；未设置时默认允许下载。禁止后整包下载与列表下载入口会隐藏，且接口返回 403。
               </p>
             </label>
 
