@@ -19,6 +19,7 @@ type Config struct {
 	Upload    UploadConfig    `json:"upload"`
 	Session   SessionConfig   `json:"session"`
 	RateLimit RateLimitConfig `json:"rate_limit"`
+	CORS      CORSConfig      `json:"cors"`
 }
 
 type ServerConfig struct {
@@ -101,6 +102,11 @@ type RateLimitRule struct {
 	Enabled bool `json:"enabled"`
 	Limit   int  `json:"limit"`
 	Window  int  `json:"window_seconds"`
+}
+
+// CORSConfig 控制允许哪些浏览器 Origin 跨域访问 API（静态页部署在其它域名时必须配置）。
+type CORSConfig struct {
+	AllowedOrigins []string `json:"allowed_origins"`
 }
 
 func Default() Config {
@@ -222,6 +228,16 @@ func applyEnv(cfg *Config) error {
 	overrideInt("OPENSHARE_RATE_LIMIT_SEARCH_LIMIT", &cfg.RateLimit.Search.Limit, &errs)
 	overrideInt("OPENSHARE_RATE_LIMIT_SEARCH_WINDOW_SECONDS", &cfg.RateLimit.Search.Window, &errs)
 
+	if value, ok := os.LookupEnv("OPENSHARE_CORS_ALLOWED_ORIGINS"); ok {
+		cfg.CORS.AllowedOrigins = nil
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				cfg.CORS.AllowedOrigins = append(cfg.CORS.AllowedOrigins, part)
+			}
+		}
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -311,6 +327,25 @@ func (c *Config) normalize() {
 	c.Storage.Root = strings.TrimSpace(c.Storage.Root)
 	c.Storage.Staging = strings.TrimSpace(c.Storage.Staging)
 	c.Storage.Trash = strings.TrimSpace(c.Storage.Trash)
+
+	c.CORS.AllowedOrigins = normalizeCORSOrigins(c.CORS.AllowedOrigins)
+}
+
+func normalizeCORSOrigins(origins []string) []string {
+	out := make([]string, 0, len(origins))
+	seen := make(map[string]struct{}, len(origins))
+	for _, o := range origins {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
+		}
+		if _, ok := seen[o]; ok {
+			continue
+		}
+		seen[o] = struct{}{}
+		out = append(out, o)
+	}
+	return out
 }
 
 func validateRateLimit(prefix string, rule RateLimitRule) error {

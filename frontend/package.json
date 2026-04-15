@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "build:readonly": "tailwindcss -c tailwind.config.ts -i ./standalone-readonly/readonly.input.css -o ./standalone-readonly/readonly.css --minify",
     "preview": "vite preview"
   },
   "dependencies": {

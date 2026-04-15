@@ -49,5 +49,10 @@
       "limit": 60,
       "window_seconds": 60
     }
+  },
+  "cors": {
+    "allowed_origins": [
+      "https://qiniu.feliks.top"
+    ]
   }
 }

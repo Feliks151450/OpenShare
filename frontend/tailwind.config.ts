@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  content: ["./index.html", "./src/**/*.{vue,ts}"],
+  content: ["./index.html", "./src/**/*.{vue,ts}", "./standalone-readonly/**/*.{html,js}"],
   darkMode: "class",
   theme: {
     extend: {

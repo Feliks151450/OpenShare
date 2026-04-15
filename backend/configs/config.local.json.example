@@ -1,4 +1,9 @@
 {
+  "cors": {
+    "allowed_origins": [
+      "https://qiniu.feliks.top"
+    ]
+  },
   "server": {
     "port": 8080
   },

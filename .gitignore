@@ -4,6 +4,7 @@
 .vscode/
 .gocache/
 .gomodcache/
+.out/
 Thumbs.db
 *.swp
 *.swo

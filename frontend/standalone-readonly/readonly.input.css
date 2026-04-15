@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color: #0f172a;
+    background: #fafafa;
+    color-scheme: only light;
+    font-family:
+      "SF Pro Display",
+      "SF Pro Text",
+      "Segoe UI",
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Microsoft YaHei",
+      sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    background: #fafafa;
+    color-scheme: only light;
+    scrollbar-gutter: stable;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #fafafa;
+    color: #0f172a;
+    color-scheme: only light;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: rgba(37, 99, 235, 0.14);
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen bg-[#fafafa] text-slate-900;
+  }
+
+  .app-container {
+    @apply mx-auto w-full max-w-[1360px] px-0 sm:px-4 md:px-6 lg:px-8;
+  }
+
+  .panel {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-950/[0.03] transition-[transform,box-shadow,border-color] duration-200;
+  }
+
+  .panel-muted {
+    @apply rounded-xl border border-slate-200 bg-[#fafafa];
+  }
+
+  .field {
+    @apply h-11 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition-[border-color,box-shadow,transform] duration-200 placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100;
+  }
+
+  .field-area {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition-[border-color,box-shadow,transform] duration-200 placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-[transform,background-color,box-shadow,opacity] duration-200 hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md hover:shadow-slate-950/[0.12] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-[transform,background-color,border-color,box-shadow,opacity] duration-200 hover:-translate-y-0.5 hover:bg-[#fafafa] hover:shadow-sm hover:shadow-slate-950/[0.08] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
+  }
+
+  .data-table {
+    @apply w-full border-separate border-spacing-0;
+  }
+
+  .data-table thead th {
+    @apply border-b border-slate-200 px-4 py-3 text-xs font-medium uppercase tracking-[0.08em] text-slate-500;
+  }
+
+  .data-table tbody td {
+    @apply border-b border-slate-100 px-4 py-4 align-top text-sm text-slate-600;
+  }
+
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .markdown-content {
+    @apply space-y-4 text-sm leading-7 text-slate-700;
+  }
+
+  .markdown-content h1 {
+    @apply text-3xl font-semibold tracking-tight text-slate-950;
+  }
+
+  .markdown-content h2 {
+    @apply text-2xl font-semibold tracking-tight text-slate-950;
+  }
+
+  .markdown-content h3 {
+    @apply text-xl font-semibold tracking-tight text-slate-950;
+  }
+
+  .markdown-content p,
+  .markdown-content ul {
+    @apply my-0;
+  }
+
+  .markdown-content ul {
+    @apply list-disc space-y-2 pl-5;
+  }
+
+  .markdown-content a {
+    @apply font-medium text-blue-600 underline decoration-blue-200 underline-offset-4 hover:text-blue-700;
+  }
+
+  .markdown-content .markdown-img {
+    @apply my-2 max-h-[min(70vh,560px)] w-auto max-w-full rounded-xl border border-slate-200 object-contain;
+  }
+
+  .markdown-content code {
+    @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.92em] text-slate-700;
+  }
+}
+
+@layer utilities {
+  .modal-card {
+    @apply will-change-transform;
+  }
+}
+
+.modal-shell-enter-active,
+.modal-shell-leave-active {
+  transition: opacity 220ms ease;
+}
+
+.modal-shell-enter-active .modal-card,
+.modal-shell-leave-active .modal-card {
+  transition: opacity 240ms ease, transform 280ms ease;
+}
+
+.modal-shell-enter-from,
+.modal-shell-leave-to {
+  opacity: 0;
+}
+
+.modal-shell-enter-from .modal-card,
+.modal-shell-leave-to .modal-card {
+  opacity: 0;
+  transform: translateY(18px) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

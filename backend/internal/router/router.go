@@ -15,6 +15,7 @@ import (
 func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger(), gin.Recovery())
+	engine.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 	engine.Use(middleware.SessionLoader(sessionManager))
 
 	handlers := buildRouteHandlers(db, cfg, sessionManager)
