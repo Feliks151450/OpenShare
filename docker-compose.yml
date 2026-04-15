@@ -1,0 +1,19 @@
+services:
+  openshare:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: openshare:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # 生产环境请显式设置固定密钥，避免容器重建后会话全部失效
+      # OPENSHARE_SESSION_SECRET: "your-long-random-string"
+      OPENSHARE_SERVER_HOST: "0.0.0.0"
+      OPENSHARE_SERVER_PORT: "8080"
+    volumes:
+      - openshare-data:/data/openshare
+    restart: unless-stopped
+
+volumes:
+  openshare-data:

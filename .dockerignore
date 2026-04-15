@@ -1,9 +1,10 @@
 .git
-.gitignore
+.gocache
 .localdata
-release
+.cursor
 frontend/node_modules
-frontend/dist
-backend/server
-backend/bin
-backend/tmp
+backend/web/dist
+release
+**/*.log
+.env
+*.md
