@@ -24,6 +24,9 @@ function getApiBase() {
   } catch {
     /* ignore */
   }
+  if (window.apiBaseFallback) {
+    return window.apiBaseFallback;
+  }
   return "/api";
 }
 
@@ -1655,10 +1658,11 @@ async function bootstrapRoute() {
 }
 
 window.addEventListener("hashchange", () => {
+  consumeApiFromHashQuery();
   void bootstrapRoute();
 });
 
-/** 首次打开可通过 ?api=https://host/api 写入基址（写入后从地址栏移除，避免泄露） */
+/** 页面级查询串：`page.html?api=https://host/api`（写入后从地址栏移除） */
 function consumeApiFromQueryOnce() {
   try {
     const u = new URL(window.location.href);
@@ -1673,9 +1677,53 @@ function consumeApiFromQueryOnce() {
   }
 }
 
+/**
+ * Hash 内查询串：`#/files/xxx?t=1&api=https://host/api`
+ * 写入 localStorage 后从 hash 中去掉 api，避免泄露与重复应用。
+ * 兼容误写为 `?t=1&https://host/api`（整段 URL 被当成参数名）的情况。
+ */
+function consumeApiFromHashQuery() {
+  try {
+    const raw = (location.hash || "").replace(/^#/, "");
+    if (!raw.includes("?")) {
+      return;
+    }
+    const qi = raw.indexOf("?");
+    const pathPart = raw.slice(0, qi);
+    const search = raw.slice(qi + 1);
+    const sp = new URLSearchParams(search);
+    let api = sp.get("api");
+    if (api != null) {
+      api = api.trim();
+    }
+    if (api) {
+      sp.delete("api");
+    } else {
+      for (const [k, v] of sp.entries()) {
+        if (v === "" && /^https?:\/\//i.test(k)) {
+          api = k.trim();
+          sp.delete(k);
+          break;
+        }
+      }
+    }
+    if (!api) {
+      return;
+    }
+    setApiBase(api);
+    const newSearch = sp.toString();
+    const newHash = newSearch ? `#${pathPart}?${newSearch}` : `#${pathPart}`;
+    const u = new URL(window.location.href);
+    history.replaceState({}, "", `${u.pathname}${u.search}${newHash}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadPrefs();
   consumeApiFromQueryOnce();
+  consumeApiFromHashQuery();
   void bootstrapRoute();
 });
 
