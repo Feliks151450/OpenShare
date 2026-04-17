@@ -87,7 +87,7 @@ function readApiError(err, fallback = "请求失败。") {
   return typeof e === "string" && e.trim() !== "" ? e : fallback;
 }
 
-/* --- Markdown（与 src/lib/markdown.ts 对齐的子集）--- */
+/* --- Markdown（marked + DOMPurify，与 src/lib/markdown.ts 对齐）--- */
 function extractCoverImageUrlFromMarkdown(source) {
   const normalized = source.replace(/\r\n/g, "\n");
   const re = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -139,67 +139,81 @@ function fileCoverImageHrefFromFields(coverUrlField, description) {
   return coverImageHrefFromDescription(description);
 }
 
-function renderInlineMarkdown(value) {
-  const escaped = escapeHtml(value);
-  return escaped
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-      const rawUrl = String(url).trim();
-      if (!isSafeImageUrlForSrc(rawUrl)) return `![${alt}](${url})`;
-      const src = escapeHtml(resolveMarkdownImageUrlToHref(rawUrl));
-      return `<img src="${src}" alt="${escapeHtml(String(alt))}" class="markdown-img" loading="lazy" decoding="async" />`;
-    })
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+function encodeHrefLikeMarked(href) {
+  const h = String(href ?? "").trim();
+  if (!h) return null;
+  try {
+    return encodeURI(decodeURI(h));
+  } catch {
+    try {
+      return encodeURI(h);
+    } catch {
+      return null;
+    }
+  }
+}
+
+let markdownRendererConfigured = false;
+function ensureMarkdownRenderer() {
+  if (markdownRendererConfigured) return;
+  markdownRendererConfigured = true;
+  if (typeof marked === "undefined") return;
+  marked.use({
+    gfm: true,
+    breaks: false,
+    renderer: {
+      image(token) {
+        let altPlain = token.text ?? "";
+        if (token.tokens?.length) {
+          altPlain = this.parser.parseInline(token.tokens, this.parser.textRenderer);
+        }
+        const rawHref = String(token.href ?? "").trim();
+        if (!isSafeImageUrlForSrc(rawHref)) {
+          return escapeHtml(token.raw ?? altPlain);
+        }
+        const resolved = resolveMarkdownImageUrlToHref(rawHref);
+        const src = escapeHtml(resolved);
+        const alt = escapeHtml(altPlain);
+        const title =
+          token.title != null && String(token.title).trim() !== ""
+            ? ` title="${escapeHtml(String(token.title))}"`
+            : "";
+        return `<img src="${src}" alt="${alt}" class="markdown-img" loading="lazy" decoding="async"${title} />`;
+      },
+      link(token) {
+        const inner = this.parser.parseInline(token.tokens);
+        const encoded = encodeHrefLikeMarked(String(token.href ?? ""));
+        if (encoded === null) return inner;
+        const title =
+          token.title != null && String(token.title).trim() !== ""
+            ? ` title="${escapeHtml(String(token.title))}"`
+            : "";
+        const hrefAttr = escapeHtml(encoded);
+        if (/^https?:\/\//i.test(encoded)) {
+          return `<a href="${hrefAttr}" target="_blank" rel="noopener noreferrer"${title}>${inner}</a>`;
+        }
+        return `<a href="${hrefAttr}"${title}>${inner}</a>`;
+      },
+    },
+  });
 }
 
 function renderSimpleMarkdown(source) {
-  const normalized = source.replace(/\r\n/g, "\n").trim();
-  if (!normalized) return "";
-  const lines = normalized.split("\n");
-  const html = [];
-  let paragraph = [];
-  let listItems = [];
-
-  function flushParagraph() {
-    if (paragraph.length === 0) return;
-    html.push(`<p>${paragraph.map((line) => renderInlineMarkdown(line)).join("<br />")}</p>`);
-    paragraph = [];
+  const normalized = source.replace(/\r\n/g, "\n");
+  if (!normalized.trim()) return "";
+  ensureMarkdownRenderer();
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return escapeHtml(normalized);
   }
-  function flushList() {
-    if (listItems.length === 0) return;
-    html.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
-    listItems = [];
+  try {
+    const html = marked.parse(normalized, { async: false });
+    return DOMPurify.sanitize(html, {
+      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start"],
+      ADD_TAGS: ["input"],
+    });
+  } catch {
+    return escapeHtml(normalized);
   }
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
-      continue;
-    }
-    if (trimmed.startsWith("- ")) {
-      flushParagraph();
-      listItems.push(trimmed.slice(2).trim());
-      continue;
-    }
-    flushList();
-    paragraph.push(trimmed);
-  }
-  flushParagraph();
-  flushList();
-  return html.join("");
 }
 
 function fileEffectiveDownloadHref(fileId, playbackUrl, folderDirectDownloadUrl) {
@@ -823,7 +837,7 @@ function renderNavbar() {
       <div class="min-w-0 flex items-center justify-start">
         <a href="#/" class="inline-flex min-w-0 items-center gap-2 sm:gap-2.5" data-nav="home">
           <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">OS</span>
-          <span class="truncate text-[15px] font-extrabold tracking-tight text-slate-900 sm:text-[16px]" style="font-family:'Roboto Slab',serif">OpenShare</span>
+          <span class="truncate font-serif text-[15px] font-extrabold tracking-tight text-slate-900 sm:text-[16px]">OpenShare</span>
         </a>
       </div>
       <nav class="flex items-center justify-center gap-1 overflow-x-auto">

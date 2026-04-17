@@ -1,3 +1,6 @@
+import DOMPurify from "dompurify";
+import { marked, type Renderer, type Tokens } from "marked";
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -82,81 +85,75 @@ export function fileCoverImageHrefFromFields(coverUrlField: string | undefined, 
   return coverImageHrefFromDescription(description);
 }
 
-function renderInlineMarkdown(value: string) {
-  const escaped = escapeHtml(value);
-  return escaped
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-      const rawUrl = String(url).trim();
-      if (!isSafeImageUrlForSrc(rawUrl)) {
-        return `![${alt}](${url})`;
-      }
-      const src = escapeHtml(resolveMarkdownImageUrlToHref(rawUrl));
-      return `<img src="${src}" alt="${escapeHtml(String(alt))}" class="markdown-img" loading="lazy" decoding="async" />`;
-    })
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+function encodeHrefLikeMarked(href: string): string | null {
+  const h = href.trim();
+  if (!h) {
+    return null;
+  }
+  try {
+    return encodeURI(decodeURI(h));
+  } catch {
+    try {
+      return encodeURI(h);
+    } catch {
+      return null;
+    }
+  }
 }
 
-export function renderSimpleMarkdown(source: string) {
-  const normalized = source.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
+marked.use({
+  gfm: true,
+  breaks: false,
+  renderer: {
+    image(this: Renderer, token: Tokens.Image): string {
+      let altPlain = token.text ?? "";
+      if (token.tokens?.length) {
+        altPlain = this.parser.parseInline(token.tokens, this.parser.textRenderer);
+      }
+      const rawHref = String(token.href ?? "").trim();
+      if (!isSafeImageUrlForSrc(rawHref)) {
+        return escapeHtml(token.raw ?? altPlain);
+      }
+      const resolved = resolveMarkdownImageUrlToHref(rawHref);
+      const src = escapeHtml(resolved);
+      const alt = escapeHtml(altPlain);
+      const title =
+        token.title != null && String(token.title).trim() !== ""
+          ? ` title="${escapeHtml(String(token.title))}"`
+          : "";
+      return `<img src="${src}" alt="${alt}" class="markdown-img" loading="lazy" decoding="async"${title} />`;
+    },
+    link(this: Renderer, token: Tokens.Link): string {
+      const inner = this.parser.parseInline(token.tokens);
+      const encoded = encodeHrefLikeMarked(String(token.href ?? ""));
+      if (encoded === null) {
+        return inner;
+      }
+      const title =
+        token.title != null && String(token.title).trim() !== ""
+          ? ` title="${escapeHtml(String(token.title))}"`
+          : "";
+      const hrefAttr = escapeHtml(encoded);
+      if (/^https?:\/\//i.test(encoded)) {
+        return `<a href="${hrefAttr}" target="_blank" rel="noopener noreferrer"${title}>${inner}</a>`;
+      }
+      return `<a href="${hrefAttr}"${title}>${inner}</a>`;
+    },
+  },
+});
+
+export function renderSimpleMarkdown(source: string): string {
+  const normalized = source.replace(/\r\n/g, "\n");
+  if (!normalized.trim()) {
     return "";
   }
-
-  const lines = normalized.split("\n");
-  const html: string[] = [];
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
-
-  function flushParagraph() {
-    if (paragraph.length === 0) {
-      return;
-    }
-    html.push(`<p>${paragraph.map((line) => renderInlineMarkdown(line)).join("<br />")}</p>`);
-    paragraph = [];
+  try {
+    const html = marked.parse(normalized, { async: false }) as string;
+    return DOMPurify.sanitize(html, {
+      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start"],
+      ADD_TAGS: ["input"],
+    });
+  } catch {
+    return escapeHtml(normalized);
   }
-
-  function flushList() {
-    if (listItems.length === 0) {
-      return;
-    }
-    html.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
-    listItems = [];
-  }
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
-      continue;
-    }
-
-    if (trimmed.startsWith("- ")) {
-      flushParagraph();
-      listItems.push(trimmed.slice(2).trim());
-      continue;
-    }
-
-    flushList();
-    paragraph.push(trimmed);
-  }
-
-  flushParagraph();
-  flushList();
-
-  return html.join("");
 }
