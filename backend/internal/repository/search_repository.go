@@ -35,6 +35,7 @@ type SearchCandidate struct {
 	ID            string
 	Name          string
 	Description   string
+	Remark        string
 	CoverURL      string
 	PlaybackURL   string
 	Extension     string
@@ -68,6 +69,7 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			ID:            file.ID,
 			Name:          file.Name,
 			Description:   file.Description,
+			Remark:        file.Remark,
 			CoverURL:      strings.TrimSpace(file.CoverURL),
 			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
 			Extension:     file.Extension,
@@ -87,6 +89,7 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			ID:            folder.ID,
 			Name:          folder.Name,
 			Description:   folder.Description,
+			Remark:        folder.Remark,
 			DownloadCount: folder.DownloadCount,
 			CreatedAt:     folder.CreatedAt,
 			UpdatedAt:     folder.UpdatedAt,
@@ -106,7 +109,7 @@ func (r *SearchRepository) searchFilesForCandidates(ctx context.Context, query S
 		db = db.Where("folder_id IN ?", query.ScopeFolderIDs)
 	}
 
-	db = applySearchTermFilters(db, []string{"name", "description"}, query.Terms)
+	db = applySearchTermFilters(db, []string{"name", "description", "remark"}, query.Terms)
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -136,7 +139,7 @@ func (r *SearchRepository) searchFoldersForCandidates(ctx context.Context, query
 		db = db.Where("id IN ?", query.ScopeFolderIDs)
 	}
 
-	db = applySearchTermFilters(db, []string{"name", "description"}, query.Terms)
+	db = applySearchTermFilters(db, []string{"name", "description", "remark"}, query.Terms)
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -207,14 +210,14 @@ func applyCandidateOrder(db *gorm.DB, primaryFields []string, descriptionField, 
 	}
 
 	descriptionPattern := containsLikePattern(fullQuery)
-	args = append(args, descriptionPattern)
+	args = append(args, descriptionPattern, descriptionPattern)
 
 	sql := fmt.Sprintf(`
 CASE
 	WHEN %s THEN 0
 	WHEN %s THEN 1
 	WHEN %s THEN 2
-	WHEN LOWER(%s) LIKE ? ESCAPE '\' THEN 3
+	WHEN LOWER(%s) LIKE ? ESCAPE '\' OR LOWER(remark) LIKE ? ESCAPE '\' THEN 3
 	ELSE 4
 END
 `, strings.Join(equalConditions, " OR "), strings.Join(prefixConditions, " OR "), strings.Join(containsConditions, " OR "), descriptionField)

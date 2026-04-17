@@ -27,6 +27,7 @@ type ManagedFileItem struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
+	Remark        string    `json:"remark"`
 	Extension     string    `json:"extension"`
 	Size          int64     `json:"size"`
 	DownloadCount int64     `json:"download_count"`
@@ -42,6 +43,7 @@ type ListManagedFilesInput struct {
 type UpdateManagedFileInput struct {
 	Name                string
 	Description         string
+	Remark              string
 	PlaybackURL         string
 	PlaybackFallbackURL string
 	CoverURL            string
@@ -54,6 +56,7 @@ type UpdateManagedFileInput struct {
 type UpdateManagedFolderDescriptionInput struct {
 	Name             string
 	Description      string
+	Remark           string
 	DirectLinkPrefix string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string
@@ -80,6 +83,7 @@ func (s *ResourceManagementService) ListFiles(ctx context.Context, input ListMan
 			ID:            row.ID,
 			Name:          row.Name,
 			Description:   row.Description,
+			Remark:        row.Remark,
 			Extension:     row.Extension,
 			Size:          row.Size,
 			DownloadCount: row.DownloadCount,

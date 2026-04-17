@@ -75,6 +75,8 @@ type Folder struct {
 	SourcePath    *string   `gorm:"column:source_path;type:text;uniqueIndex:ux_folders_source_path"`
 	Name          string    `gorm:"column:name;type:text;not null"`
 	Description   string    `gorm:"column:description;type:text;not null;default:''"`
+	// Remark 单行展示用文案（卡片等）；与 Markdown 简介 description 分离
+	Remark string `gorm:"column:remark;type:text;not null;default:''"`
 	// DirectLinkPrefix 为 http(s) 根地址时，其下文件直链为该前缀 + 相对路径（相对最内层已配置前缀的祖先文件夹）
 	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载
@@ -97,6 +99,7 @@ type File struct {
 	FolderID      *EntityID `gorm:"column:folder_id;type:text;index:idx_files_folder_id"`
 	Name          string    `gorm:"column:name;type:text;not null;default:''"`
 	Description   string    `gorm:"column:description;type:text;not null;default:''"`
+	Remark        string    `gorm:"column:remark;type:text;not null;default:''"`
 	Extension     string    `gorm:"column:extension;type:text;not null;default:''"`
 	MimeType      string    `gorm:"column:mime_type;type:text;not null;default:''"`
 	PlaybackURL          string `gorm:"column:playback_url;type:text;not null;default:''"`

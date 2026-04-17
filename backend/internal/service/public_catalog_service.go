@@ -49,6 +49,7 @@ type PublicFileItem struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
+	Remark        string    `json:"remark"`
 	Extension     string    `json:"extension"`
 	CoverURL      string    `json:"cover_url"`
 	PlaybackURL   string    `json:"playback_url"`
@@ -63,6 +64,7 @@ type PublicFolderItem struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
+	Remark          string    `json:"remark"`
 	DownloadAllowed bool      `json:"download_allowed"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	FileCount       int64     `json:"file_count"`
@@ -79,6 +81,7 @@ type PublicFolderDetail struct {
 	ID            string                       `json:"id"`
 	Name          string                       `json:"name"`
 	Description   string                       `json:"description"`
+	Remark        string                       `json:"remark"`
 	ParentID      *string                      `json:"parent_id"`
 	Breadcrumbs   []PublicFolderBreadcrumbItem `json:"breadcrumbs"`
 	FileCount     int64                        `json:"file_count"`
@@ -198,6 +201,7 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 			ID:              row.ID,
 			Name:            row.Name,
 			Description:     row.Description,
+			Remark:          row.Remark,
 			DownloadAllowed: allowed,
 			UpdatedAt:       row.UpdatedAt,
 			FileCount:       row.FileCount,
@@ -257,6 +261,7 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		ID:            current.ID,
 		Name:          current.Name,
 		Description:   current.Description,
+		Remark:        current.Remark,
 		ParentID:      current.ParentID,
 		Breadcrumbs:   breadcrumbs,
 		FileCount:     current.FileCount,
@@ -370,6 +375,7 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			ID:            file.ID,
 			Name:          file.Name,
 			Description:   file.Description,
+			Remark:        file.Remark,
 			Extension:     file.Extension,
 			CoverURL:      strings.TrimSpace(file.CoverURL),
 			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),

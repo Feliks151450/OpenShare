@@ -435,6 +435,7 @@ function buildRows() {
       sortTimeMs: parseSortTimeMs(folder.updated_at),
       downloadURL: apiUrl(`/public/folders/${encodeURIComponent(folder.id)}/download`),
       downloadAllowed: folder.download_allowed !== false,
+      remark: (folder.remark ?? "").trim(),
     };
   });
   const fileRows = folderId
@@ -446,6 +447,7 @@ function buildRows() {
           name: file.name,
           extension: file.extension || extractExtension(file.name),
           description: desc,
+          remark: (file.remark ?? "").trim(),
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
           downloadCount: file.download_count ?? 0,
           fileCount: 0,
@@ -625,6 +627,7 @@ async function runSearch(keyword) {
         name: item.name,
         extension: item.entity_type === "file" ? item.extension || extractExtension(item.name) : "",
         description: "",
+        remark: (item.remark ?? "").trim(),
         coverUrl:
           item.entity_type === "file" ? fileCoverImageHrefFromFields(item.cover_url, "") : null,
         downloadCount: item.download_count ?? 0,
@@ -1019,6 +1022,11 @@ function renderHome() {
         </div>
         <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
           ${
+            (fd.remark ?? "").trim()
+              ? `<p class="mb-3 text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(fd.remark).trim())}</p>`
+              : ""
+          }
+          ${
             descHtml
               ? `<div class="space-y-3">
             <div class="relative">
@@ -1156,9 +1164,16 @@ function closeToolbarMenusIfOutside(e) {
   render();
 }
 
+function cardRemarkLine(text) {
+  return String(text ?? "")
+    .replace(/\r/g, " ")
+    .replace(/\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function renderCard(row) {
-  const prev = stripCoverImageMarkdown(row.description || "");
-  const descPreview = prev.trim();
+  const remarkPreview = cardRemarkLine(row.remark);
   const cover = row.coverUrl;
   const dlBtn =
     row.downloadAllowed && row.kind === "file"
@@ -1175,7 +1190,7 @@ function renderCard(row) {
       </div>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
         <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">${escapeHtml(row.name)}</h3>
-        ${descPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(descPreview)}</p>` : ""}
+        ${remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
         <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
           ${row.kind === "file" ? `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${escapeHtml(row.sizeText)}</span>` : `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${row.fileCount} 个文件</span><span>${escapeHtml(row.sizeText)}</span>`}
           <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">${Ico.clock}<span class="truncate">${escapeHtml(row.updatedAt)}</span></span>
@@ -1191,7 +1206,7 @@ function renderCard(row) {
       <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-slate-500">${icon}</div>
       <div class="min-w-0 flex-1 pr-2 pt-0.5">
         <h3 class="truncate text-base font-semibold leading-6 text-slate-900">${escapeHtml(row.name)}</h3>
-        ${descPreview ? `<p class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500">${escapeHtml(descPreview)}</p>` : ""}
+        ${remarkPreview ? `<p class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
       </div>
     </div>
     <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
@@ -1318,6 +1333,11 @@ function renderFileDetail() {
                 : ""
             }
             <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
+              ${
+                (d.remark ?? "").trim()
+                  ? `<p class="mb-3 text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(d.remark).trim())}</p>`
+                  : ""
+              }
               ${descHtml ? `<div class="markdown-content">${descHtml}</div>` : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`}
             </div>
           </div>

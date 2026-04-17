@@ -18,6 +18,8 @@ interface FileDetailResponse {
   folder_id: string;
   path: string;
   description: string;
+  /** 单行备注；卡片副标题用，与 Markdown 简介分离 */
+  remark?: string;
   mime_type: string;
   /** 非空时使用该 http(s) 地址作为播放器与复制下载直链，而非本站下载接口 */
   playback_url?: string;
@@ -46,6 +48,7 @@ const saveError = ref("");
 const saving = ref(false);
 const editFileName = ref("");
 const editDescription = ref("");
+const editRemark = ref("");
 const editPlaybackUrl = ref("");
 const editPlaybackFallbackUrl = ref("");
 const editCoverUrl = ref("");
@@ -305,11 +308,16 @@ const secondaryDetailRows = computed(() => {
     return [];
   }
 
-  return [
+  const rows: Array<{ label: string; value: string }> = [
     { label: "下载量", value: String(detail.value.download_count) },
     { label: "文件大小", value: formatSize(detail.value.size) },
     { label: "更新时间", value: formatDate(detail.value.uploaded_at) },
   ];
+  const rm = (detail.value.remark ?? "").trim();
+  if (rm) {
+    rows.splice(1, 0, { label: "备注", value: rm });
+  }
+  return rows;
 });
 const editorDirty = computed(() => {
   if (!detail.value) {
@@ -319,6 +327,7 @@ const editorDirty = computed(() => {
   return (
     editFileName.value.trim() !== detail.value.name ||
     editDescription.value.trim() !== (detail.value.description ?? "") ||
+    editRemark.value.trim() !== (detail.value.remark ?? "").trim() ||
     editPlaybackUrl.value.trim() !== (detail.value.playback_url ?? "").trim() ||
     editPlaybackFallbackUrl.value.trim() !== (detail.value.playback_fallback_url ?? "").trim() ||
     editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim() ||
@@ -387,6 +396,7 @@ async function loadDetail() {
     if (detail.value) {
       editFileName.value = detail.value.name;
       editDescription.value = detail.value.description;
+      editRemark.value = (detail.value.remark ?? "").trim();
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
@@ -416,6 +426,7 @@ async function loadAdminPermission() {
 function openDescriptionEditor() {
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
+  editRemark.value = (detail.value?.remark ?? "").trim();
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
@@ -431,6 +442,7 @@ function closeDescriptionEditor() {
   saveError.value = "";
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
+  editRemark.value = (detail.value?.remark ?? "").trim();
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
@@ -484,6 +496,7 @@ async function saveDescription() {
       body: {
         name: normalizedName,
         description: editDescription.value.trim(),
+        remark: editRemark.value.trim(),
         playback_url: editPlaybackUrl.value.trim(),
         playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
         cover_url: editCoverUrl.value.trim(),
@@ -885,6 +898,12 @@ function performDownloadFile() {
             </div>
 
             <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
+              <p
+                v-if="(detail.remark ?? '').trim()"
+                class="mb-3 text-sm leading-relaxed text-slate-700"
+              >
+                <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
+              </p>
               <div
                 v-if="detailCoverImageHref && !isVideo"
                 class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
@@ -1076,11 +1095,26 @@ function performDownloadFile() {
                 />
               </label>
 
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">备注（单行）</span>
+                <input
+                  v-model="editRemark"
+                  type="text"
+                  maxlength="500"
+                  class="field"
+                  placeholder="展示在首页卡片副标题，不支持换行与 Markdown"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">简介（Markdown）</span>
+              </label>
               <textarea
                 v-model="editDescription"
                 rows="10"
                 class="field-area"
-                placeholder="输入文件简介，简介支持简单 Markdown。"
+                placeholder="仅在文件详情页展示；支持简单 Markdown。"
               />
 
               <label class="space-y-2">

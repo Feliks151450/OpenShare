@@ -16,6 +16,7 @@ type ManagedFileRow struct {
 	ID            string
 	Name          string
 	Description   string
+	Remark        string
 	Extension     string
 	Size          int64
 	DownloadCount int64
@@ -48,6 +49,7 @@ func (r *ResourceManagementRepository) ListFiles(ctx context.Context, query stri
 			files.id,
 			files.name,
 			files.description,
+			files.remark,
 			files.extension,
 			files.size,
 			files.download_count,
@@ -58,7 +60,7 @@ func (r *ResourceManagementRepository) ListFiles(ctx context.Context, query stri
 		Joins("LEFT JOIN folders ON folders.id = files.folder_id")
 	if trimmed := strings.TrimSpace(query); trimmed != "" {
 		like := "%" + trimmed + "%"
-		dbq = dbq.Where("files.name LIKE ? OR files.description LIKE ?", like, like)
+		dbq = dbq.Where("files.name LIKE ? OR files.description LIKE ? OR files.remark LIKE ?", like, like, like)
 	}
 
 	var rows []ManagedFileRow

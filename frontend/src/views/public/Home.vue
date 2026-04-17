@@ -32,7 +32,6 @@ import {
   coverImageHrefFromDescription,
   fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
-  stripCoverImageMarkdown,
 } from "../../lib/markdown";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
@@ -57,6 +56,8 @@ interface PublicFolderItem {
   id: string;
   name: string;
   description?: string;
+  /** 单行备注，用于首页卡片展示 */
+  remark?: string;
   /** 解析继承后的是否允许打包下载 */
   download_allowed?: boolean;
   updated_at: string;
@@ -69,6 +70,7 @@ interface PublicFileItem {
   id: string;
   name: string;
   description: string;
+  remark?: string;
   extension: string;
   /** 非空时优先作为卡片封面，高于简介中的 ![cover](...) */
   cover_url?: string;
@@ -110,6 +112,7 @@ interface SearchResultResponse {
     entity_type: "file" | "folder";
     id: string;
     name: string;
+    remark?: string;
     extension?: string;
     cover_url?: string;
     playback_url?: string;
@@ -129,6 +132,7 @@ interface FolderDetailResponse {
   id: string;
   name: string;
   description: string;
+  remark?: string;
   parent_id: string | null;
   file_count: number;
   download_count: number;
@@ -208,6 +212,7 @@ const canManageResourceDescriptions = ref(false);
 const folderDescriptionEditorOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
+const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
 const folderDescriptionSaving = ref(false);
@@ -243,6 +248,8 @@ type DirectoryRow = {
   name: string;
   extension: string;
   description: string;
+  /** 单行备注（卡片副标题）；简介仍为 `description` */
+  remark: string;
   /** 优先 `cover_url`，否则由简介中 `![cover](url)` 解析，用于卡片/表格缩略图 */
   coverUrl: string | null;
   downloadCount: number;
@@ -266,6 +273,7 @@ const rows = computed<DirectoryRow[]>(() => [
       name: folder.name,
       extension: "",
       description: desc,
+      remark: (folder.remark ?? "").trim(),
       coverUrl: coverImageHrefFromDescription(desc),
       downloadCount: folder.download_count ?? 0,
       fileCount: folder.file_count ?? 0,
@@ -286,6 +294,7 @@ const rows = computed<DirectoryRow[]>(() => [
           name: file.name,
           extension: file.extension || extractExtension(file.name),
           description: desc,
+          remark: (file.remark ?? "").trim(),
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
           downloadCount: file.download_count ?? 0,
           fileCount: 0,
@@ -401,6 +410,7 @@ const folderEditorDirty = computed(() => {
   return (
     folderNameDraft.value.trim() !== currentFolderDetail.value.name ||
     folderDescriptionDraft.value.trim() !== (currentFolderDetail.value.description ?? "") ||
+    folderRemarkDraft.value.trim() !== (currentFolderDetail.value.remark ?? "").trim() ||
     folderDirectPrefixDraft.value.trim() !== (currentFolderDetail.value.direct_link_prefix ?? "").trim() ||
     folderDownloadPolicyDraft.value !== (currentFolderDetail.value.download_policy ?? "inherit")
   );
@@ -842,6 +852,7 @@ async function loadDirectory() {
       currentFolderDetail.value = detail;
       folderNameDraft.value = detail.name;
       folderDescriptionDraft.value = detail.description ?? "";
+      folderRemarkDraft.value = (detail.remark ?? "").trim();
       folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
       folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
       breadcrumbs.value = detail.breadcrumbs ?? [];
@@ -849,6 +860,7 @@ async function loadDirectory() {
       currentFolderDetail.value = null;
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
+      folderRemarkDraft.value = "";
       folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       breadcrumbs.value = [];
@@ -860,6 +872,7 @@ async function loadDirectory() {
     currentFolderDetail.value = null;
     folderNameDraft.value = "";
     folderDescriptionDraft.value = "";
+    folderRemarkDraft.value = "";
     folderDirectPrefixDraft.value = "";
     folderDownloadPolicyDraft.value = "inherit";
     if (err instanceof HttpError && err.status === 404) {
@@ -924,6 +937,7 @@ function downloadCurrentFolder() {
     name: currentFolderDetail.value.name,
     extension: "",
     description: (currentFolderDetail.value.description ?? "").trim(),
+    remark: (currentFolderDetail.value.remark ?? "").trim(),
     coverUrl: coverImageHrefFromDescription((currentFolderDetail.value.description ?? "").trim()),
     downloadCount: currentFolderDetail.value.download_count ?? 0,
     fileCount: currentFolderDetail.value.file_count ?? 0,
@@ -1026,6 +1040,7 @@ async function runSearch(keyword: string) {
         name: item.name,
         extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
         description: "",
+        remark: (item.remark ?? "").trim(),
         coverUrl:
           item.entity_type === "file"
             ? fileCoverImageHrefFromFields(item.cover_url, "")
@@ -1304,6 +1319,7 @@ function closeFeedbackSuccessModal() {
 function openFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
+  folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderDescriptionError.value = "";
@@ -1317,6 +1333,7 @@ function closeFolderDescriptionEditor() {
   folderDescriptionError.value = "";
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
+  folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   syncBodyScrollLock();
@@ -1335,6 +1352,7 @@ async function saveFolderDescription() {
       body: {
         name: folderNameDraft.value.trim(),
         description: folderDescriptionDraft.value.trim(),
+        remark: folderRemarkDraft.value.trim(),
         direct_link_prefix: folderDirectPrefixDraft.value.trim(),
         download_policy: folderDownloadPolicyDraft.value,
       },
@@ -1343,6 +1361,7 @@ async function saveFolderDescription() {
       ...currentFolderDetail.value,
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
+      remark: folderRemarkDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
     };
@@ -1398,8 +1417,16 @@ async function submitFeedback() {
   }
 }
 
-function descriptionCardPreview(description: string): string {
-  return stripCoverImageMarkdown(description).trim();
+/** 卡片副标题：仅展示单行备注（不含 Markdown） */
+function cardRemarkPreview(remark: string): string {
+  return String(remark ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 }
 
 function formatSize(size: number) {
@@ -1826,10 +1853,10 @@ async function syncSessionReceiptCode() {
                 <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
                   <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{{ row.name }}</h3>
                   <p
-                    v-if="descriptionCardPreview(row.description)"
+                    v-if="cardRemarkPreview(row.remark)"
                     class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500"
                   >
-                    {{ descriptionCardPreview(row.description) }}
+                    {{ cardRemarkPreview(row.remark) }}
                   </p>
                   <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                     <template v-if="row.kind === 'file'">
@@ -1899,10 +1926,10 @@ async function syncSessionReceiptCode() {
                   <div class="min-w-0 flex-1 pr-10 pt-0.5">
                     <h3 class="truncate text-base font-semibold leading-6 text-slate-900">{{ row.name }}</h3>
                     <p
-                      v-if="descriptionCardPreview(row.description)"
+                      v-if="cardRemarkPreview(row.remark)"
                       class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500"
                     >
-                      {{ descriptionCardPreview(row.description) }}
+                      {{ cardRemarkPreview(row.remark) }}
                     </p>
                   </div>
                 </div>
@@ -2507,11 +2534,26 @@ async function syncSessionReceiptCode() {
               />
             </label>
 
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">备注（单行）</span>
+              <input
+                v-model="folderRemarkDraft"
+                type="text"
+                maxlength="500"
+                class="field"
+                placeholder="展示在首页卡片副标题，不支持换行与 Markdown"
+                autocomplete="off"
+              />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">简介（Markdown）</span>
+            </label>
             <textarea
               v-model="folderDescriptionDraft"
               rows="10"
               class="field-area"
-              placeholder="输入文件夹简介，简介支持简单 Markdown。"
+              placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。"
             />
 
             <label class="space-y-2">

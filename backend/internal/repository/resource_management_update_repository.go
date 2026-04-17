@@ -27,6 +27,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	name string,
 	extension string,
 	description string,
+	remark string,
 	playbackURL string,
 	playbackFallbackURL string,
 	coverURL string,
@@ -42,6 +43,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"name":                  name,
 			"extension":             extension,
 			"description":           description,
+			"remark":                remark,
 			"playback_url":          playbackURL,
 			"playback_fallback_url": playbackFallbackURL,
 			"cover_url":             coverURL,
@@ -65,6 +67,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	folderID string,
 	name string,
 	description string,
+	remark string,
 	directLinkPrefix string,
 	applyAllowDownload bool,
 	allowDownload *bool,
@@ -77,6 +80,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 		updates := map[string]any{
 			"name":               name,
 			"description":        description,
+			"remark":             remark,
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
 		}
@@ -98,6 +102,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	folderID string,
 	name string,
 	description string,
+	remark string,
 	directLinkPrefix string,
 	applyAllowDownload bool,
 	allowDownload *bool,
@@ -111,6 +116,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 		rootUpdates := map[string]any{
 			"name":               name,
 			"description":        description,
+			"remark":             remark,
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
 		}

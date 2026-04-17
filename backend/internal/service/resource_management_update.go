@@ -33,6 +33,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 		return ErrInvalidResourceEdit
 	}
 	description := normalizeTrimmedString(input.Description)
+	remark := normalizeManagedRemark(input.Remark)
 	playbackURL, err := normalizeOptionalHTTPURL(input.PlaybackURL)
 	if err != nil {
 		return ErrInvalidResourceEdit
@@ -88,7 +89,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, playbackURL, playbackFallbackURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFileNotFound
 		}
@@ -136,4 +137,25 @@ func normalizeOptionalHTTPURL(raw string) (string, error) {
 		return "", fmt.Errorf("url must include host")
 	}
 	return u.String(), nil
+}
+
+const maxManagedRemarkRunes = 500
+
+// normalizeManagedRemark 将备注规范为单行纯文本（换行等折叠为空格），最长 maxManagedRemarkRunes 个 Unicode 字符。
+func normalizeManagedRemark(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = collapseSearchWhitespace(s)
+	fields := strings.Fields(s)
+	s = strings.Join(fields, " ")
+	r := []rune(s)
+	if len(r) > maxManagedRemarkRunes {
+		return string(r[:maxManagedRemarkRunes])
+	}
+	return s
 }

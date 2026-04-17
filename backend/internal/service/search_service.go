@@ -77,6 +77,7 @@ type SearchResultItem struct {
 	EntityType    string     `json:"entity_type"` // "file" | "folder"
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
+	Remark        string     `json:"remark,omitempty"`
 	Extension     string     `json:"extension,omitempty"`
 	CoverURL      string     `json:"cover_url,omitempty"`
 	PlaybackURL   string     `json:"playback_url,omitempty"`
@@ -323,10 +324,14 @@ func rankSearchCandidates(candidates []repository.SearchCandidate, query normali
 func scoreSearchCandidate(candidate repository.SearchCandidate, query normalizedSearchQuery, scopeFolderID string) int {
 	primaryFields := []string{normalizeSearchField(candidate.Name)}
 	description := normalizeSearchField(candidate.Description)
+	remark := normalizeSearchField(candidate.Remark)
 
 	score := bestFieldMatchScore(query.Full, primaryFields, 1200, 920, 720)
 	if description != "" && strings.Contains(description, query.Full) {
 		score += 120
+	}
+	if remark != "" && strings.Contains(remark, query.Full) {
+		score += 100
 	}
 
 	if len(query.Terms) > 1 {
@@ -334,6 +339,9 @@ func scoreSearchCandidate(candidate repository.SearchCandidate, query normalized
 			score += bestFieldMatchScore(term, primaryFields, 200, 150, 90)
 			if description != "" && strings.Contains(description, term) {
 				score += 25
+			}
+			if remark != "" && strings.Contains(remark, term) {
+				score += 20
 			}
 		}
 	}
@@ -447,6 +455,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			EntityType:    "file",
 			ID:            candidate.ID,
 			Name:          candidate.Name,
+			Remark:        strings.TrimSpace(candidate.Remark),
 			Extension:     candidate.Extension,
 			CoverURL:      strings.TrimSpace(candidate.CoverURL),
 			PlaybackURL:   strings.TrimSpace(candidate.PlaybackURL),
@@ -477,6 +486,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			EntityType:      "folder",
 			ID:              candidate.ID,
 			Name:            candidate.Name,
+			Remark:          strings.TrimSpace(candidate.Remark),
 			DownloadAllowed: dl,
 			UpdatedAt:       &updatedAt,
 		}, nil

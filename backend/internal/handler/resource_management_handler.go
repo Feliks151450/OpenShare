@@ -18,6 +18,7 @@ type ResourceManagementHandler struct {
 type updateManagedFileRequest struct {
 	Name                string  `json:"name"`
 	Description         string  `json:"description"`
+	Remark              string  `json:"remark"`
 	PlaybackURL         string  `json:"playback_url"`
 	PlaybackFallbackURL string  `json:"playback_fallback_url"`
 	CoverURL            string  `json:"cover_url"`
@@ -27,6 +28,7 @@ type updateManagedFileRequest struct {
 type updateManagedFolderDescriptionRequest struct {
 	Name             string  `json:"name"`
 	Description      string  `json:"description"`
+	Remark           string  `json:"remark"`
 	DirectLinkPrefix string  `json:"direct_link_prefix"`
 	DownloadPolicy   *string `json:"download_policy"`
 }
@@ -67,6 +69,7 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 	err := h.service.UpdateFile(ctx.Request.Context(), ctx.Param("fileID"), service.UpdateManagedFileInput{
 		Name:                req.Name,
 		Description:         req.Description,
+		Remark:              req.Remark,
 		PlaybackURL:         req.PlaybackURL,
 		PlaybackFallbackURL: req.PlaybackFallbackURL,
 		CoverURL:            req.CoverURL,
@@ -106,6 +109,7 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 	err := h.service.UpdateFolderDescription(ctx.Request.Context(), ctx.Param("folderID"), service.UpdateManagedFolderDescriptionInput{
 		Name:             req.Name,
 		Description:      req.Description,
+		Remark:           req.Remark,
 		DirectLinkPrefix: req.DirectLinkPrefix,
 		DownloadPolicy:   req.DownloadPolicy,
 		OperatorID:       identity.AdminID,

@@ -47,6 +47,7 @@ type PublicFileDetail struct {
 	FolderID      string    `json:"folder_id"`
 	Path          string    `json:"path"`
 	Description   string    `json:"description"`
+	Remark        string    `json:"remark"`
 	MimeType      string    `json:"mime_type"`
 	PlaybackURL   string    `json:"playback_url"`
 	PlaybackFallbackURL string `json:"playback_fallback_url"`
@@ -231,6 +232,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		FolderID:      strings.TrimSpace(optionalString(file.FolderID)),
 		Path:          fullPath,
 		Description:   file.Description,
+		Remark:        file.Remark,
 		MimeType:      file.MimeType,
 		PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
 		PlaybackFallbackURL: strings.TrimSpace(file.PlaybackFallbackURL),
