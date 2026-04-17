@@ -284,6 +284,12 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function parseSortTimeMs(raw) {
+  if (raw == null || raw === "" || (typeof raw === "string" && !raw.trim())) return 0;
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function extractExtension(name) {
   const index = name.lastIndexOf(".");
   if (index <= 0 || index === name.length - 1) return "";
@@ -375,7 +381,7 @@ function loadPrefs() {
   const vm = localStorage.getItem(LS_VIEW);
   if (vm === "cards" || vm === "table") state.viewMode = vm;
   const sm = localStorage.getItem(LS_SORT);
-  if (sm === "name" || sm === "download" || sm === "format") state.sortMode = sm;
+  if (sm === "name" || sm === "download" || sm === "format" || sm === "modified") state.sortMode = sm;
   const sd = localStorage.getItem(LS_SORT_DIR);
   if (sd === "asc" || sd === "desc") state.sortDirection = sd;
 }
@@ -419,6 +425,7 @@ function buildRows() {
       fileCount: folder.file_count ?? 0,
       sizeText: formatSize(folder.total_size ?? 0),
       updatedAt: formatDateTime(folder.updated_at),
+      sortTimeMs: parseSortTimeMs(folder.updated_at),
       downloadURL: apiUrl(`/public/folders/${encodeURIComponent(folder.id)}/download`),
       downloadAllowed: folder.download_allowed !== false,
     };
@@ -437,6 +444,7 @@ function buildRows() {
           fileCount: 0,
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
+          sortTimeMs: parseSortTimeMs(file.uploaded_at),
           downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
           downloadAllowed: file.download_allowed !== false,
         };
@@ -467,6 +475,9 @@ function compareRows(left, right, mode, direction) {
     const lr = formatSortRank(left);
     const rr = formatSortRank(right);
     if (lr !== rr) result = lr - rr;
+    else result = left.name.localeCompare(right.name, "zh-CN");
+  } else if (mode === "modified") {
+    if (left.sortTimeMs !== right.sortTimeMs) result = left.sortTimeMs - right.sortTimeMs;
     else result = left.name.localeCompare(right.name, "zh-CN");
   } else {
     result = left.name.localeCompare(right.name, "zh-CN");
@@ -597,24 +608,29 @@ async function runSearch(keyword) {
     });
     if (state.route.folder) query.set("folder_id", state.route.folder);
     const response = await apiRequest(`/public/search?${query.toString()}`);
-    state.searchRows = (response.items ?? []).map((item) => ({
-      id: item.id,
-      kind: item.entity_type,
-      name: item.name,
-      extension: item.entity_type === "file" ? item.extension || extractExtension(item.name) : "",
-      description: "",
-      coverUrl:
-        item.entity_type === "file" ? fileCoverImageHrefFromFields(item.cover_url, "") : null,
-      downloadCount: item.download_count ?? 0,
-      fileCount: 0,
-      sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
-      updatedAt: item.uploaded_at ? formatDateTime(item.uploaded_at) : "-",
-      downloadURL:
-        item.entity_type === "file"
-          ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
-          : apiUrl(`/public/folders/${encodeURIComponent(item.id)}/download`),
-      downloadAllowed: item.download_allowed !== false,
-    }));
+    state.searchRows = (response.items ?? []).map((item) => {
+      const modRaw =
+        item.entity_type === "folder" ? item.updated_at : (item.updated_at || item.uploaded_at);
+      return {
+        id: item.id,
+        kind: item.entity_type,
+        name: item.name,
+        extension: item.entity_type === "file" ? item.extension || extractExtension(item.name) : "",
+        description: "",
+        coverUrl:
+          item.entity_type === "file" ? fileCoverImageHrefFromFields(item.cover_url, "") : null,
+        downloadCount: item.download_count ?? 0,
+        fileCount: 0,
+        sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
+        updatedAt: modRaw ? formatDateTime(modRaw) : "-",
+        sortTimeMs: parseSortTimeMs(modRaw),
+        downloadURL:
+          item.entity_type === "file"
+            ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
+            : apiUrl(`/public/folders/${encodeURIComponent(item.id)}/download`),
+        downloadAllowed: item.download_allowed !== false,
+      };
+    });
   } catch (err) {
     state.searchRows = [];
     state.searchError = readApiError(err, "搜索失败。");
@@ -979,6 +995,7 @@ function renderHome() {
             <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="download">下载量排序</button>
             <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="name">名称排序</button>
             <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="format">格式排序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="modified">修改日期排序</button>
             <div class="mx-2 my-1 border-t border-slate-100"></div>
             <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort-dir="desc">降序</button>
             <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort-dir="asc">升序</button>
@@ -1046,7 +1063,13 @@ function renderHome() {
 
 function sortDirLabel() {
   const sm =
-    state.sortMode === "download" ? "下载量排序" : state.sortMode === "format" ? "格式排序" : "名称排序";
+    state.sortMode === "download"
+      ? "下载量排序"
+      : state.sortMode === "format"
+        ? "格式排序"
+        : state.sortMode === "modified"
+          ? "修改日期排序"
+          : "名称排序";
   const sd = state.sortDirection === "asc" ? "升序" : "降序";
   return `${sm} · ${sd}`;
 }
@@ -1529,7 +1552,7 @@ function appClickHandler(e) {
       const sort = t.closest("[data-set-sort]");
       if (sort) {
         const mode = sort.getAttribute("data-set-sort");
-        if (mode === "name" || mode === "download" || mode === "format") {
+        if (mode === "name" || mode === "download" || mode === "format" || mode === "modified") {
           state.sortMode = mode;
           savePref(LS_SORT, mode);
         }

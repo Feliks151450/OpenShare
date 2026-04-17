@@ -84,7 +84,8 @@ type SearchResultItem struct {
 	DownloadAllowed bool     `json:"download_allowed"`
 	Size          int64      `json:"size,omitempty"`
 	DownloadCount int64      `json:"download_count,omitempty"`
-	UploadedAt    *time.Time `json:"uploaded_at,omitempty"`
+	UploadedAt *time.Time `json:"uploaded_at,omitempty"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +442,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 				return SearchResultItem{}, err
 			}
 		}
+		updatedAt := candidate.UpdatedAt
 		return SearchResultItem{
 			EntityType:    "file",
 			ID:            candidate.ID,
@@ -453,6 +455,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			Size:                    candidate.Size,
 			DownloadCount:           candidate.DownloadCount,
 			UploadedAt:              &uploadedAt,
+			UpdatedAt:               &updatedAt,
 		}, nil
 	default:
 		dl := true
@@ -469,11 +472,13 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 				return SearchResultItem{}, err
 			}
 		}
+		updatedAt := candidate.UpdatedAt
 		return SearchResultItem{
 			EntityType:      "folder",
 			ID:              candidate.ID,
 			Name:            candidate.Name,
 			DownloadAllowed: dl,
+			UpdatedAt:       &updatedAt,
 		}, nil
 	}
 }

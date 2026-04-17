@@ -118,6 +118,7 @@ interface SearchResultResponse {
     size?: number;
     download_count?: number;
     uploaded_at?: string;
+    updated_at?: string;
   }>;
   page: number;
   page_size: number;
@@ -153,7 +154,7 @@ const hotDownloadItems = ref<HotDownloadItem[]>([]);
 const latestItems = ref<LatestItem[]>([]);
 const sidebarDetailModal = ref<SidebarDetailModalState | null>(null);
 const viewMode = ref<"cards" | "table">("cards");
-const sortMode = ref<"name" | "download" | "format">("name");
+const sortMode = ref<"name" | "download" | "format" | "modified">("name");
 const sortDirection = ref<"asc" | "desc">("desc");
 const sortMenuOpen = ref(false);
 const viewMenuOpen = ref(false);
@@ -243,6 +244,7 @@ type DirectoryRow = {
   fileCount: number;
   sizeText: string;
   updatedAt: string;
+  sortTimeMs: number;
   downloadURL: string;
   /** 解析继承后是否允许下载（列表/搜索行内） */
   downloadAllowed: boolean;
@@ -262,6 +264,7 @@ const rows = computed<DirectoryRow[]>(() => [
       fileCount: folder.file_count ?? 0,
       sizeText: formatSize(folder.total_size ?? 0),
       updatedAt: formatDateTime(folder.updated_at),
+      sortTimeMs: parseSortTimeMs(folder.updated_at),
       downloadURL: `/api/public/folders/${encodeURIComponent(folder.id)}/download`,
       downloadAllowed: folder.download_allowed !== false,
     };
@@ -280,6 +283,7 @@ const rows = computed<DirectoryRow[]>(() => [
           fileCount: 0,
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
+          sortTimeMs: parseSortTimeMs(file.uploaded_at),
           downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
           downloadAllowed: file.download_allowed !== false,
         };
@@ -535,7 +539,7 @@ onMounted(async () => {
     viewMode.value = storedViewMode;
   }
   const storedSortMode = window.localStorage.getItem("public-home-sort-mode");
-  if (storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format") {
+  if (storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format" || storedSortMode === "modified") {
     sortMode.value = storedSortMode;
   }
   const storedSortDirection = window.localStorage.getItem("public-home-sort-direction");
@@ -806,6 +810,7 @@ function downloadCurrentFolder() {
     fileCount: currentFolderDetail.value.file_count ?? 0,
     sizeText: formatSize(currentFolderDetail.value.total_size ?? 0),
     updatedAt: formatDateTime(currentFolderDetail.value.updated_at),
+    sortTimeMs: parseSortTimeMs(currentFolderDetail.value.updated_at),
     downloadURL: `/api/public/folders/${encodeURIComponent(currentFolderDetail.value.id)}/download`,
     downloadAllowed: true,
   });
@@ -890,25 +895,32 @@ async function runSearch(keyword: string) {
       query.set("folder_id", currentFolderID.value);
     }
     const response = await httpClient.get<SearchResultResponse>(`/public/search?${query.toString()}`);
-    searchRows.value = response.items.map((item) => ({
-      id: item.id,
-      kind: item.entity_type,
-      name: item.name,
-      extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
-      description: "",
-      coverUrl:
-        item.entity_type === "file"
-          ? fileCoverImageHrefFromFields(item.cover_url, "")
-          : null,
-      downloadCount: item.download_count ?? 0,
-      fileCount: 0,
-      sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
-      updatedAt: item.uploaded_at ? formatDateTime(item.uploaded_at) : "-",
-      downloadURL: item.entity_type === "file"
-        ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
-        : `/api/public/folders/${encodeURIComponent(item.id)}/download`,
-      downloadAllowed: item.download_allowed !== false,
-    }));
+    searchRows.value = response.items.map((item) => {
+      const modRaw =
+        item.entity_type === "folder"
+          ? item.updated_at
+          : (item.updated_at || item.uploaded_at);
+      return {
+        id: item.id,
+        kind: item.entity_type,
+        name: item.name,
+        extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
+        description: "",
+        coverUrl:
+          item.entity_type === "file"
+            ? fileCoverImageHrefFromFields(item.cover_url, "")
+            : null,
+        downloadCount: item.download_count ?? 0,
+        fileCount: 0,
+        sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
+        updatedAt: modRaw ? formatDateTime(modRaw) : "-",
+        sortTimeMs: parseSortTimeMs(modRaw),
+        downloadURL: item.entity_type === "file"
+          ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
+          : `/api/public/folders/${encodeURIComponent(item.id)}/download`,
+        downloadAllowed: item.download_allowed !== false,
+      };
+    });
   } catch (err: unknown) {
     searchRows.value = [];
     searchError.value = readApiError(err, "搜索失败。");
@@ -1115,7 +1127,7 @@ watch(sortedRows, (rows) => {
   selectedResourceKeys.value = selectedResourceKeys.value.filter((key) => allowedKeys.has(key));
 }, { immediate: true });
 
-function setSortMode(mode: "name" | "download" | "format") {
+function setSortMode(mode: "name" | "download" | "format" | "modified") {
   sortMode.value = mode;
   window.localStorage.setItem("public-home-sort-mode", mode);
 }
@@ -1126,12 +1138,14 @@ function setSortDirection(direction: "asc" | "desc") {
   window.localStorage.setItem("public-home-sort-direction", direction);
 }
 
-function sortModeLabel(mode: "name" | "download" | "format") {
+function sortModeLabel(mode: "name" | "download" | "format" | "modified") {
   switch (mode) {
     case "download":
       return "下载量排序";
     case "format":
       return "格式排序";
+    case "modified":
+      return "修改日期排序";
     default:
       return "名称排序";
   }
@@ -1286,6 +1300,14 @@ function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
+function parseSortTimeMs(raw: string | undefined) {
+  if (raw == null || typeof raw !== "string" || !raw.trim()) {
+    return 0;
+  }
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function extractExtension(name: string) {
   const index = name.lastIndexOf(".");
   if (index <= 0 || index === name.length - 1) {
@@ -1309,7 +1331,7 @@ function fileIconComponent(extension: string) {
 function compareRows(
   left: DirectoryRow,
   right: DirectoryRow,
-  mode: "name" | "download" | "format",
+  mode: "name" | "download" | "format" | "modified",
   direction: "asc" | "desc",
 ) {
   let result = 0;
@@ -1325,6 +1347,12 @@ function compareRows(
     const rightRank = formatSortRank(right);
     if (leftRank !== rightRank) {
       result = leftRank - rightRank;
+    } else {
+      result = left.name.localeCompare(right.name, "zh-CN");
+    }
+  } else if (mode === "modified") {
+    if (left.sortTimeMs !== right.sortTimeMs) {
+      result = left.sortTimeMs - right.sortTimeMs;
     } else {
       result = left.name.localeCompare(right.name, "zh-CN");
     }
@@ -1572,6 +1600,14 @@ async function syncSessionReceiptCode() {
                     @click="setSortMode('format')"
                   >
                     格式排序
+                  </button>
+                  <button
+                    type="button"
+                    class="block w-full rounded-xl px-3 py-2 text-left text-sm transition"
+                    :class="sortMode === 'modified' ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
+                    @click="setSortMode('modified')"
+                  >
+                    修改日期排序
                   </button>
                   <div class="mx-2 my-1 border-t border-slate-100"></div>
                   <button
