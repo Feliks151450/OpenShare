@@ -2016,31 +2016,49 @@ async function syncSessionReceiptCode() {
                   <td>
                     <div
                       v-if="row.kind === 'folder'"
-                      class="flex min-w-0 items-center gap-3 text-left"
+                      class="flex min-w-0 items-start gap-3 text-left"
                     >
                       <img
                         v-if="row.coverUrl"
                         :src="row.coverUrl"
                         alt=""
-                        class="h-5 w-5 shrink-0 rounded object-cover"
+                        class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover"
                         loading="lazy"
                       />
-                      <Folder v-else class="h-5 w-5 shrink-0 text-blue-500" />
-                      <span class="truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
+                      <Folder v-else class="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
+                      <div class="min-w-0 flex-1">
+                        <span class="block truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
+                        <p
+                          v-if="cardRemarkPreview(row.remark)"
+                          class="mt-0.5 truncate text-xs leading-snug text-slate-500 dark:text-slate-400"
+                          :title="cardRemarkPreview(row.remark)"
+                        >
+                          {{ cardRemarkPreview(row.remark) }}
+                        </p>
+                      </div>
                     </div>
                     <div
                       v-else
-                      class="flex min-w-0 items-center gap-3 text-left"
+                      class="flex min-w-0 items-start gap-3 text-left"
                     >
                       <img
                         v-if="row.coverUrl"
                         :src="row.coverUrl"
                         alt=""
-                        class="h-5 w-5 shrink-0 rounded object-cover"
+                        class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover"
                         loading="lazy"
                       />
-                      <component v-else :is="fileIconComponent(row.extension)" class="h-5 w-5 shrink-0 text-slate-500" />
-                      <span class="truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
+                      <component v-else :is="fileIconComponent(row.extension)" class="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+                      <div class="min-w-0 flex-1">
+                        <span class="block truncate text-slate-900 dark:text-slate-100" :title="row.name">{{ row.name }}</span>
+                        <p
+                          v-if="cardRemarkPreview(row.remark)"
+                          class="mt-0.5 truncate text-xs leading-snug text-slate-500 dark:text-slate-400"
+                          :title="cardRemarkPreview(row.remark)"
+                        >
+                          {{ cardRemarkPreview(row.remark) }}
+                        </p>
+                      </div>
                     </div>
                   </td>
                   <td class="w-[120px] whitespace-nowrap text-right tabular-nums">{{ row.sizeText }}</td>

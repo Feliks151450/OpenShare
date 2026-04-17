@@ -1229,19 +1229,23 @@ function renderCard(row) {
 }
 
 function renderTableRow(row) {
+  const remarkPreview = cardRemarkLine(row.remark);
   const cover = row.coverUrl;
   const icon =
     row.kind === "folder"
       ? cover
-        ? `<img src="${escapeHtml(cover)}" alt="" class="h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
-        : Ico.folder.replace("h-7 w-7", "h-5 w-5 shrink-0")
+        ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
+        : Ico.folder.replace("h-7 w-7", "mt-0.5 h-5 w-5 shrink-0")
       : cover
-        ? `<img src="${escapeHtml(cover)}" alt="" class="h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
-        : fileIconSvg(row.extension).replace("h-7 w-7", "h-5 w-5 shrink-0");
+        ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
+        : fileIconSvg(row.extension).replace("h-7 w-7", "mt-0.5 h-5 w-5 shrink-0");
+  const remarkLine = remarkPreview
+    ? `<p class="mt-0.5 truncate text-xs leading-snug text-slate-500" title="${escapeHtml(remarkPreview)}">${escapeHtml(remarkPreview)}</p>`
+    : "";
   return `
   <tr class="cursor-pointer transition hover:bg-slate-50" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
     <td>
-      <div class="flex min-w-0 items-center gap-3 text-left">${icon}<span class="truncate text-slate-900" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</span></div>
+      <div class="flex min-w-0 items-start gap-3 text-left">${icon}<div class="min-w-0 flex-1"><span class="block truncate text-slate-900" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</span>${remarkLine}</div></div>
     </td>
     <td class="w-[120px] whitespace-nowrap text-right tabular-nums">${escapeHtml(row.sizeText)}</td>
     <td class="hidden w-[220px] whitespace-nowrap text-right tabular-nums xl:table-cell">${escapeHtml(row.updatedAt)}</td>
