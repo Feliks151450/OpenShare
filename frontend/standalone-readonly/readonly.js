@@ -1105,9 +1105,17 @@ function renderHome() {
   const hot = state.hotDownloadItems.slice(0, 5).map((h) => ({ id: h.id, label: h.name }));
   const latest = state.latestItems.slice(0, 5).map((l) => ({ id: l.id, label: l.name }));
 
+  const announcementPanel = renderInfoPanel(
+    "公告栏",
+    ann,
+    "暂无公告",
+    'data-action="announcement-list"',
+    "announcement",
+  );
+
   const aside = `
   <aside class="order-2 min-w-0 space-y-4">
-    ${renderInfoPanel("公告栏", ann, "暂无公告", 'data-action="announcement-list"', "announcement")}
+    <div class="hidden xl:block">${announcementPanel}</div>
     ${renderInfoPanel("热门下载", hot, "暂无下载数据", 'data-action="hot-modal"', "file")}
     ${renderInfoPanel("资料上新", latest, "暂无最新资料", 'data-action="latest-modal"', "file")}
   </aside>`;
@@ -1115,7 +1123,9 @@ function renderHome() {
   return `
   <main class="pt-16">
     <div class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
+    <div class="space-y-6">
+      <div class="block xl:hidden">${announcementPanel}</div>
+      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
       <section class="order-1 min-w-0">
         <div class="panel overflow-hidden">
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6">
@@ -1130,6 +1140,7 @@ function renderHome() {
         </div>
       </section>
       ${aside}
+      </div>
     </div>
     </div>
   </main>`;

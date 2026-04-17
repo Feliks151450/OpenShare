@@ -1552,15 +1552,17 @@ async function syncSessionReceiptCode() {
 
   <main class="app-container py-2 sm:py-8 lg:py-10">
     <div class="space-y-6">
-      <InfoPanelCard
-        title="公告栏"
-        :items="recentAnnouncements"
-        clickable
-        action-label="详情"
-        empty-text="暂无公告"
-        @select="openAnnouncementDetail"
-        @action="openAnnouncementList"
-      />
+      <div class="block xl:hidden">
+        <InfoPanelCard
+          title="公告栏"
+          :items="recentAnnouncements"
+          clickable
+          action-label="详情"
+          empty-text="暂无公告"
+          @select="openAnnouncementDetail"
+          @action="openAnnouncementList"
+        />
+      </div>
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
       <section class="order-1 min-w-0">
         <div class="panel overflow-hidden">
@@ -2052,6 +2054,17 @@ async function syncSessionReceiptCode() {
       </section>
 
       <aside class="order-2 min-w-0 space-y-4">
+        <div class="hidden xl:block">
+          <InfoPanelCard
+            title="公告栏"
+            :items="recentAnnouncements"
+            clickable
+            action-label="详情"
+            empty-text="暂无公告"
+            @select="openAnnouncementDetail"
+            @action="openAnnouncementList"
+          />
+        </div>
         <InfoPanelCard
           title="热门下载"
           :items="hotDownloads"
