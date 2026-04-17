@@ -54,6 +54,7 @@ const descriptionEditorOpen = ref(false);
 const canManageResourceDescriptions = ref(false);
 const deleteDialogOpen = ref(false);
 const deletePassword = ref("");
+const deleteMoveToTrash = ref(true);
 const deleteSubmitting = ref(false);
 const deleteError = ref("");
 const feedbackModalOpen = ref(false);
@@ -408,6 +409,7 @@ function closeDescriptionEditor() {
 function openDeleteDialog() {
   deletePassword.value = "";
   deleteError.value = "";
+  deleteMoveToTrash.value = true;
   deleteDialogOpen.value = true;
 }
 
@@ -430,6 +432,7 @@ function closeFeedbackSuccessModal() {
 function closeDeleteDialog() {
   deleteDialogOpen.value = false;
   deletePassword.value = "";
+  deleteMoveToTrash.value = true;
   deleteError.value = "";
   deleteSubmitting.value = false;
 }
@@ -480,7 +483,7 @@ async function confirmDeleteFile() {
   try {
     await httpClient.request(`/admin/resources/files/${encodeURIComponent(detail.value.id)}`, {
       method: "DELETE",
-      body: { password: deletePassword.value },
+      body: { password: deletePassword.value, move_to_trash: deleteMoveToTrash.value },
     });
     closeDeleteDialog();
     goBack();
@@ -854,12 +857,28 @@ function downloadFile() {
           <div>
             <h3 class="text-lg font-semibold text-slate-900">确认删除文件</h3>
             <p class="mt-2 text-sm leading-6 text-slate-500">
-              删除后将无法恢复。确认删除
+              <template v-if="deleteMoveToTrash">
+                将移动到该文件所在磁盘根目录下的 <span class="font-medium text-slate-800">trash</span> 文件夹，可从文件系统中找回。
+              </template>
+              <template v-else>
+                将直接从磁盘<strong class="text-rose-700">彻底删除</strong>，无法恢复。
+              </template>
+              确认删除
               <span class="font-medium text-slate-900">{{ detail.name }}</span>
               吗？
             </p>
           </div>
           <div class="mt-6 space-y-4">
+            <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+              <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+                <input v-model="deleteMoveToTrash" type="radio" class="mt-1" :value="true" />
+                <span>移动到垃圾桶（写入所在磁盘根目录的 <code class="rounded bg-white px-1 text-xs">trash</code>）</span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+                <input v-model="deleteMoveToTrash" type="radio" class="mt-1" :value="false" />
+                <span>彻底删除（不经过垃圾桶，不可恢复）</span>
+              </label>
+            </div>
             <input v-model="deletePassword" type="password" class="field" placeholder="输入当前管理员密码确认删除" />
             <p v-if="deleteError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ deleteError }}

@@ -208,6 +208,7 @@ const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
 const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
 const deleteResourcePassword = ref("");
+const deleteResourceMoveToTrash = ref(true);
 const deleteResourceSubmitting = ref(false);
 const deleteResourceError = ref("");
 const currentFolderID = computed(() => {
@@ -820,12 +821,14 @@ function openDeleteFolderDialog() {
     name: currentFolderDetail.value.name,
   };
   deleteResourcePassword.value = "";
+  deleteResourceMoveToTrash.value = true;
   deleteResourceError.value = "";
 }
 
 function closeDeleteResourceDialog() {
   deleteResourceTarget.value = null;
   deleteResourcePassword.value = "";
+  deleteResourceMoveToTrash.value = true;
   deleteResourceError.value = "";
   deleteResourceSubmitting.value = false;
 }
@@ -841,14 +844,18 @@ async function confirmDeleteResource() {
 
   deleteResourceSubmitting.value = true;
   deleteResourceError.value = "";
+  const movedToTrash = deleteResourceMoveToTrash.value;
+  const deletedName = currentFolderDetail.value?.name ?? "";
   try {
     await httpClient.request(`/admin/resources/folders/${encodeURIComponent(deleteResourceTarget.value.id)}`, {
       method: "DELETE",
-      body: { password: deleteResourcePassword.value },
+      body: { password: deleteResourcePassword.value, move_to_trash: movedToTrash },
     });
     const parentID = currentFolderDetail.value?.parent_id ?? "";
     closeDeleteResourceDialog();
-    actionMessage.value = `文件夹 ${currentFolderDetail.value?.name ?? ""} 已删除。`;
+    actionMessage.value = movedToTrash
+      ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
+      : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
     clearSearchState();
     if (parentID) {
       await router.push({ name: "public-home", query: { folder: parentID } });
@@ -2057,12 +2064,28 @@ async function syncSessionReceiptCode() {
         <div>
           <h3 class="text-lg font-semibold text-slate-900">确认删除文件夹</h3>
           <p class="mt-2 text-sm leading-6 text-slate-500">
-            删除后会清除该文件夹及其子目录、文件，无法恢复。确认删除
+            <template v-if="deleteResourceMoveToTrash">
+              将把该文件夹及其子目录、文件移动到<strong class="text-slate-800">所在磁盘根目录下的 trash</strong> 文件夹（可从文件系统找回）。
+            </template>
+            <template v-else>
+              将<strong class="text-rose-700">彻底删除</strong>该文件夹及其子目录、文件，无法恢复。
+            </template>
+            确认删除
             <span class="font-medium text-slate-900">{{ deleteResourceTarget.name }}</span>
             吗？
           </p>
         </div>
         <div class="mt-6 space-y-4">
+          <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+            <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+              <input v-model="deleteResourceMoveToTrash" type="radio" class="mt-1" :value="true" />
+              <span>移动到垃圾桶（写入所在磁盘根目录的 <code class="rounded bg-white px-1 text-xs">trash</code>）</span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+              <input v-model="deleteResourceMoveToTrash" type="radio" class="mt-1" :value="false" />
+              <span>彻底删除（不经过垃圾桶，不可恢复）</span>
+            </label>
+          </div>
           <input v-model="deleteResourcePassword" type="password" class="field" placeholder="输入当前管理员密码确认删除" />
           <p v-if="deleteResourceError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {{ deleteResourceError }}

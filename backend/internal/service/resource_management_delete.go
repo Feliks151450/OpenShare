@@ -12,7 +12,7 @@ import (
 	"openshare/backend/pkg/identity"
 )
 
-func (s *ResourceManagementService) DeleteFile(ctx context.Context, fileID string, operatorID string, operatorIP string) error {
+func (s *ResourceManagementService) DeleteFile(ctx context.Context, fileID string, operatorID string, operatorIP string, moveToTrash bool) error {
 	current, err := s.repo.FindFileByID(ctx, strings.TrimSpace(fileID))
 	if err != nil {
 		return err
@@ -30,9 +30,15 @@ func (s *ResourceManagementService) DeleteFile(ctx context.Context, fileID strin
 		return ErrManagedFileNotFound
 	}
 
-	_, err = s.storage.MoveManagedFileToTrash(filePath)
-	if err != nil {
-		return fmt.Errorf("move managed file to trash: %w", err)
+	if moveToTrash {
+		_, err = s.storage.MoveManagedFileToTrash(filePath)
+		if err != nil {
+			return fmt.Errorf("move managed file to trash: %w", err)
+		}
+	} else {
+		if err := s.storage.RemoveManagedFilePermanently(filePath); err != nil {
+			return fmt.Errorf("remove managed file: %w", err)
+		}
 	}
 
 	logID, err := identity.NewID()
@@ -49,7 +55,7 @@ func (s *ResourceManagementService) DeleteFile(ctx context.Context, fileID strin
 	return nil
 }
 
-func (s *ResourceManagementService) DeleteFolder(ctx context.Context, folderID string, operatorID string, operatorIP string) error {
+func (s *ResourceManagementService) DeleteFolder(ctx context.Context, folderID string, operatorID string, operatorIP string, moveToTrash bool) error {
 	current, err := s.repo.FindFolderByID(ctx, strings.TrimSpace(folderID))
 	if err != nil {
 		return err
@@ -68,9 +74,16 @@ func (s *ResourceManagementService) DeleteFolder(ctx context.Context, folderID s
 
 	newPath := ""
 	if current.SourcePath != nil && strings.TrimSpace(*current.SourcePath) != "" {
-		newPath, err = s.storage.MoveManagedDirectoryToTrash(*current.SourcePath)
-		if err != nil {
-			return fmt.Errorf("move managed folder to trash: %w", err)
+		src := strings.TrimSpace(*current.SourcePath)
+		if moveToTrash {
+			newPath, err = s.storage.MoveManagedDirectoryToTrash(src)
+			if err != nil {
+				return fmt.Errorf("move managed folder to trash: %w", err)
+			}
+		} else {
+			if err := s.storage.RemoveManagedDirectoryPermanently(src); err != nil {
+				return fmt.Errorf("remove managed folder: %w", err)
+			}
 		}
 	}
 

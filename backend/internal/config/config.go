@@ -42,7 +42,8 @@ type SQLPragma struct {
 type StorageConfig struct {
 	Root    string `json:"root"`
 	Staging string `json:"staging"`
-	Trash   string `json:"trash"`
+	// Trash is the folder name under each volume/mount root (e.g. /data/trash), not under Root.
+	Trash string `json:"trash"`
 }
 
 type UploadConfig struct {

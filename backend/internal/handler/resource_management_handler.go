@@ -32,7 +32,8 @@ type updateManagedFolderDescriptionRequest struct {
 }
 
 type deleteManagedResourceRequest struct {
-	Password string `json:"password"`
+	Password    string `json:"password"`
+	MoveToTrash *bool  `json:"move_to_trash"`
 }
 
 func NewResourceManagementHandler(service *service.ResourceManagementService, authService *service.AdminAuthService) *ResourceManagementHandler {
@@ -148,7 +149,12 @@ func (h *ResourceManagementHandler) DeleteFile(ctx *gin.Context) {
 		return
 	}
 
-	err := h.service.DeleteFile(ctx.Request.Context(), ctx.Param("fileID"), identity.AdminID, ctx.ClientIP())
+	moveToTrash := true
+	if req.MoveToTrash != nil {
+		moveToTrash = *req.MoveToTrash
+	}
+
+	err := h.service.DeleteFile(ctx.Request.Context(), ctx.Param("fileID"), identity.AdminID, ctx.ClientIP(), moveToTrash)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrManagedFileNotFound):
@@ -183,7 +189,12 @@ func (h *ResourceManagementHandler) DeleteFolder(ctx *gin.Context) {
 		return
 	}
 
-	err := h.service.DeleteFolder(ctx.Request.Context(), ctx.Param("folderID"), identity.AdminID, ctx.ClientIP())
+	moveToTrash := true
+	if req.MoveToTrash != nil {
+		moveToTrash = *req.MoveToTrash
+	}
+
+	err := h.service.DeleteFolder(ctx.Request.Context(), ctx.Param("folderID"), identity.AdminID, ctx.ClientIP(), moveToTrash)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrManagedFolderNotFound):

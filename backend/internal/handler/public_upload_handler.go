@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,7 @@ func (h *PublicUploadHandler) CreateSubmission(ctx *gin.Context) {
 		case errors.Is(err, service.ErrReceiptCodeGenerate):
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate receipt code"})
 		default:
+			log.Printf("public upload: create submission failed: %v", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create submission"})
 		}
 		return

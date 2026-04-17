@@ -12,7 +12,6 @@ func EnsureLayout(cfg config.StorageConfig) error {
 	for _, path := range []string{
 		cfg.Root,
 		stagingPath(cfg),
-		trashPath(cfg),
 	} {
 		if err := ensureDir(path); err != nil {
 			return err
@@ -24,10 +23,6 @@ func EnsureLayout(cfg config.StorageConfig) error {
 
 func stagingPath(cfg config.StorageConfig) string {
 	return filepath.Join(cfg.Root, cfg.Staging)
-}
-
-func trashPath(cfg config.StorageConfig) string {
-	return filepath.Join(cfg.Root, cfg.Trash)
 }
 
 func ensureDir(path string) error {

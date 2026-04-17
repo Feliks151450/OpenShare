@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"openshare/backend/internal/config"
 	"openshare/backend/pkg/identity"
@@ -21,7 +22,7 @@ const maxStoredNameAttempts = 5
 
 type Service struct {
 	stagingDir string
-	trashDir   string
+	trashLeaf  string
 }
 
 type StagedFile struct {
@@ -47,8 +48,16 @@ type ScannedEntry struct {
 func NewService(cfg config.StorageConfig) *Service {
 	return &Service{
 		stagingDir: filepath.Join(cfg.Root, cfg.Staging),
-		trashDir:   filepath.Join(cfg.Root, cfg.Trash),
+		trashLeaf:  cfg.Trash,
 	}
+}
+
+func (s *Service) resolveTrashDirectory(forManagedPath string) (string, error) {
+	p := filepath.Clean(strings.TrimSpace(forManagedPath))
+	if p == "" {
+		return "", fmt.Errorf("empty managed path")
+	}
+	return VolumeTrashDirectory(p, s.trashLeaf)
 }
 
 func (s *Service) SaveToStaging(reader io.Reader, extension string, maxBytes int64) (*StagedFile, error) {
@@ -125,6 +134,155 @@ func (s *Service) StagedFileExists(diskPath string) (bool, error) {
 	return true, nil
 }
 
+// isCrossDeviceRenameErr reports whether err is EXDEV / cross-volume rename,
+// where os.Rename cannot move a file and a copy+delete is required.
+func isCrossDeviceRenameErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrExist) {
+		return false
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) && errno == syscall.EXDEV {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "cross-device") || strings.Contains(msg, "different disk")
+}
+
+// moveRegularFile tries os.Rename; if source and destination are on different
+// filesystems, it copies via a temp file in the destination directory then removes the source.
+func moveRegularFile(srcPath, dstPath string) error {
+	if err := os.Rename(srcPath, dstPath); err == nil {
+		return nil
+	} else if !isCrossDeviceRenameErr(err) {
+		return err
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open source for cross-device move: %w", err)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source for cross-device move: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("cross-device move: source is not a regular file")
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), ".openshare-xdev-*")
+	if err != nil {
+		return fmt.Errorf("create temp for cross-device move: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanupTmp := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		cleanupTmp()
+		return fmt.Errorf("copy for cross-device move: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanupTmp()
+		return fmt.Errorf("sync temp for cross-device move: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanupTmp()
+		return fmt.Errorf("close temp for cross-device move: %w", err)
+	}
+	if err := os.Chmod(tmpPath, info.Mode().Perm()); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp for cross-device move: %w", err)
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename temp to destination for cross-device move: %w", err)
+	}
+	if err := os.Remove(srcPath); err != nil {
+		return fmt.Errorf("remove source after cross-device copy: %w", err)
+	}
+	return nil
+}
+
+// moveDirTreeCrossDevice copies a directory tree from srcRoot to dstRoot when
+// os.Rename cannot be used across filesystems, then removes srcRoot.
+// dstRoot must not exist yet (caller ensures a unique trash path).
+func moveDirTreeCrossDevice(srcRoot, dstRoot string) error {
+	srcRoot = filepath.Clean(srcRoot)
+	dstRoot = filepath.Clean(dstRoot)
+
+	info, err := os.Stat(srcRoot)
+	if err != nil {
+		return fmt.Errorf("stat source directory: %w", err)
+	}
+	if !info.IsDir() {
+		return moveRegularFile(srcRoot, dstRoot)
+	}
+
+	if err := os.MkdirAll(dstRoot, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("mkdir trash destination directory: %w", err)
+	}
+
+	var moveContents func(srcDir, dstDir string) error
+	moveContents = func(srcDir, dstDir string) error {
+		entries, err := os.ReadDir(srcDir)
+		if err != nil {
+			return fmt.Errorf("read directory: %w", err)
+		}
+		for _, entry := range entries {
+			srcPath := filepath.Join(srcDir, entry.Name())
+			dstPath := filepath.Join(dstDir, entry.Name())
+
+			if entry.Type()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(srcPath)
+				if err != nil {
+					return fmt.Errorf("read symlink: %w", err)
+				}
+				if err := os.Symlink(target, dstPath); err != nil {
+					return fmt.Errorf("create symlink in trash: %w", err)
+				}
+				if err := os.Remove(srcPath); err != nil {
+					return fmt.Errorf("remove source symlink: %w", err)
+				}
+				continue
+			}
+
+			if entry.IsDir() {
+				fi, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if err := os.MkdirAll(dstPath, fi.Mode().Perm()); err != nil {
+					return fmt.Errorf("mkdir: %w", err)
+				}
+				if err := moveContents(srcPath, dstPath); err != nil {
+					return err
+				}
+				if err := os.Remove(srcPath); err != nil {
+					return fmt.Errorf("remove source subdirectory: %w", err)
+				}
+				continue
+			}
+
+			if err := moveRegularFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+		return os.Remove(srcDir)
+	}
+
+	if err := moveContents(srcRoot, dstRoot); err != nil {
+		return fmt.Errorf("cross-device directory move to trash: %w", err)
+	}
+	return nil
+}
+
 // MoveStagedFileToFolder moves a file from staging into targetDir using
 // originalName as the preferred filename. When a name conflict exists a
 // numeric suffix (_1, _2, …) is appended before the extension.
@@ -165,7 +323,7 @@ func (s *Service) MoveStagedFileToFolder(stagedPath, targetDir, originalName str
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", "", fmt.Errorf("inspect target: %w", err)
 		}
-		if err := os.Rename(stagedPath, destPath); err != nil {
+		if err := moveRegularFile(stagedPath, destPath); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
@@ -181,7 +339,7 @@ func (s *Service) MoveFileBackToStaging(diskPath, stagingPath string) (string, e
 	if !s.isWithinDir(stagingPath, s.stagingDir) {
 		return "", fmt.Errorf("target staging path is outside staging directory")
 	}
-	if err := os.Rename(diskPath, stagingPath); err != nil {
+	if err := moveRegularFile(diskPath, stagingPath); err != nil {
 		return "", fmt.Errorf("move file back to staging: %w", err)
 	}
 	return stagingPath, nil
@@ -231,6 +389,11 @@ func (s *Service) MoveManagedFileToTrash(diskPath string) (string, error) {
 		return "", fmt.Errorf("managed file path is a directory")
 	}
 
+	trashRoot, err := s.resolveTrashDirectory(diskPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve trash directory: %w", err)
+	}
+
 	base := filepath.Base(diskPath)
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
@@ -239,14 +402,14 @@ func (s *Service) MoveManagedFileToTrash(diskPath string) (string, error) {
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s_%d%s", name, attempt, ext)
 		}
-		target := filepath.Join(s.trashDir, candidate)
+		target := filepath.Join(trashRoot, candidate)
 		if _, err := os.Stat(target); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("inspect trash target: %w", err)
 		}
 
-		if err := os.Rename(diskPath, target); err != nil {
+		if err := moveRegularFile(diskPath, target); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
@@ -275,29 +438,63 @@ func (s *Service) MoveManagedDirectoryToTrash(dirPath string) (string, error) {
 		return "", fmt.Errorf("managed directory path is not a directory")
 	}
 
+	trashRoot, err := s.resolveTrashDirectory(dirPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve trash directory: %w", err)
+	}
+
 	base := filepath.Base(dirPath)
 	for attempt := 0; attempt < 100; attempt++ {
 		candidate := base
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s_%d", base, attempt)
 		}
-		target := filepath.Join(s.trashDir, candidate)
+		target := filepath.Join(trashRoot, candidate)
 		if _, err := os.Stat(target); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("inspect trash target: %w", err)
 		}
 
-		if err := os.Rename(dirPath, target); err != nil {
-			if errors.Is(err, os.ErrExist) {
-				continue
+		if err := os.Rename(dirPath, target); err == nil {
+			return target, nil
+		} else if errors.Is(err, os.ErrExist) {
+			continue
+		} else if isCrossDeviceRenameErr(err) {
+			if err := moveDirTreeCrossDevice(dirPath, target); err != nil {
+				return "", fmt.Errorf("move managed directory to trash: %w", err)
 			}
+			return target, nil
+		} else {
 			return "", fmt.Errorf("move managed directory to trash: %w", err)
 		}
-		return target, nil
 	}
 
 	return "", fmt.Errorf("move managed directory to trash: unable to allocate target path")
+}
+
+// RemoveManagedFilePermanently deletes a managed file from disk without moving to trash.
+func (s *Service) RemoveManagedFilePermanently(diskPath string) error {
+	diskPath = filepath.Clean(strings.TrimSpace(diskPath))
+	if diskPath == "" {
+		return nil
+	}
+	if err := os.Remove(diskPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove managed file: %w", err)
+	}
+	return nil
+}
+
+// RemoveManagedDirectoryPermanently recursively deletes a managed directory tree from disk.
+func (s *Service) RemoveManagedDirectoryPermanently(dirPath string) error {
+	dirPath = filepath.Clean(strings.TrimSpace(dirPath))
+	if dirPath == "" {
+		return nil
+	}
+	if err := os.RemoveAll(dirPath); err != nil {
+		return fmt.Errorf("remove managed directory: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) RenameManagedDirectory(dirPath, newName string) (string, error) {
