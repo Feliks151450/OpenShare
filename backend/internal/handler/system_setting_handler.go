@@ -27,6 +27,17 @@ func (h *SystemSettingHandler) GetPolicy(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, policy)
 }
 
+func (h *SystemSettingHandler) GetPublicDownloadPolicy(ctx *gin.Context) {
+	policy, err := h.service.GetPolicy(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load download policy"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"large_download_confirm_bytes": policy.Download.LargeDownloadConfirmBytes,
+	})
+}
+
 func (h *SystemSettingHandler) SavePolicy(ctx *gin.Context) {
 	identity, ok := session.GetAdminIdentity(ctx)
 	if !ok {
@@ -44,6 +55,10 @@ func (h *SystemSettingHandler) SavePolicy(ctx *gin.Context) {
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidUploadInput) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid system settings"})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidDownloadPolicyInput) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid download policy"})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save system settings"})

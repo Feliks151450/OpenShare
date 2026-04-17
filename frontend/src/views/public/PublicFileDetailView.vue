@@ -58,6 +58,9 @@ const deleteMoveToTrash = ref(true);
 const deleteSubmitting = ref(false);
 const deleteError = ref("");
 const feedbackModalOpen = ref(false);
+const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
+const largeDownloadConfirmBytes = ref(DEFAULT_LARGE_DOWNLOAD_CONFIRM);
+const downloadFileConfirmOpen = ref(false);
 const feedbackSuccessModalOpen = ref(false);
 const feedbackDescription = ref("");
 const feedbackSubmitting = ref(false);
@@ -323,9 +326,37 @@ const editorDirty = computed(() => {
   );
 });
 
-onMounted(() => {
-  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
+const fileDetailNeedsDownloadConfirm = computed(() => {
+  const d = detail.value;
+  if (!d || d.download_allowed === false) {
+    return false;
+  }
+  return (d.size ?? 0) >= largeDownloadConfirmBytes.value;
 });
+
+const fileDownloadConfirmBody = computed(() => {
+  const d = detail.value;
+  if (!d) {
+    return "";
+  }
+  return `该文件大小为 ${formatSizeBytes(d.size)}，已超过本站设定的大文件阈值（${formatSizeBytes(largeDownloadConfirmBytes.value)}）。确定要下载吗？`;
+});
+
+onMounted(() => {
+  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode(), loadLargeDownloadPolicy()]);
+});
+
+async function loadLargeDownloadPolicy() {
+  try {
+    const response = await httpClient.get<{ large_download_confirm_bytes: number }>("/public/download-policy");
+    const b = Number(response.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) {
+      largeDownloadConfirmBytes.value = b;
+    }
+  } catch {
+    /* 默认 1 GiB */
+  }
+}
 
 watch(fileID, () => {
   videoFileMetaVisible.value = false;
@@ -547,6 +578,14 @@ function formatSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** 用于下载确认等场景，与首页 `formatSize` 一致支持 GB */
+function formatSizeBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function goBack() {
   const folderID = detail.value?.folder_id?.trim() ?? "";
   if (folderID) {
@@ -587,6 +626,26 @@ async function copyDetailLinkAtCurrentTime() {
 }
 
 function downloadFile() {
+  if (!downloadActionsAllowed.value) {
+    return;
+  }
+  if (fileDetailNeedsDownloadConfirm.value) {
+    downloadFileConfirmOpen.value = true;
+    return;
+  }
+  performDownloadFile();
+}
+
+function closeDownloadFileConfirm() {
+  downloadFileConfirmOpen.value = false;
+}
+
+function confirmDownloadFileFromModal() {
+  downloadFileConfirmOpen.value = false;
+  performDownloadFile();
+}
+
+function performDownloadFile() {
   if (!downloadActionsAllowed.value) {
     return;
   }
@@ -894,6 +953,25 @@ function downloadFile() {
                 {{ deleteSubmitting ? "删除中…" : "确认删除" }}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="modal-shell">
+      <div
+        v-if="downloadFileConfirmOpen && detail"
+        class="fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/30 px-4"
+        @click.self="closeDownloadFileConfirm"
+      >
+        <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" @click.stop>
+          <h3 class="text-lg font-semibold text-slate-900">确认下载</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-600">{{ fileDownloadConfirmBody }}</p>
+          <div class="mt-6 flex flex-wrap justify-end gap-3">
+            <button type="button" class="btn-secondary" @click="closeDownloadFileConfirm">取消</button>
+            <button type="button" class="btn-primary" @click="confirmDownloadFileFromModal">确认下载</button>
           </div>
         </div>
       </div>

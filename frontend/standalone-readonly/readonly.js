@@ -1,5 +1,6 @@
 /**
  * OpenShare 只读静态页：无登录、上传、反馈、批量下载、管理端操作。
+ * 大文件与文件夹下载前会弹出确认（阈值来自 GET /public/download-policy）。
  * API 基址默认 /api（同域），可通过 localStorage「openshare_readonly_api_base」或页面内设置保存。
  * 所有请求 credentials: omit，不发送 Cookie。
  */
@@ -297,6 +298,8 @@ function extractExtension(name) {
 }
 
 const VIDEO_EXT = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v", "ogv"]);
+/** 与后端默认一致：超过该大小的单文件下载前确认；文件夹打包始终确认 */
+const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
 
 function isVideoDetail(d) {
   const mime = (d.mime_type ?? "").toLowerCase();
@@ -365,6 +368,9 @@ const state = {
   modalSidebar: null,
   transientWarning: "",
   downloadTimestamps: [],
+  largeDownloadConfirmBytes: DEFAULT_LARGE_DOWNLOAD_CONFIRM,
+  /** @type {null | { kind: "row"; row: object } | { kind: "folderToolbar" } | { kind: "fileDetail" }} */
+  downloadConfirm: null,
   /** 详情页 */
   fileDetail: null,
   fileLoading: false,
@@ -423,6 +429,7 @@ function buildRows() {
       coverUrl: coverImageHrefFromDescription(desc),
       downloadCount: folder.download_count ?? 0,
       fileCount: folder.file_count ?? 0,
+      sizeBytes: folder.total_size ?? 0,
       sizeText: formatSize(folder.total_size ?? 0),
       updatedAt: formatDateTime(folder.updated_at),
       sortTimeMs: parseSortTimeMs(folder.updated_at),
@@ -442,6 +449,7 @@ function buildRows() {
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
           downloadCount: file.download_count ?? 0,
           fileCount: 0,
+          sizeBytes: file.size ?? 0,
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
           sortTimeMs: parseSortTimeMs(file.uploaded_at),
@@ -621,6 +629,7 @@ async function runSearch(keyword) {
           item.entity_type === "file" ? fileCoverImageHrefFromFields(item.cover_url, "") : null,
         downloadCount: item.download_count ?? 0,
         fileCount: 0,
+        sizeBytes: item.entity_type === "file" ? (item.size ?? 0) : 0,
         sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
         updatedAt: modRaw ? formatDateTime(modRaw) : "-",
         sortTimeMs: parseSortTimeMs(modRaw),
@@ -736,7 +745,13 @@ function goBackFromDetail() {
   else setHashRoute({ view: "home", folder: "", root: "", fileId: "", t: "" });
 }
 
-function downloadRow(row) {
+function rowNeedsDownloadConfirm(row) {
+  if (row.kind === "folder") return true;
+  const sz = Number(row.sizeBytes) || 0;
+  return sz >= state.largeDownloadConfirmBytes;
+}
+
+function performDownloadRow(row) {
   if (!row.downloadAllowed) {
     showWarning("该资源不允许下载。");
     return;
@@ -754,7 +769,26 @@ function downloadRow(row) {
   link.remove();
 }
 
-function downloadCurrentFolder() {
+function downloadRow(row) {
+  if (!row.downloadAllowed) {
+    showWarning("该资源不允许下载。");
+    return;
+  }
+  if (rowNeedsDownloadConfirm(row)) {
+    state.downloadConfirm = { kind: "row", row };
+    render();
+    return;
+  }
+  performDownloadRow(row);
+}
+
+function fileDetailNeedsDownloadConfirm() {
+  const d = state.fileDetail;
+  if (!d || d.download_allowed === false) return false;
+  return (Number(d.size) || 0) >= state.largeDownloadConfirmBytes;
+}
+
+function performDownloadCurrentFolder() {
   const d = state.folderDetail;
   if (!d || d.download_allowed === false) {
     showWarning("该文件夹不允许下载。");
@@ -773,7 +807,17 @@ function downloadCurrentFolder() {
   link.remove();
 }
 
-function downloadFileFromDetail() {
+function downloadCurrentFolder() {
+  const d = state.folderDetail;
+  if (!d || d.download_allowed === false) {
+    showWarning("该文件夹不允许下载。");
+    return;
+  }
+  state.downloadConfirm = { kind: "folderToolbar" };
+  render();
+}
+
+function performDownloadFileFromDetail() {
   const d = state.fileDetail;
   if (!d || d.download_allowed === false) return;
   const src = mediaSourceURL(d, d.id);
@@ -784,6 +828,28 @@ function downloadFileFromDetail() {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function downloadFileFromDetail() {
+  const d = state.fileDetail;
+  if (!d || d.download_allowed === false) return;
+  if (fileDetailNeedsDownloadConfirm()) {
+    state.downloadConfirm = { kind: "fileDetail" };
+    render();
+    return;
+  }
+  performDownloadFileFromDetail();
+}
+
+async function loadDownloadSettings() {
+  try {
+    const r = await apiRequest("/public/download-policy");
+    const b = Number(r?.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
+    else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
+  } catch {
+    state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
+  }
 }
 
 /** 更新复制提示：在视频详情页只改 DOM，避免 render() 重建 video 节点导致重新加载转圈。 */
@@ -988,24 +1054,24 @@ function renderHome() {
   <div class="px-4 pb-2 sm:px-6">
     <div class="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
       <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45" data-action="go-up" ${canBack ? "" : "disabled"}>${Ico.chevronLeft}${backLabel}</button>
-      <div class="flex w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:justify-end">
+      <div class="flex w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:justify-end" data-toolbar-dropdowns>
         <div class="relative">
-          <button type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 sm:w-auto" data-action="toggle-sort-menu">排序 · ${escapeHtml(sortDirLabel())} ${Ico.chevronRight.replace("class=\"h-4 w-4\"", "class=\"h-4 w-4 rotate-90\"")}</button>
+          <button type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 sm:w-auto" data-action="toggle-sort-menu">${escapeHtml(sortModeLabel())} · ${escapeHtml(sortDirectionLabel())} ${Ico.chevronRight.replace("class=\"h-4 w-4\"", "class=\"h-4 w-4 rotate-90\"")}</button>
           <div class="${state.sortMenuOpen ? "" : "hidden"} absolute left-0 top-full z-20 mt-2 min-w-[176px] rounded-2xl border border-slate-200 bg-white p-1 shadow-lg">
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="download">下载量排序</button>
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="name">名称排序</button>
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="format">格式排序</button>
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort="modified">修改日期排序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortMode === "download" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort="download">下载量排序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortMode === "name" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort="name">名称排序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortMode === "format" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort="format">格式排序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortMode === "modified" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort="modified">修改日期排序</button>
             <div class="mx-2 my-1 border-t border-slate-100"></div>
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort-dir="desc">降序</button>
-            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-sort-dir="asc">升序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortDirection === "desc" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort-dir="desc">降序</button>
+            <button type="button" class="block w-full rounded-xl px-3 py-2 text-left text-sm transition ${state.sortDirection === "asc" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-sort-dir="asc">升序</button>
           </div>
         </div>
         <div class="relative">
-          <button type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 sm:w-auto" data-action="toggle-view-menu">${state.viewMode === "cards" ? Ico.grid : Ico.list}${state.viewMode === "cards" ? "卡片" : "表格"} ${Ico.chevronRight.replace("class=\"h-4 w-4\"", "class=\"h-4 w-4 rotate-90\"")}</button>
+          <button type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 sm:w-auto" data-action="toggle-view-menu">${state.viewMode === "cards" ? Ico.grid : Ico.list}${state.viewMode === "cards" ? "卡片" : "表格"} ${Ico.chevronRight.replace("class=\"h-4 w-4\"", "class=\"h-4 w-4 rotate-90\"")}</button>
           <div class="${state.viewMenuOpen ? "" : "hidden"} absolute left-0 top-full z-20 mt-2 min-w-[124px] rounded-2xl border border-slate-200 bg-white p-1 shadow-lg">
-            <button type="button" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-view="cards">${Ico.grid} 卡片</button>
-            <button type="button" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50" data-set-view="table">${Ico.list} 表格</button>
+            <button type="button" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${state.viewMode === "cards" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-view="cards">${Ico.grid} 卡片</button>
+            <button type="button" class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${state.viewMode === "table" ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}" data-set-view="table">${Ico.list} 表格</button>
           </div>
         </div>
       </div>
@@ -1061,17 +1127,33 @@ function renderHome() {
   </main>`;
 }
 
-function sortDirLabel() {
-  const sm =
-    state.sortMode === "download"
-      ? "下载量排序"
-      : state.sortMode === "format"
-        ? "格式排序"
-        : state.sortMode === "modified"
-          ? "修改日期排序"
-          : "名称排序";
-  const sd = state.sortDirection === "asc" ? "升序" : "降序";
-  return `${sm} · ${sd}`;
+function sortModeLabel() {
+  switch (state.sortMode) {
+    case "download":
+      return "下载量排序";
+    case "format":
+      return "格式排序";
+    case "modified":
+      return "修改日期排序";
+    default:
+      return "名称排序";
+  }
+}
+
+function sortDirectionLabel() {
+  return state.sortDirection === "asc" ? "升序" : "降序";
+}
+
+function closeToolbarMenusIfOutside(e) {
+  const app = document.getElementById("app");
+  if (!app || !(e.target instanceof Node) || !app.contains(e.target)) return;
+  if (!state.sortMenuOpen && !state.viewMenuOpen) return;
+  const t = e.target instanceof Element ? e.target : e.target.parentElement;
+  if (!(t instanceof Element)) return;
+  if (t.closest("[data-toolbar-dropdowns]")) return;
+  state.sortMenuOpen = false;
+  state.viewMenuOpen = false;
+  render();
 }
 
 function renderCard(row) {
@@ -1247,6 +1329,35 @@ function renderFileDetail() {
 
 function renderModals() {
   let html = "";
+  if (state.downloadConfirm) {
+    const dc = state.downloadConfirm;
+    let body = "";
+    if (dc.kind === "row") {
+      const r = dc.row;
+      body =
+        r.kind === "folder"
+          ? "您即将打包下载整个文件夹，体积与耗时不确定，可能较大。确定要开始下载吗？"
+          : `该文件大小为 ${escapeHtml(r.sizeText)}，已超过本站设定的大文件阈值（${escapeHtml(formatSize(state.largeDownloadConfirmBytes))}）。确定要下载吗？`;
+    } else if (dc.kind === "folderToolbar") {
+      body = "您即将打包下载整个文件夹，体积与耗时不确定，可能较大。确定要开始下载吗？";
+    } else if (dc.kind === "fileDetail") {
+      const fd = state.fileDetail;
+      body = fd
+        ? `该文件大小为 ${escapeHtml(formatSize(fd.size))}，已超过本站设定的大文件阈值（${escapeHtml(formatSize(state.largeDownloadConfirmBytes))}）。确定要下载吗？`
+        : "";
+    }
+    html += `
+    <div class="fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/30 px-4">
+      <div class="modal-card panel w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" data-stop-modal="1">
+        <h3 class="text-lg font-semibold text-slate-900">确认下载</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-600">${body}</p>
+        <div class="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" class="btn-secondary" data-action="download-confirm-no">取消</button>
+          <button type="button" class="btn-primary" data-action="download-confirm-yes">确认下载</button>
+        </div>
+      </div>
+    </div>`;
+  }
   if (state.modalAnnouncementList) {
     const items = state.announcements
       .map(
@@ -1384,6 +1495,7 @@ let globalHandlersInstalled = false;
 function installGlobalHandlersOnce() {
   if (globalHandlersInstalled) return;
   globalHandlersInstalled = true;
+  document.addEventListener("pointerdown", closeToolbarMenusIfOutside, true);
   document.addEventListener("click", appClickHandler, true);
   document.addEventListener("submit", searchSubmitHandler, true);
   document.addEventListener("change", apiBaseChangeHandler, true);
@@ -1415,6 +1527,23 @@ function appClickHandler(e) {
   if (!(t instanceof Element)) return;
   if (t.closest("[data-stop-modal]")) {
     e.stopPropagation();
+  }
+
+  if (t.closest("[data-action=\"download-confirm-yes\"]")) {
+    e.preventDefault();
+    const dc = state.downloadConfirm;
+    state.downloadConfirm = null;
+    if (dc?.kind === "row") performDownloadRow(dc.row);
+    else if (dc?.kind === "folderToolbar") performDownloadCurrentFolder();
+    else if (dc?.kind === "fileDetail") performDownloadFileFromDetail();
+    render();
+    return;
+  }
+  if (t.closest("[data-action=\"download-confirm-no\"]")) {
+    e.preventDefault();
+    state.downloadConfirm = null;
+    render();
+    return;
   }
 
       const openAnn = t.closest("[data-announcement-open]");
@@ -1685,11 +1814,12 @@ async function bootstrapRoute() {
   state.modalSidebar = null;
   state.folderMarkdownExpanded = false;
   state.videoPlaybackStep = 0;
+  state.downloadConfirm = null;
   if (state.route.view === "file") {
-    await loadFileDetail();
+    await Promise.all([loadFileDetail(), loadDownloadSettings()]);
   } else {
     clearSearchState();
-    await Promise.all([loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), loadDirectory()]);
+    await Promise.all([loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), loadDirectory(), loadDownloadSettings()]);
   }
   render();
 }

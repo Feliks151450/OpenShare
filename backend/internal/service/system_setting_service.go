@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 )
 
 const systemPolicyKey = "system_policy"
+
+// DefaultLargeDownloadConfirmBytes 超过该大小的单文件在访客端下载前会弹出确认（文件夹打包下载始终确认）。可由超级管理员在系统设置中调整。
+const DefaultLargeDownloadConfirmBytes int64 = 1024 * 1024 * 1024
+
+var ErrInvalidDownloadPolicyInput = errors.New("invalid download policy input")
 
 type UploadPolicy struct {
 	MaxUploadTotalBytes int64 `json:"max_upload_total_bytes"`
@@ -36,8 +42,13 @@ func (p *UploadPolicy) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type DownloadPolicy struct {
+	LargeDownloadConfirmBytes int64 `json:"large_download_confirm_bytes"`
+}
+
 type SystemPolicy struct {
-	Upload UploadPolicy `json:"upload"`
+	Upload   UploadPolicy   `json:"upload"`
+	Download DownloadPolicy `json:"download"`
 }
 
 type SystemSettingService struct {
@@ -50,6 +61,9 @@ func defaultSystemPolicy(cfg config.UploadConfig) SystemPolicy {
 	return SystemPolicy{
 		Upload: UploadPolicy{
 			MaxUploadTotalBytes: cfg.MaxUploadTotalBytes,
+		},
+		Download: DownloadPolicy{
+			LargeDownloadConfirmBytes: DefaultLargeDownloadConfirmBytes,
 		},
 	}
 }
@@ -76,12 +90,45 @@ func (s *SystemSettingService) GetPolicy(ctx context.Context) (*SystemPolicy, er
 	if err := json.Unmarshal([]byte(item.Value), &policy); err != nil {
 		return nil, fmt.Errorf("decode system policy: %w", err)
 	}
+	if policy.Download.LargeDownloadConfirmBytes <= 0 {
+		policy.Download.LargeDownloadConfirmBytes = s.defaultPolicy.Download.LargeDownloadConfirmBytes
+	}
 	return &policy, nil
 }
 
-func (s *SystemSettingService) SavePolicy(ctx context.Context, policy SystemPolicy, operatorID string, operatorIP string) (*SystemPolicy, error) {
+func validateLargeDownloadConfirmBytes(v int64) error {
+	const maxBytes = 1024 * 1024 * 1024 * 1024 * 1024 // 1 PiB
+	if v < 1 {
+		return ErrInvalidDownloadPolicyInput
+	}
+	if v > maxBytes {
+		return ErrInvalidDownloadPolicyInput
+	}
+	return nil
+}
+
+func (s *SystemSettingService) SavePolicy(ctx context.Context, incoming SystemPolicy, operatorID string, operatorIP string) (*SystemPolicy, error) {
+	baseline, err := s.GetPolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policy := *baseline
+
+	if incoming.Upload.MaxUploadTotalBytes > 0 {
+		policy.Upload = incoming.Upload
+	}
+	if incoming.Download.LargeDownloadConfirmBytes > 0 {
+		policy.Download.LargeDownloadConfirmBytes = incoming.Download.LargeDownloadConfirmBytes
+	}
+
 	if policy.Upload.MaxUploadTotalBytes <= 0 {
 		return nil, ErrInvalidUploadInput
+	}
+	if policy.Download.LargeDownloadConfirmBytes <= 0 {
+		policy.Download.LargeDownloadConfirmBytes = baseline.Download.LargeDownloadConfirmBytes
+	}
+	if err := validateLargeDownloadConfirmBytes(policy.Download.LargeDownloadConfirmBytes); err != nil {
+		return nil, err
 	}
 
 	payload, err := json.Marshal(policy)

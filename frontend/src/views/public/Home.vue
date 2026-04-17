@@ -158,6 +158,7 @@ const sortMode = ref<"name" | "download" | "format" | "modified">("name");
 const sortDirection = ref<"asc" | "desc">("desc");
 const sortMenuOpen = ref(false);
 const viewMenuOpen = ref(false);
+const toolbarDropdownsRef = ref<HTMLElement | null>(null);
 const transientWarning = ref("");
 const transientWarningTimer = ref<number | null>(null);
 const downloadTimestamps = ref<number[]>([]);
@@ -189,6 +190,10 @@ const error = ref("");
 const actionMessage = ref("");
 const actionError = ref("");
 const batchDownloadSubmitting = ref(false);
+const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
+const largeDownloadConfirmBytes = ref(DEFAULT_LARGE_DOWNLOAD_CONFIRM);
+type DownloadConfirmState = { mode: "single"; row: DirectoryRow } | { mode: "batch" };
+const downloadConfirm = ref<DownloadConfirmState | null>(null);
 const folders = ref<PublicFolderItem[]>([]);
 const files = ref<PublicFileItem[]>([]);
 const searchInput = ref("");
@@ -242,6 +247,8 @@ type DirectoryRow = {
   coverUrl: string | null;
   downloadCount: number;
   fileCount: number;
+  /** 原始字节数：文件为 `size`，文件夹可为 `total_size`（用于大文件下载确认） */
+  sizeBytes: number;
   sizeText: string;
   updatedAt: string;
   sortTimeMs: number;
@@ -262,6 +269,7 @@ const rows = computed<DirectoryRow[]>(() => [
       coverUrl: coverImageHrefFromDescription(desc),
       downloadCount: folder.download_count ?? 0,
       fileCount: folder.file_count ?? 0,
+      sizeBytes: folder.total_size ?? 0,
       sizeText: formatSize(folder.total_size ?? 0),
       updatedAt: formatDateTime(folder.updated_at),
       sortTimeMs: parseSortTimeMs(folder.updated_at),
@@ -281,6 +289,7 @@ const rows = computed<DirectoryRow[]>(() => [
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
           downloadCount: file.download_count ?? 0,
           fileCount: 0,
+          sizeBytes: file.size ?? 0,
           sizeText: formatSize(file.size),
           updatedAt: formatDateTime(file.uploaded_at),
           sortTimeMs: parseSortTimeMs(file.uploaded_at),
@@ -300,6 +309,20 @@ const sortedRows = computed(() => {
 const selectedRows = computed(() => sortedRows.value.filter((row) => selectedResourceKeys.value.includes(selectionKey(row))));
 const hasSelectedRows = computed(() => selectedRows.value.length > 0);
 const selectedRowsDownloadAllowed = computed(() => selectedRows.value.every((row) => row.downloadAllowed));
+const downloadConfirmMessage = computed(() => {
+  const s = downloadConfirm.value;
+  if (!s) {
+    return "";
+  }
+  if (s.mode === "batch") {
+    return "所选项目中包含文件夹或超过本站设定阈值的大文件，打包成 ZIP 时体积与耗时不确定，可能较大。确定要继续吗？";
+  }
+  const row = s.row;
+  if (row.kind === "folder") {
+    return "您即将打包下载整个文件夹，体积与耗时不确定，可能较大。确定要开始下载吗？";
+  }
+  return `该文件大小为 ${row.sizeText}，已超过本站设定的大文件阈值（${formatSize(largeDownloadConfirmBytes.value)}）。确定要下载吗？`;
+});
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
 const currentFolderDescriptionHTML = computed(() => renderSimpleMarkdown(currentFolderDetail.value?.description ?? ""));
 
@@ -399,7 +422,14 @@ const canGoUp = computed(() => currentFolderID.value.length > 0);
 const backButtonLabel = computed(() => (searchKeyword.value ? "返回所在目录" : "返回上一级"));
 const canUseBackButton = computed(() => searchKeyword.value.length > 0 || canGoUp.value);
 
-function downloadResource(row: DirectoryRow) {
+function rowNeedsDownloadConfirm(row: DirectoryRow) {
+  if (row.kind === "folder") {
+    return true;
+  }
+  return (row.sizeBytes ?? 0) >= largeDownloadConfirmBytes.value;
+}
+
+function performDownloadResource(row: DirectoryRow) {
   actionMessage.value = "";
   actionError.value = "";
   if (!row.downloadAllowed) {
@@ -423,6 +453,42 @@ function downloadResource(row: DirectoryRow) {
 
   applyDownloadCountUpdate(row);
   void loadHotDownloads();
+}
+
+function downloadResource(row: DirectoryRow) {
+  if (!row.downloadAllowed) {
+    showTransientWarning("该资源不允许下载。");
+    return;
+  }
+  if (rowNeedsDownloadConfirm(row)) {
+    downloadConfirm.value = { mode: "single", row };
+    syncBodyScrollLock();
+    return;
+  }
+  performDownloadResource(row);
+}
+
+function closeDownloadConfirm() {
+  downloadConfirm.value = null;
+  syncBodyScrollLock();
+}
+
+function confirmPendingDownload() {
+  const pending = downloadConfirm.value;
+  if (!pending) {
+    return;
+  }
+  downloadConfirm.value = null;
+  syncBodyScrollLock();
+  if (pending.mode === "single") {
+    performDownloadResource(pending.row);
+  } else {
+    void performBatchDownload();
+  }
+}
+
+function batchNeedsDownloadConfirm() {
+  return selectedRows.value.some((row) => rowNeedsDownloadConfirm(row));
 }
 
 function selectionKey(row: DirectoryRow) {
@@ -459,6 +525,24 @@ function toggleSelectAllVisibleRows() {
 }
 
 async function downloadSelectedResources() {
+  if (!hasSelectedRows.value || batchDownloadSubmitting.value) {
+    return;
+  }
+  if (!selectedRowsDownloadAllowed.value) {
+    showTransientWarning("所选项目中包含不允许下载的项。");
+    return;
+  }
+
+  if (batchNeedsDownloadConfirm()) {
+    downloadConfirm.value = { mode: "batch" };
+    syncBodyScrollLock();
+    return;
+  }
+
+  await performBatchDownload();
+}
+
+async function performBatchDownload() {
   if (!hasSelectedRows.value || batchDownloadSubmitting.value) {
     return;
   }
@@ -528,12 +612,27 @@ function syncBodyScrollLock() {
       || feedbackModalOpen.value
       || feedbackSuccessModalOpen.value
       || folderDescriptionEditorOpen.value
-      || deleteResourceTarget.value,
+      || deleteResourceTarget.value
+      || downloadConfirm.value,
   );
   document.body.style.overflow = shouldLock ? "hidden" : "";
 }
 
+function onDocumentPointerDownCloseToolbarMenus(event: PointerEvent) {
+  if (!sortMenuOpen.value && !viewMenuOpen.value) {
+    return;
+  }
+  const root = toolbarDropdownsRef.value;
+  const target = event.target;
+  if (!root || !(target instanceof Node) || root.contains(target)) {
+    return;
+  }
+  sortMenuOpen.value = false;
+  viewMenuOpen.value = false;
+}
+
 onMounted(async () => {
+  document.addEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
   const storedViewMode = window.localStorage.getItem("public-home-view-mode");
   if (storedViewMode === "cards" || storedViewMode === "table") {
     viewMode.value = storedViewMode;
@@ -547,10 +646,30 @@ onMounted(async () => {
     sortDirection.value = storedSortDirection;
   }
   currentReceiptCode.value = await syncSessionReceiptCode();
-  await Promise.all([loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), loadDirectory(), loadAdminPermission()]);
+  await Promise.all([
+    loadAnnouncements(),
+    loadHotDownloads(),
+    loadLatestTitles(),
+    loadDirectory(),
+    loadAdminPermission(),
+    loadLargeDownloadPolicy(),
+  ]);
 });
 
+async function loadLargeDownloadPolicy() {
+  try {
+    const response = await httpClient.get<{ large_download_confirm_bytes: number }>("/public/download-policy");
+    const b = Number(response.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) {
+      largeDownloadConfirmBytes.value = b;
+    }
+  } catch {
+    /* 使用默认 1 GiB */
+  }
+}
+
 onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
   folderMarkdownResizeObserver?.disconnect();
   if (transientWarningTimer.value !== null) {
     window.clearTimeout(transientWarningTimer.value);
@@ -808,6 +927,7 @@ function downloadCurrentFolder() {
     coverUrl: coverImageHrefFromDescription((currentFolderDetail.value.description ?? "").trim()),
     downloadCount: currentFolderDetail.value.download_count ?? 0,
     fileCount: currentFolderDetail.value.file_count ?? 0,
+    sizeBytes: currentFolderDetail.value.total_size ?? 0,
     sizeText: formatSize(currentFolderDetail.value.total_size ?? 0),
     updatedAt: formatDateTime(currentFolderDetail.value.updated_at),
     sortTimeMs: parseSortTimeMs(currentFolderDetail.value.updated_at),
@@ -912,6 +1032,7 @@ async function runSearch(keyword: string) {
             : null,
         downloadCount: item.download_count ?? 0,
         fileCount: 0,
+        sizeBytes: item.entity_type === "file" ? (item.size ?? 0) : 0,
         sizeText: item.entity_type === "file" ? formatSize(item.size ?? 0) : "-",
         updatedAt: modRaw ? formatDateTime(modRaw) : "-",
         sortTimeMs: parseSortTimeMs(modRaw),
@@ -1566,7 +1687,7 @@ async function syncSessionReceiptCode() {
                 {{ allVisibleRowsSelected ? "取消全选" : "全选" }}
               </button>
 
-              <div class="flex w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:justify-end">
+              <div ref="toolbarDropdownsRef" class="flex w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto sm:justify-end">
               <div class="relative">
                 <button
                   type="button"
@@ -2137,6 +2258,27 @@ async function syncSessionReceiptCode() {
               {{ deleteResourceSubmitting ? "删除中…" : "确认删除" }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div
+      v-if="downloadConfirm"
+      class="fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/30 px-4"
+      @click.self="closeDownloadConfirm"
+    >
+      <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" @click.stop>
+        <h3 class="text-lg font-semibold text-slate-900">确认下载</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-600">{{ downloadConfirmMessage }}</p>
+        <div class="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" class="btn-secondary" @click="closeDownloadConfirm">取消</button>
+          <button type="button" class="btn-primary" :disabled="batchDownloadSubmitting" @click="confirmPendingDownload">
+            {{ batchDownloadSubmitting ? "处理中…" : "确认下载" }}
+          </button>
         </div>
       </div>
     </div>
