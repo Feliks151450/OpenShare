@@ -1551,7 +1551,17 @@ async function syncSessionReceiptCode() {
   </Teleport>
 
   <main class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
+    <div class="space-y-6">
+      <InfoPanelCard
+        title="公告栏"
+        :items="recentAnnouncements"
+        clickable
+        action-label="详情"
+        empty-text="暂无公告"
+        @select="openAnnouncementDetail"
+        @action="openAnnouncementList"
+      />
+      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
       <section class="order-1 min-w-0">
         <div class="panel overflow-hidden">
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6 dark:border-slate-800">
@@ -2043,15 +2053,6 @@ async function syncSessionReceiptCode() {
 
       <aside class="order-2 min-w-0 space-y-4">
         <InfoPanelCard
-          title="公告栏"
-          :items="recentAnnouncements"
-          clickable
-          action-label="详情"
-          empty-text="暂无公告"
-          @select="openAnnouncementDetail"
-          @action="openAnnouncementList"
-        />
-        <InfoPanelCard
           title="热门下载"
           :items="hotDownloads"
           clickable
@@ -2070,6 +2071,7 @@ async function syncSessionReceiptCode() {
           @action="openLatestItemsModal"
         />
       </aside>
+      </div>
     </div>
   </main>
 
