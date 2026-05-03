@@ -117,11 +117,12 @@ func TestPublicFileDetailReturnsMetadata(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		ID          string `json:"id"`
-		Extension   string `json:"extension"`
-		FolderID    string `json:"folder_id"`
-		Description string `json:"description"`
-		Path        string `json:"path"`
+		ID            string `json:"id"`
+		Extension     string `json:"extension"`
+		FolderID      string `json:"folder_id"`
+		Description   string `json:"description"`
+		Path          string `json:"path"`
+		StoragePath   string `json:"storage_path"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode detail response: %v", err)
@@ -131,6 +132,10 @@ func TestPublicFileDetailReturnsMetadata(t *testing.T) {
 	}
 	if response.Path != folder.Name {
 		t.Fatalf("expected file path %q, got %q", folder.Name, response.Path)
+	}
+	expectedDisk := filepath.Join(*folder.SourcePath, file.Name)
+	if response.StoragePath != expectedDisk {
+		t.Fatalf("expected storage_path %q, got %q", expectedDisk, response.StoragePath)
 	}
 	if response.FolderID != folder.ID {
 		t.Fatalf("expected folder_id %q for managed file, got %q", folder.ID, response.FolderID)

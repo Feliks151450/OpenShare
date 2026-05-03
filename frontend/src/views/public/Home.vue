@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
   ChevronLeft,
   ChevronRight,
+  Database,
   Download,
   FileArchive,
   FileAudio,
   FileCode2,
   FileImage,
+  FilePenLine,
   FileSpreadsheet,
   FileText,
   FileType2,
@@ -18,10 +20,13 @@ import {
   Home,
   LayoutGrid,
   List,
+  NotebookText,
+  PanelRightOpen,
   Upload,
 } from "lucide-vue-next";
 
 import InfoPanelCard, { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vue";
+import PublicFileDetailView from "./PublicFileDetailView.vue";
 import SearchSection from "../../components/resources/SearchSection.vue";
 import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
@@ -32,7 +37,12 @@ import {
   fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
 } from "../../lib/markdown";
-import { onMarkdownLinkClickCapture } from "../../lib/publicMarkdownLinks";
+import {
+  hydrateMarkdownCatalogNavigatePresentation,
+  markdownCatalogNavigateInitialPresentation,
+  type MarkdownCatalogConfirmPresentation,
+} from "../../lib/markdownCatalogNavigateDisplay";
+import { markdownRoutePublicFileDetailId, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 import {
@@ -113,16 +123,20 @@ interface SearchResultResponse {
 const route = useRoute();
 const router = useRouter();
 
-function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
-  onMarkdownLinkClickCapture(ev, router);
-}
-
 const announcements = ref<AnnouncementItem[]>([]);
 const announcementDetail = ref<AnnouncementItem | null>(null);
 const announcementListOpen = ref(false);
 const hotDownloadItems = ref<HotDownloadItem[]>([]);
 const latestItems = ref<LatestItem[]>([]);
 const sidebarDetailModal = ref<SidebarDetailModalState | null>(null);
+/** 卡片「右侧预览」抽屉：嵌入 PublicFileDetailView */
+const fileDetailPanelFileId = ref<string | null>(null);
+/** Markdown 站内链接前往目录前确认 */
+const markdownCatalogNavigateConfirmRoute = ref<RouteLocationRaw | null>(null);
+let markdownCatalogNavigateConfirmResolve: ((ok: boolean) => void) | null = null;
+const markdownCatalogNavigatePresentation = ref<MarkdownCatalogConfirmPresentation | null>(null);
+let markdownCatalogNavigateHydrateGeneration = 0;
+
 const viewMode = ref<"cards" | "table">("cards");
 const sortMode = ref<"name" | "download" | "format" | "modified">("name");
 const sortDirection = ref<"asc" | "desc">("desc");
@@ -274,7 +288,7 @@ const rows = computed<DirectoryRow[]>(() => [
           id: file.id,
           kind: "file" as const,
           name: file.name,
-          extension: file.extension || extractExtension(file.name),
+          extension: normalizeFileExtension(file.extension) || extractExtension(file.name),
           description: desc,
           remark: (file.remark ?? "").trim(),
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
@@ -422,7 +436,6 @@ const currentFolderStats = computed(() => {
   }
 
   return [
-    { label: "文件夹名", value: currentFolderDetail.value.name },
     { label: "下载量", value: String(currentFolderDetail.value.download_count ?? 0) },
     { label: "文件数", value: `${currentFolderDetail.value.file_count ?? 0} 个文件` },
     { label: "文件夹大小", value: formatSize(currentFolderDetail.value.total_size ?? 0) },
@@ -690,9 +703,57 @@ function syncBodyScrollLock() {
       || feedbackSuccessModalOpen.value
       || folderDescriptionEditorOpen.value
       || deleteResourceTarget.value
-      || downloadConfirm.value,
+      || downloadConfirm.value
+      || Boolean(fileDetailPanelFileId.value)
+      || Boolean(markdownCatalogNavigateConfirmRoute.value),
   );
   document.body.style.overflow = shouldLock ? "hidden" : "";
+}
+
+function promptMarkdownCatalogNavigateConfirm(route: RouteLocationRaw): Promise<boolean> {
+  return new Promise((resolve) => {
+    markdownCatalogNavigateHydrateGeneration += 1;
+    const gen = markdownCatalogNavigateHydrateGeneration;
+    markdownCatalogNavigateConfirmRoute.value = route;
+    markdownCatalogNavigatePresentation.value = markdownCatalogNavigateInitialPresentation(route);
+    markdownCatalogNavigateConfirmResolve = resolve;
+    syncBodyScrollLock();
+    void hydrateMarkdownCatalogNavigatePresentation(route).then((presentation) => {
+      if (gen !== markdownCatalogNavigateHydrateGeneration) {
+        return;
+      }
+      markdownCatalogNavigatePresentation.value = presentation;
+    });
+  });
+}
+
+function dismissMarkdownCatalogNavigateConfirm(ok: boolean) {
+  markdownCatalogNavigateHydrateGeneration += 1;
+  markdownCatalogNavigateConfirmRoute.value = null;
+  markdownCatalogNavigatePresentation.value = null;
+  markdownCatalogNavigateConfirmResolve?.(ok);
+  markdownCatalogNavigateConfirmResolve = null;
+  syncBodyScrollLock();
+}
+
+function interceptHomeMarkdownFilePanelPeek(route: RouteLocationRaw): boolean {
+  const fileId = markdownRoutePublicFileDetailId(route);
+  if (!fileId) {
+    return false;
+  }
+  if (!isViewportTailwindXlMin()) {
+    return false;
+  }
+  fileDetailPanelFileId.value = fileId;
+  syncBodyScrollLock();
+  return true;
+}
+
+function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
+  onMarkdownLinkClickCapture(ev, router, {
+    interceptPush: interceptHomeMarkdownFilePanelPeek,
+    confirmBeforeMarkdownCatalogNavigate: promptMarkdownCatalogNavigateConfirm,
+  });
 }
 
 function onDocumentPointerDownCloseToolbarMenus(event: PointerEvent) {
@@ -757,12 +818,53 @@ onBeforeUnmount(() => {
   if (transientWarningTimer.value !== null) {
     window.clearTimeout(transientWarningTimer.value);
   }
+  markdownCatalogNavigateHydrateGeneration += 1;
+  markdownCatalogNavigateConfirmResolve?.(false);
+  markdownCatalogNavigateConfirmResolve = null;
+  markdownCatalogNavigateConfirmRoute.value = null;
+  markdownCatalogNavigatePresentation.value = null;
   document.body.style.overflow = "";
 });
 
 watch(currentFolderID, () => {
+  fileDetailPanelFileId.value = null;
+  if (markdownCatalogNavigateConfirmRoute.value) {
+    dismissMarkdownCatalogNavigateConfirm(false);
+  }
   clearSearchState();
   void loadDirectory();
+});
+
+watch(fileDetailPanelFileId, (id, _prev, onCleanup) => {
+  syncBodyScrollLock();
+  if (!id) {
+    return;
+  }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      closeFileDetailPanel();
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKeyDown);
+  });
+});
+
+watch(markdownCatalogNavigateConfirmRoute, (r, _p, onCleanup) => {
+  syncBodyScrollLock();
+  if (!r) {
+    return;
+  }
+  const onKeyDownCatalog = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      dismissMarkdownCatalogNavigateConfirm(false);
+    }
+  };
+  window.addEventListener("keydown", onKeyDownCatalog);
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKeyDownCatalog);
+  });
 });
 
 async function loadAnnouncements() {
@@ -1109,6 +1211,31 @@ function openFile(fileID: string) {
   void router.push({ name: "public-file-detail", params: { fileID } });
 }
 
+function openFileDetailInSidePanel(fileID: string) {
+  fileDetailPanelFileId.value = fileID;
+}
+
+function closeFileDetailPanel() {
+  fileDetailPanelFileId.value = null;
+}
+
+function onFileDetailPanelOpenFullPage() {
+  const id = fileDetailPanelFileId.value;
+  closeFileDetailPanel();
+  if (id) {
+    openFile(id);
+  }
+}
+
+function onFileDetailPanelNavigate(nextId: string) {
+  fileDetailPanelFileId.value = nextId;
+}
+
+function onFileDetailPanelLeaveCatalog() {
+  closeFileDetailPanel();
+  void router.push({ name: "public-home" });
+}
+
 function downloadCurrentFolder() {
   if (!currentFolderDetail.value) {
     return;
@@ -1225,7 +1352,7 @@ async function runSearch(keyword: string) {
         id: item.id,
         kind: item.entity_type,
         name: item.name,
-        extension: item.entity_type === "file" ? (item.extension || extractExtension(item.name)) : "",
+        extension: item.entity_type === "file" ? normalizeFileExtension(item.extension) || extractExtension(item.name) : "",
         description: "",
         remark: (item.remark ?? "").trim(),
         coverUrl:
@@ -1683,15 +1810,35 @@ function extractExtension(name: string) {
   return name.slice(index + 1).toLowerCase();
 }
 
+/** 后端等处可能存 `filepath.Ext` 形式（含前导 `.`），图标与排序按无前缀后缀解析 */
+function normalizeFileExtension(ext: string | undefined | null): string {
+  let s = String(ext ?? "").trim().toLowerCase();
+  while (s.startsWith(".")) {
+    s = s.slice(1);
+  }
+  return s;
+}
+
 function fileIconComponent(extension: string) {
-  const ext = extension.toLowerCase();
+  const ext = normalizeFileExtension(extension);
   if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(ext)) return FileImage;
-  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return FileVideo;
+  if (["mp4", "mov", "avi", "mkv", "webm", "m4v", "ogv"].includes(ext)) return FileVideo;
   if (["mp3", "wav", "flac", "aac", "m4a", "ogg"].includes(ext)) return FileAudio;
   if (["zip", "rar", "7z", "tar", "gz", "bz2", "xz"].includes(ext)) return FileArchive;
+  if (["nc"].includes(ext)) return Database;
+  if (["ncl"].includes(ext)) return FileCode2;
+  if (["md", "markdown"].includes(ext)) return FilePenLine;
+  if (ext === "pdf") return NotebookText;
+  if (["doc", "docx", "ppt", "pptx"].includes(ext)) return NotebookText;
   if (["xls", "xlsx", "csv", "numbers"].includes(ext)) return FileSpreadsheet;
-  if (["js", "ts", "jsx", "tsx", "json", "html", "css", "go", "py", "java", "c", "cpp", "h", "hpp", "rs", "sh", "yaml", "yml", "toml", "xml"].includes(ext)) return FileCode2;
-  if (["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "rtf"].includes(ext)) return FileText;
+  if (
+    ["js", "ts", "jsx", "tsx", "json", "html", "css", "go", "py", "java", "c", "cpp", "h", "hpp", "rs", "sh", "yaml", "yml", "toml", "xml"].includes(
+      ext,
+    )
+  ) {
+    return FileCode2;
+  }
+  if (["txt", "rtf"].includes(ext)) return FileText;
   return FileType2;
 }
 
@@ -1735,7 +1882,7 @@ function formatSortRank(row: DirectoryRow) {
     return 0;
   }
 
-  const extension = row.extension.toLowerCase();
+  const extension = normalizeFileExtension(row.extension);
   if (extension === "pdf") {
     return 1;
   }
@@ -1769,7 +1916,7 @@ async function syncSessionReceiptCode() {
     </div>
   </Teleport>
 
-  <main class="app-container py-2 sm:py-8 lg:py-2">
+  <main class="app-container py-2 sm:py-8 lg:py-8">
     <div class="space-y-6">
       <div class="block xl:hidden">
         <InfoPanelCard
@@ -1813,7 +1960,9 @@ async function syncSessionReceiptCode() {
             <section>
               <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1 space-y-3">
-                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Folder Info</p>
+                  <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-blue-600 sm:text-xl dark:text-slate-100">
+                    {{ currentFolderDetail.name }}
+                  </p>
                   <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
                     <div
                       v-for="item in currentFolderStats"
@@ -2098,6 +2247,12 @@ async function syncSessionReceiptCode() {
                     loading="lazy"
                   />
                   <div
+                    v-if="row.kind === 'file'"
+                    class="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/90 bg-white/95 shadow-sm backdrop-blur-sm ring-1 ring-slate-200/75"
+                  >
+                    <component :is="fileIconComponent(row.extension)" class="h-5 w-5 shrink-0 text-slate-700" />
+                  </div>
+                  <div
                     v-if="cardMultiSelectMode"
                     class="absolute right-3 top-3 z-10 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm"
                   >
@@ -2138,7 +2293,7 @@ async function syncSessionReceiptCode() {
                       <span class="text-slate-500">{{ row.sizeText }}</span>
                     </template>
                   </div>
-                  <div class="mt-2 flex items-center justify-between border-t border-slate-100 pt-3">
+                  <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                     <button
                       type="button"
                       class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
@@ -2146,14 +2301,26 @@ async function syncSessionReceiptCode() {
                     >
                       <Flag class="h-4 w-4" />
                     </button>
-                    <button
-                      v-if="row.downloadAllowed"
-                      type="button"
-                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-                      @click.stop="downloadResource(row)"
-                    >
-                      <Download class="h-4 w-4" />
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <button
+                        v-if="row.kind === 'file'"
+                        type="button"
+                        title="右侧打开预览"
+                        class="hidden xl:inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        aria-label="右侧打开预览"
+                        @click.stop="openFileDetailInSidePanel(row.id)"
+                      >
+                        <PanelRightOpen class="h-4 w-4" />
+                      </button>
+                      <button
+                        v-if="row.downloadAllowed"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        @click.stop="downloadResource(row)"
+                      >
+                        <Download class="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -2221,7 +2388,7 @@ async function syncSessionReceiptCode() {
                   </template>
                 </div>
 
-                <div class="mt-2 flex items-center justify-between border-t border-slate-100 py-2.5">
+                <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 py-2.5">
                   <button
                     type="button"
                     class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
@@ -2229,14 +2396,26 @@ async function syncSessionReceiptCode() {
                   >
                     <Flag class="h-4 w-4" />
                   </button>
-                  <button
-                    v-if="row.downloadAllowed"
-                    type="button"
-                    class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-                    @click.stop="downloadResource(row)"
-                  >
-                    <Download class="h-4 w-4" />
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="row.kind === 'file'"
+                      type="button"
+                      title="右侧打开预览"
+                      class="hidden xl:inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      aria-label="右侧打开预览"
+                      @click.stop="openFileDetailInSidePanel(row.id)"
+                    >
+                      <PanelRightOpen class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-if="row.downloadAllowed"
+                      type="button"
+                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      @click.stop="downloadResource(row)"
+                    >
+                      <Download class="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </template>
             </article>
@@ -2297,14 +2476,10 @@ async function syncSessionReceiptCode() {
                       v-else
                       class="flex min-w-0 items-start gap-3 text-left"
                     >
-                      <img
-                        v-if="row.coverUrl"
-                        :src="row.coverUrl"
-                        alt=""
-                        class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover"
-                        loading="lazy"
+                      <component
+                        :is="fileIconComponent(row.extension)"
+                        class="mt-0.5 h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400"
                       />
-                      <component v-else :is="fileIconComponent(row.extension)" class="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
                       <div class="min-w-0 flex-1">
                         <span
                           class="block truncate text-base font-medium leading-snug text-slate-900 dark:text-slate-100"
@@ -2364,6 +2539,141 @@ async function syncSessionReceiptCode() {
       </div>
     </div>
   </main>
+
+  <Teleport to="body">
+    <Transition name="file-detail-drawer-shell">
+      <div
+        v-if="fileDetailPanelFileId"
+        class="fixed inset-0 z-[118]"
+      >
+        <div
+          class="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px]"
+          aria-hidden="true"
+          @click="closeFileDetailPanel"
+        />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="文件详情预览"
+          class="file-detail-drawer-panel absolute right-0 top-0 flex h-full w-[min(100vw,50rem)] min-w-0 flex-col overflow-hidden border-l border-slate-200 bg-[#fafafa] shadow-[0_0_0_1px_rgba(15,23,42,0.06),-12px_0_48px_-24px_rgba(15,23,42,0.25)] dark:border-slate-800 dark:bg-slate-950"
+          @click.stop
+        >
+          <PublicFileDetailView
+            class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto"
+            :override-file-id="fileDetailPanelFileId"
+            panel-presentation
+            @close-panel="closeFileDetailPanel"
+            @open-full-page="onFileDetailPanelOpenFullPage"
+            @navigate-panel-file="onFileDetailPanelNavigate"
+            @leave-to-public-catalog="onFileDetailPanelLeaveCatalog"
+          />
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal-shell">
+      <div
+        v-if="markdownCatalogNavigateConfirmRoute"
+        class="fixed inset-0 z-[126] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[1px]"
+        @click.self="dismissMarkdownCatalogNavigateConfirm(false)"
+      >
+        <div
+          class="modal-card panel w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-900"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="home-md-catalog-confirm-title"
+          @click.stop
+        >
+          <h3 id="home-md-catalog-confirm-title" class="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            前往文件夹浏览
+          </h3>
+          <template v-if="markdownCatalogNavigatePresentation">
+            <div
+              v-if="
+                markdownCatalogNavigatePresentation.variant !== 'folder'
+                  || markdownCatalogNavigatePresentation.loading
+              "
+              class="mt-3 space-y-2"
+            >
+              <p
+                class="text-base font-semibold leading-snug text-slate-900 dark:text-slate-50 sm:text-lg sm:leading-snug"
+              >
+                {{ markdownCatalogNavigatePresentation.headline }}
+              </p>
+              <p
+                v-if="markdownCatalogNavigatePresentation.detail"
+                class="text-sm leading-6 text-slate-600 dark:text-slate-300"
+              >
+                {{ markdownCatalogNavigatePresentation.detail }}
+              </p>
+              <p
+                v-if="markdownCatalogNavigatePresentation.loading"
+                class="text-xs leading-5 text-slate-500 dark:text-slate-400"
+              >
+                正在向服务器查询文件夹名称、路径与简介等信息……
+              </p>
+            </div>
+            <div v-else class="mt-3 max-h-[min(62vh,28rem)] space-y-3 overflow-y-auto pr-1 text-sm leading-relaxed">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  文件夹名
+                </p>
+                <p class="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                  {{ markdownCatalogNavigatePresentation.headline }}
+                </p>
+              </div>
+              <div v-if="markdownCatalogNavigatePresentation.detail">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  路径
+                </p>
+                <p class="mt-1 text-slate-700 dark:text-slate-300">
+                  {{ markdownCatalogNavigatePresentation.detail }}
+                </p>
+              </div>
+              <div v-if="markdownCatalogNavigatePresentation.remark">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  备注
+                </p>
+                <p class="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                  {{ markdownCatalogNavigatePresentation.remark }}
+                </p>
+              </div>
+              <div v-if="markdownCatalogNavigatePresentation.filesSummary">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  内容与大小
+                </p>
+                <p class="mt-1 tabular-nums text-slate-700 dark:text-slate-300">
+                  {{ markdownCatalogNavigatePresentation.filesSummary }}
+                </p>
+              </div>
+              <div v-if="markdownCatalogNavigatePresentation.descriptionHtml">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  简介
+                </p>
+                <div
+                  class="markdown-content mt-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/50"
+                  v-html="markdownCatalogNavigatePresentation.descriptionHtml"
+                />
+              </div>
+            </div>
+            <p class="mt-4 text-sm text-slate-500 dark:text-slate-400">
+              将把当前首页切换到上方所示文件夹的资料列表，确定吗？
+            </p>
+          </template>
+          <div class="mt-6 flex flex-wrap justify-end gap-3">
+            <button type="button" class="btn-secondary" @click="dismissMarkdownCatalogNavigateConfirm(false)">
+              取消
+            </button>
+            <button type="button" class="btn-primary" @click="dismissMarkdownCatalogNavigateConfirm(true)">
+              前往
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 
   <Teleport to="body">
     <Transition

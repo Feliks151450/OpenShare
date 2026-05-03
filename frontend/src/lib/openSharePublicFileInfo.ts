@@ -6,6 +6,8 @@ export interface PublicFileDetailPayload {
   extension: string;
   folder_id: string;
   path: string;
+  /** 托管磁盘绝对路径（可解析时为非空） */
+  storage_path?: string;
   description?: string;
   remark?: string;
   mime_type: string;
@@ -28,8 +30,10 @@ export type OpenSharePublicFileInfo = {
   sizeBytes: number;
   mimeType: string;
   folderId: string;
-  /** 服务端返回的库里路径分段（通常为所属目录名层级） */
+  /** 服务端返回的资料目录层级展示路径（通常为目录名层级） */
   path: string;
+  /** 同上接口字段：磁盘上的绝对路径；无托管路径时省略 */
+  storagePath?: string;
   description: string;
   remark: string;
   uploadedAt: string;
@@ -88,6 +92,10 @@ export function buildOpenSharePublicFileInfo(
     mimeType: String(payload.mime_type ?? ""),
     folderId: String(payload.folder_id ?? ""),
     path: String(payload.path ?? ""),
+    storagePath:
+      typeof payload.storage_path === "string" && payload.storage_path.trim() !== ""
+        ? payload.storage_path.trim()
+        : undefined,
     description: String(payload.description ?? ""),
     remark: String(payload.remark ?? ""),
     uploadedAt: String(payload.uploaded_at ?? ""),

@@ -41,25 +41,26 @@ type DownloadableFile struct {
 }
 
 type PublicFileDetail struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Extension     string    `json:"extension"`
-	FolderID      string    `json:"folder_id"`
-	Path          string    `json:"path"`
-	Description   string    `json:"description"`
-	Remark        string    `json:"remark"`
-	MimeType      string    `json:"mime_type"`
-	PlaybackURL   string    `json:"playback_url"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Extension           string `json:"extension"`
+	FolderID            string `json:"folder_id"`
+	Path                string `json:"path"`
+	StoragePath         string `json:"storage_path,omitempty"`
+	Description         string `json:"description"`
+	Remark              string `json:"remark"`
+	MimeType            string `json:"mime_type"`
+	PlaybackURL         string `json:"playback_url"`
 	PlaybackFallbackURL string `json:"playback_fallback_url"`
-	CoverURL      string    `json:"cover_url"`
+	CoverURL            string `json:"cover_url"`
 	// FolderDirectDownloadURL 由文件夹直链前缀 + 相对路径生成；不含 playback_url。前端优先使用 playback_url。
 	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
 	DownloadAllowed         bool   `json:"download_allowed"`
 	// DownloadPolicy 本节点存储：inherit | allow | deny（不含继承解析）
-	DownloadPolicy string `json:"download_policy"`
-	Size           int64  `json:"size"`
-	UploadedAt    time.Time `json:"uploaded_at"`
-	DownloadCount int64     `json:"download_count"`
+	DownloadPolicy string    `json:"download_policy"`
+	Size           int64     `json:"size"`
+	UploadedAt     time.Time `json:"uploaded_at"`
+	DownloadCount  int64     `json:"download_count"`
 }
 
 type BatchDownloadFile struct {
@@ -248,29 +249,35 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		return nil, fmt.Errorf("build public file path: %w", err)
 	}
 
+	storagePath := ""
+	if resolvedStorage, err := s.resolveManagedFilePath(ctx, file); err == nil {
+		storagePath = strings.TrimSpace(resolvedStorage)
+	}
+
 	dlAllowed, err := s.EffectiveDownloadAllowedForFile(ctx, file)
 	if err != nil {
 		return nil, fmt.Errorf("resolve download policy: %w", err)
 	}
 
 	return &PublicFileDetail{
-		ID:            file.ID,
-		Name:          file.Name,
-		Extension:     file.Extension,
-		FolderID:      strings.TrimSpace(optionalString(file.FolderID)),
-		Path:          fullPath,
-		Description:   file.Description,
-		Remark:        file.Remark,
-		MimeType:      file.MimeType,
-		PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
-		PlaybackFallbackURL: strings.TrimSpace(file.PlaybackFallbackURL),
-		CoverURL:      strings.TrimSpace(file.CoverURL),
+		ID:                      file.ID,
+		Name:                    file.Name,
+		Extension:               file.Extension,
+		FolderID:                strings.TrimSpace(optionalString(file.FolderID)),
+		Path:                    fullPath,
+		StoragePath:             storagePath,
+		Description:             file.Description,
+		Remark:                  file.Remark,
+		MimeType:                file.MimeType,
+		PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
+		PlaybackFallbackURL:     strings.TrimSpace(file.PlaybackFallbackURL),
+		CoverURL:                strings.TrimSpace(file.CoverURL),
 		FolderDirectDownloadURL: s.FolderDirectDownloadURLForFile(ctx, *file),
-		DownloadAllowed:       dlAllowed,
-		DownloadPolicy:        DownloadPolicyString(file.AllowDownload),
-		Size:                  file.Size,
-		UploadedAt:            file.CreatedAt,
-		DownloadCount:         file.DownloadCount,
+		DownloadAllowed:         dlAllowed,
+		DownloadPolicy:          DownloadPolicyString(file.AllowDownload),
+		Size:                    file.Size,
+		UploadedAt:              file.CreatedAt,
+		DownloadCount:           file.DownloadCount,
 	}, nil
 }
 

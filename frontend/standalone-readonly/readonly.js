@@ -637,6 +637,13 @@ function extractExtension(name) {
   return name.slice(index + 1).toLowerCase();
 }
 
+/** 后端等处可能存 `filepath.Ext` 形式（含前导 `.`），图标分支需无前缀后缀 */
+function normalizeExtensionField(ext) {
+  let s = String(ext ?? "").trim().toLowerCase();
+  while (s.startsWith(".")) s = s.slice(1);
+  return s;
+}
+
 const VIDEO_EXT = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v", "ogv"]);
 /** 与后端默认一致：超过该大小的单文件下载前确认；文件夹打包始终确认 */
 const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
@@ -750,6 +757,13 @@ const Ico = {
   home: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   chevronLeft: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>',
   chevronRight: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>',
+  /** 与 SPA 预览栏折叠箭头一致（chevron-down，收起时外层加 -rotate-90） */
+  chevronDown: '<svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ease-out" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>',
+  /** 同目录侧栏收起/展开（对齐 PublicFileDetailView） */
+  panelRightOpen:
+    '<svg class="h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m11 15-4-4 4-4"/></svg>',
+  panelRightClose:
+    '<svg class="h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>',
   download: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
   clock: '<svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   folder: '<svg class="h-7 w-7 text-blue-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.04 3.6a2 2 0 0 0-1.69-.9H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',
@@ -759,21 +773,41 @@ const Ico = {
   grid: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>',
   list: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>',
   link2: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+  /** 与 SPA Server 一致：复制托管磁盘路径 */
+  server:
+    '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>',
   share: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>',
   fileVideo: '<svg class="h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
   fileText: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+  /** 列表等：notebook-text，与 SPA NotebookText 一致 */
+  filePdfNotebook:
+    '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9.5 8h5"/><path d="M9.5 12H16"/><path d="M9.5 16H14"/></svg>',
+  /** 列表等：file-pen-line，与 SPA FilePenLine 一致 */
+  fileMarkdownPen:
+    '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z"/><path d="M14.487 7.858A1 1 0 0 1 14 7V2"/><path d="M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516"/><path d="M8 18h1"/></svg>',
+  /** 列表等：database，NetCDF（与 SPA Database 一致） */
+  fileNcDatabase:
+    '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>',
+  /** 列表等：file-code-corner，NCL（与 SPA FileCode2 一致） */
+  fileNclCode:
+    '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.15V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-3.35"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="m5 16-3 3 3 3"/><path d="m9 22 3-3-3-3"/></svg>',
+  /** 详情同目录列表：同上，小字号 */
   filePeerPdf:
-    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9.5 8h5"/><path d="M9.5 12H16"/><path d="M9.5 16H14"/></svg>',
   filePeerNc:
-    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M4.037 14.367a.492.492 0 0 1 .697 0l2.829 2.829a.49.49 0 0 1-.697.697l-2.83-2.829a.49.49 0 0 1 0-.697Z"/><path d="m10 11 2 2 4-4"/></svg>',
+    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>',
   clockBig: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
 };
 
 function fileIconSvg(ext) {
-  const e = String(ext || "").toLowerCase();
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(e)) {
+  const e = normalizeExtensionField(ext);
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(e)) {
     return '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
   }
+  if (["md", "markdown"].includes(e)) return Ico.fileMarkdownPen;
+  if (e === "pdf" || ["doc", "docx", "ppt", "pptx"].includes(e)) return Ico.filePdfNotebook;
+  if (e === "nc") return Ico.fileNcDatabase;
+  if (e === "ncl") return Ico.fileNclCode;
   if (VIDEO_EXT.has(e)) {
     return '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
   }
@@ -828,6 +862,10 @@ const state = {
   filePreviewNetcdfStructure: null,
   filePreviewTruncated: false,
   filePreviewImageFailed: false,
+  /** 文案 / Markdown / CSV / NetCDF 等抓取式预览头部折叠 */
+  fileFetchedPreviewCollapsed: false,
+  /** 与 SPA 对齐：详情页右侧同目录列表临时收起后加宽容器内预览，换文件恢复 */
+  peerListAsideTempHidden: false,
   /** PDF：本站下载时 blob: URL */
   filePdfBlobUrl: "",
   filePdfPreviewLoading: false,
@@ -896,7 +934,7 @@ function buildRows() {
           id: file.id,
           kind: "file",
           name: file.name,
-          extension: file.extension || extractExtension(file.name),
+          extension: normalizeExtensionField(file.extension) || extractExtension(file.name),
           description: desc,
           remark: (file.remark ?? "").trim(),
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
@@ -921,7 +959,7 @@ function displayedRows() {
 
 function formatSortRank(row) {
   if (row.kind === "folder") return 0;
-  const extension = row.extension.toLowerCase();
+  const extension = normalizeExtensionField(row.extension);
   if (extension === "pdf") return 1;
   if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) return 2;
   return 3;
@@ -956,7 +994,6 @@ function currentFolderStats() {
   const d = state.folderDetail;
   if (!d) return [];
   return [
-    { label: "文件夹名", value: d.name },
     { label: "下载量", value: String(d.download_count ?? 0) },
     { label: "文件数", value: `${d.file_count ?? 0} 个文件` },
     { label: "文件夹大小", value: formatSize(d.total_size ?? 0) },
@@ -1076,7 +1113,7 @@ async function runSearch(keyword) {
         id: item.id,
         kind: item.entity_type,
         name: item.name,
-        extension: item.entity_type === "file" ? item.extension || extractExtension(item.name) : "",
+        extension: item.entity_type === "file" ? normalizeExtensionField(item.extension) || extractExtension(item.name) : "",
         description: "",
         remark: (item.remark ?? "").trim(),
         coverUrl:
@@ -1129,6 +1166,8 @@ async function loadFileDetail() {
   state.filePreviewNetcdfStructure = null;
   state.filePreviewTruncated = false;
   state.filePreviewImageFailed = false;
+  state.fileFetchedPreviewCollapsed = false;
+  state.peerListAsideTempHidden = false;
   state.filePdfPreviewLoading = false;
   state.filePdfPreviewError = "";
   try {
@@ -1648,7 +1687,7 @@ function renderHome() {
       <section>
         <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div class="min-w-0 flex-1 space-y-3">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Folder Info</p>
+            <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-blue-600 sm:text-xl">${escapeHtml(fd.name)}</p>
             <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
               ${folderStats.map((item) => `<div class="inline-flex items-center gap-2"><span>${escapeHtml(item.label)}</span><span class="font-medium text-slate-900">${escapeHtml(item.value)}</span></div>`).join("")}
             </div>
@@ -1831,10 +1870,21 @@ function renderCard(row) {
         : "";
 
   if (cover) {
+    const typeBadgeSvg =
+      row.kind === "file"
+        ? fileIconSvg(row.extension)
+            .replace(/h-6 w-6/g, "h-5 w-5")
+            .replace(/h-7 w-7/g, "h-5 w-5")
+            .replace("text-slate-500", "text-slate-700")
+        : "";
+    const typeBadge =
+      row.kind === "file" && typeBadgeSvg
+        ? `<div class="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/90 bg-white/95 shadow-sm backdrop-blur-sm ring-1 ring-slate-200/75">${typeBadgeSvg}</div>`
+        : "";
     return `
     <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm ${cover ? "min-h-0" : "min-h-[168px] px-4 pt-3.5 sm:px-5"}" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
       <div class="relative aspect-[16/10] min-h-[132px] w-full max-h-[220px] shrink-0 overflow-hidden bg-slate-100 sm:min-h-[148px] sm:max-h-[240px]">
-        <img src="${escapeHtml(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+        <img src="${escapeHtml(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />${typeBadge}
       </div>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
         <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">${escapeHtml(row.name)}</h3>
@@ -1879,9 +1929,7 @@ function renderTableRow(row) {
       ? cover
         ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
         : Ico.folder.replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0")
-      : cover
-        ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
-        : fileIconSvg(row.extension).replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0");
+      : fileIconSvg(row.extension).replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0").replace("h-7 w-7", "mt-0.5 h-5 w-5 shrink-0");
   const remarkLine = remarkPreview
     ? `<p class="mt-0.5 truncate text-xs leading-snug text-slate-500" title="${escapeHtml(remarkPreview)}">${escapeHtml(remarkPreview)}</p>`
     : "";
@@ -1924,8 +1972,9 @@ function folderPeerAsideHtml(peerKind, opts = {}) {
       ? `<ul class="space-y-1">${state.folderVideoPeers.map((p) => `<li><a href="#/files/${encodeURIComponent(p.id)}" class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">${meta.icon}<span class="min-w-0 break-words leading-snug">${escapeHtml(p.name)}</span></a></li>`).join("")}</ul>`
       : `<p class="px-2 py-6 text-center text-sm text-slate-500">${escapeHtml(meta.empty)}</p>`;
   return `<aside${idAttr} class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80" style="max-height:min(70vh,720px)">
-      <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-        <p class="mt-1 text-sm font-medium text-slate-900">${escapeHtml(meta.title)}</p>
+      <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 sm:px-4">
+        <p class="min-w-0 text-sm font-medium text-slate-900">${escapeHtml(meta.title)}</p>
+        <button type="button" class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50" data-action="peer-aside-hide" title="收起侧栏以加宽预览区域" aria-label="收起同目录列表">${Ico.panelRightClose}<span class="hidden sm:inline">收起</span></button>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         ${listBody}
@@ -1957,6 +2006,12 @@ function renderFileDetail() {
   const absDlFull = absDl.startsWith("http") ? absDl : new URL(absDl, window.location.origin).href;
   const absDlEmbed = withBackendDownloadInlinePreviewParam(absDlFull);
   const detailUrl = absoluteDetailPageURL(d.id);
+  const extToolbar = (d.extension ?? "").replace(/^\./, "").toLowerCase() || extractExtension(d.name);
+  const storagePathToolbar = String(d.storage_path ?? "").trim();
+  const ncCopyServerPathBtn =
+    extToolbar === "nc" && storagePathToolbar
+      ? `<button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-copy-plain="${escapeHtml(storagePathToolbar)}" data-copy-label="服务器路径" title="复制文件在托管服务器磁盘上的路径（POSIX 路径，不是网页链接）" aria-label="复制服务器磁盘路径">${Ico.server}</button>`
+      : "";
   const q = buildVideoPlaybackUrlQueue(d.id, d);
   const activeSrc = q[Math.min(state.videoPlaybackStep, q.length - 1)] ?? "";
 
@@ -1968,14 +2023,26 @@ function renderFileDetail() {
     <div class="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] items-baseline gap-x-3 text-sm"><span class="text-slate-500">更新时间</span><span class="font-medium text-slate-900">${formatDateTime(d.uploaded_at)}</span></div>
   </div>`;
 
+  const restorePeerAsideVideoHtml = `<button type="button" class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-700/40 bg-slate-950/85 px-2.5 py-1 text-xs font-medium text-white shadow-md backdrop-blur-sm hover:bg-slate-950" data-action="peer-aside-show" aria-label="显示同目录列表" title="展开同文件夹列表">${Ico.panelRightOpen}<span class="whitespace-nowrap">同目录</span></button>`;
+
+  const restorePeerAsidePreviewHtml = `<button type="button" class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm hover:bg-slate-50" data-action="peer-aside-show" aria-label="显示同目录列表" title="展开同文件夹列表">${Ico.panelRightOpen}<span class="whitespace-nowrap">同目录</span></button>`;
+
+  const videoPeersEligible = Boolean(folderId && peerKind === "video");
+  const videoPeersExpanded = videoPeersEligible && !state.peerListAsideTempHidden;
+  const videoRowClass =
+    videoPeersEligible && state.peerListAsideTempHidden ? "relative min-w-0 w-full" : "flex flex-col gap-4 lg:flex-row lg:items-start";
+  const videoStageFlexClass =
+    videoPeersEligible && state.peerListAsideTempHidden ? "min-w-0 w-full " : "min-w-0 flex-1 self-start ";
+
   const videoBlock =
     isVideo && activeSrc
       ? `
-  <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-    <div id="detail-video-stage" class="min-w-0 flex-1 self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5">
+  <div class="${videoRowClass}">
+    ${videoPeersEligible && state.peerListAsideTempHidden ? restorePeerAsideVideoHtml : ""}
+    <div id="detail-video-stage" class="${videoStageFlexClass}overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5">
       <video id="detail-video" class="max-h-[min(70vh,720px)] w-full object-contain" controls playsinline preload="metadata" src="${escapeHtml(activeSrc)}"></video>
     </div>
-    ${folderId ? folderPeerAsideHtml("video", { asideId: "detail-video-peers-aside" }) : ""}
+    ${videoPeersExpanded ? folderPeerAsideHtml("video", { asideId: "detail-video-peers-aside" }) : ""}
   </div>`
       : "";
 
@@ -2006,10 +2073,15 @@ function renderFileDetail() {
       pdfInner = `<iframe title="PDF 预览" class="block min-h-[min(70vh,720px)] w-full border-0 bg-white" src="${escapeHtml(absDlFull)}"></iframe>`;
     }
     const pdfCore = `<div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5">${pdfInner}</div>`;
-    previewBlock =
-      folderId && peerKind === "pdf"
-        ? `<div class="flex flex-col gap-4 lg:flex-row lg:items-start"><div class="min-w-0 flex-1 self-start">${pdfCore}</div>${folderPeerAsideHtml("pdf")}</div>`
-        : pdfCore;
+    const pdfPeersEligible = Boolean(folderId && peerKind === "pdf");
+    const pdfPeersExpanded = pdfPeersEligible && !state.peerListAsideTempHidden;
+    if (!pdfPeersEligible) {
+      previewBlock = pdfCore;
+    } else if (pdfPeersExpanded) {
+      previewBlock = `<div class="flex flex-col gap-4 lg:flex-row lg:items-start"><div class="min-w-0 flex-1 self-start">${pdfCore}</div>${folderPeerAsideHtml("pdf")}</div>`;
+    } else {
+      previewBlock = `<div class="relative min-w-0 w-full">${restorePeerAsidePreviewHtml}${pdfCore}</div>`;
+    }
   } else if (!isVideo && (pvKind === "markdown" || pvKind === "plain" || pvKind === "csv" || pvKind === "netcdf")) {
     let inner = "";
     if (state.filePreviewTextLoading) {
@@ -2055,9 +2127,18 @@ function renderFileDetail() {
       !state.filePreviewTextLoading && !state.filePreviewTextError
         ? `<button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"${previewCopyable ? "" : " disabled"} data-action="copy-file-preview-text" aria-label="复制预览区文本">复制</button>`
         : "";
-    previewBlock = `<div class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"><div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2"><p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>${previewHeaderCopy}</div><div>${inner}</div></div>`;
-    if (pvKind === "netcdf" && folderId && peerKind === "nc") {
+    const pctCollapsed = state.fileFetchedPreviewCollapsed;
+    const previewChevron = Ico.chevronDown.replace(
+      'class="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ease-out"',
+      `class=\"h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ease-out${pctCollapsed ? " -rotate-90" : ""}\"`,
+    );
+    previewBlock = `<div class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"><div tabindex="0" role="button" data-action="toggle-fetched-text-preview-header" aria-label="展开或收起文件预览" aria-expanded="${pctCollapsed ? "false" : "true"}" aria-controls="fetched-text-preview-panel" class="flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2 transition hover:bg-slate-50/70"><span class="flex min-w-0 flex-1 items-center gap-2">${previewChevron}<span class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</span></span>${previewHeaderCopy}</div><div id="fetched-text-preview-panel" class="${pctCollapsed ? "hidden" : ""}">${inner}</div></div>`;
+    const ncPeersEligible = Boolean(pvKind === "netcdf" && folderId && peerKind === "nc");
+    const ncPeersExpanded = ncPeersEligible && !state.peerListAsideTempHidden;
+    if (ncPeersExpanded) {
       previewBlock = `<div class="flex flex-col gap-4 lg:flex-row lg:items-start"><div class="min-w-0 flex-1 self-start">${previewBlock}</div>${folderPeerAsideHtml("nc")}</div>`;
+    } else if (ncPeersEligible && state.peerListAsideTempHidden) {
+      previewBlock = `<div class="relative min-w-0 w-full">${restorePeerAsidePreviewHtml}${previewBlock}</div>`;
     }
   }
 
@@ -2065,6 +2146,23 @@ function renderFileDetail() {
 
   const metaVisible = !isVideo || state.videoFileMetaVisible;
   const dlAllowed = d.download_allowed !== false;
+
+  const remarkBelowTitleHtml = (d.remark ?? "").trim()
+    ? `<p class="text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(d.remark).trim())}</p>`
+    : "";
+  const coverHtmlIntro =
+    !isVideo && coverHref && pvKind !== "image"
+      ? `<div class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"><img src="${escapeHtml(coverHref)}" alt="" class="max-h-72 w-full object-cover" loading="lazy" /></div>`
+      : "";
+  const descBodyHtmlIntro = descHtml
+    ? `<div class="markdown-content">${descHtml}</div>`
+    : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`;
+  const introInnerHtml = `${coverHtmlIntro}${descBodyHtmlIntro}`;
+  const introCardTopHtml = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
+  const introCardBottomHtml = `<div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
+
+  const descAboveIntro =
+    !isVideo && pvKind != null && ["markdown", "pdf", "plain", "netcdf"].includes(pvKind);
 
   return `
   <section class="app-container py-2 sm:py-8 lg:py-2">
@@ -2075,16 +2173,14 @@ function renderFileDetail() {
           <div class="space-y-4">
             <div class="flex flex-col gap-4">
               <div class="min-w-0 w-full space-y-2">
-                <div class="flex items-center gap-2">
-                  <button type="button" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300" data-action="detail-back" aria-label="返回">${Ico.chevronLeft}</button>
-                  <p class="text-l font-semibold text-blue-600">返回文件夹</p>
-                </div>
                 <h3 class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl">${escapeHtml(d.name)}</h3>
+                ${remarkBelowTitleHtml}
               </div>
               <div class="w-full min-w-0">
                 <div class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3">
                   ${isVideo ? `<button id="file-detail-toggle-meta-btn" type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-action="toggle-video-meta" aria-label="文件信息" aria-controls="file-detail-meta-panel" aria-expanded="${state.videoFileMetaVisible ? "true" : "false"}">${Ico.fileText}</button>` : ""}
                   ${dlAllowed ? `<button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-copy="${escapeHtml(absDlFull)}" data-copy-label="下载直链" title="复制下载直链" aria-label="复制下载直链">${Ico.link2}</button>` : ""}
+                  ${ncCopyServerPathBtn}
                   <button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-copy="${escapeHtml(detailUrl)}" data-copy-label="详情页链接" title="复制详情页链接" aria-label="复制详情页链接">${Ico.share}</button>
                   ${isVideo && dlAllowed ? `<button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-action="copy-at-time" title="复制带时间戳的链接" aria-label="复制含时间戳的详情页链接">${Ico.clockBig}</button>` : ""}
                   ${dlAllowed ? `<button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700" data-action="dl-file" aria-label="下载文件">${Ico.download}</button>` : ""}
@@ -2096,20 +2192,9 @@ function renderFileDetail() {
               ${metaSecondary}
             </div>
             ${videoBlock}
+            ${descAboveIntro ? introCardTopHtml : ""}
             ${previewBlock}
-            ${
-              !isVideo && coverHref && pvKind !== "image"
-                ? `<div class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"><img src="${escapeHtml(coverHref)}" alt="" class="max-h-72 w-full object-cover" loading="lazy" /></div>`
-                : ""
-            }
-            <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
-              ${
-                (d.remark ?? "").trim()
-                  ? `<p class="mb-3 text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(d.remark).trim())}</p>`
-                  : ""
-              }
-              ${descHtml ? `<div class="markdown-content">${descHtml}</div>` : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`}
-            </div>
+            ${!descAboveIntro ? introCardBottomHtml : ""}
           </div>
         </section>
       </div>
@@ -2300,11 +2385,26 @@ function getRowByKey(key) {
 
 let globalHandlersInstalled = false;
 
+/** 预览栏折叠：焦点在头部时 Enter / Space（与 SPA 对齐） */
+function appKeyDownHandler(e) {
+  if (e.defaultPrevented || e.repeat) return;
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const t = e.target;
+  const app = document.getElementById("app");
+  if (!(t instanceof Element) || !app || !app.contains(t)) return;
+  if (t.closest('[data-action="copy-file-preview-text"]')) return;
+  if (!t.closest('[data-action="toggle-fetched-text-preview-header"]')) return;
+  e.preventDefault();
+  state.fileFetchedPreviewCollapsed = !state.fileFetchedPreviewCollapsed;
+  render();
+}
+
 function installGlobalHandlersOnce() {
   if (globalHandlersInstalled) return;
   globalHandlersInstalled = true;
   document.addEventListener("pointerdown", closeToolbarMenusIfOutside, true);
   document.addEventListener("click", appClickHandler, true);
+  document.addEventListener("keydown", appKeyDownHandler, true);
   document.addEventListener("submit", searchSubmitHandler, true);
   document.addEventListener("change", apiBaseChangeHandler, true);
 }
@@ -2428,8 +2528,15 @@ function appClickHandler(e) {
         return;
       }
 
-      const copyBtn = t.closest("[data-copy]");
+      const copyBtn = t.closest("[data-copy],[data-copy-plain]");
       if (copyBtn) {
+        const plain = copyBtn.getAttribute("data-copy-plain");
+        if (plain != null && plain !== "") {
+          const label = copyBtn.getAttribute("data-copy-label") || "内容";
+          e.preventDefault();
+          void copyText(label, plain);
+          return;
+        }
         const url = copyBtn.getAttribute("data-copy") || "";
         const label = copyBtn.getAttribute("data-copy-label") || "链接";
         e.preventDefault();
@@ -2448,6 +2555,23 @@ function appClickHandler(e) {
         if (!txt) return;
         const label = state.filePreviewTruncated ? "预览内容（已截断）" : "预览内容";
         void copyText(label, txt);
+        return;
+      }
+
+      if (t.closest('[data-action="peer-aside-hide"]')) {
+        state.peerListAsideTempHidden = true;
+        render();
+        return;
+      }
+      if (t.closest('[data-action="peer-aside-show"]')) {
+        state.peerListAsideTempHidden = false;
+        render();
+        return;
+      }
+
+      if (t.closest('[data-action="toggle-fetched-text-preview-header"]')) {
+        state.fileFetchedPreviewCollapsed = !state.fileFetchedPreviewCollapsed;
+        render();
         return;
       }
 
@@ -2746,6 +2870,7 @@ function buildOpenSharePublicFileInfoReadonly(payload) {
     mimeType: String(payload?.mime_type ?? ""),
     folderId: String(payload?.folder_id ?? ""),
     path: String(payload?.path ?? ""),
+    storagePath: typeof payload?.storage_path === "string" && payload.storage_path.trim() ? payload.storage_path.trim() : undefined,
     description: String(payload?.description ?? ""),
     remark: String(payload?.remark ?? ""),
     uploadedAt: String(payload?.uploaded_at ?? ""),

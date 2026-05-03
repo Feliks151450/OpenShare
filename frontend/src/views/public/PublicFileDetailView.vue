@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
+  ChevronDown,
   ChevronLeft,
   Clock,
+  Database,
   Download,
   FileText,
-  FileType,
   FileVideo,
+  Folder,
   Flag,
   Link2,
+  NotebookText,
+  PanelRightClose,
+  PanelRightOpen,
+  Server,
   Share2,
 } from "lucide-vue-next";
 
@@ -25,15 +31,45 @@ import {
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
-import { onMarkdownLinkClickCapture } from "../../lib/publicMarkdownLinks";
+import {
+  hydrateMarkdownCatalogNavigatePresentation,
+  markdownCatalogNavigateInitialPresentation,
+  type MarkdownCatalogConfirmPresentation,
+} from "../../lib/markdownCatalogNavigateDisplay";
+import { onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
 import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
+/** 递归嵌套「右侧预览」，避免与同名默认导出循环引用告警 */
+import PublicFileDetailPeek from "./PublicFileDetailView.vue";
+
+const props = withDefaults(
+  defineProps<{
+    /** 嵌入首页侧栏时传入，覆盖路由里的 fileID */
+    overrideFileId?: string | null;
+    /** 是否为右侧抽屉内嵌展示（交互与全文路由区分） */
+    panelPresentation?: boolean;
+  }>(),
+  {
+    overrideFileId: null,
+    panelPresentation: false,
+  },
+);
+
+const emit = defineEmits<{
+  closePanel: [];
+  openFullPage: [];
+  navigatePanelFile: [fileId: string];
+  leaveToPublicCatalog: [];
+}>();
 
 interface FileDetailResponse {
   id: string;
   name: string;
   extension: string;
   folder_id: string;
+  /** 站内展示用资料路径（通常为目录层级名）；非磁盘路径 */
   path: string;
+  /** 托管存储下磁盘绝对路径（可解析且存在时为非空）；与 `path` 不同 */
+  storage_path?: string;
   description: string;
   /** 单行备注；卡片副标题用，与 Markdown 简介分离 */
   remark?: string;
@@ -58,9 +94,15 @@ interface FileDetailResponse {
 const route = useRoute();
 const router = useRouter();
 
-function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
-  onMarkdownLinkClickCapture(ev, router);
-}
+/** 全文路由页：Markdown 链到站内其它文件时用右侧预览（与子组件抽屉逻辑一致） */
+const markdownPeekFileId = ref<string | null>(null);
+
+/** Markdown 内链前往资料目录前：弹窗占位，挂起 Promise 的 resolve */
+const markdownCatalogNavigateConfirmRoute = ref<RouteLocationRaw | null>(null);
+let markdownCatalogNavigateConfirmResolve: ((ok: boolean) => void) | null = null;
+const markdownCatalogNavigatePresentation = ref<MarkdownCatalogConfirmPresentation | null>(null);
+let markdownCatalogNavigateHydrateGeneration = 0;
+
 const detail = ref<FileDetailResponse | null>(null);
 const loading = ref(false);
 const error = ref("");
@@ -91,7 +133,146 @@ const feedbackSubmitting = ref(false);
 const feedbackMessage = ref("");
 const feedbackError = ref("");
 const currentReceiptCode = ref("");
-const fileID = computed(() => String(route.params.fileID ?? ""));
+const fileID = computed(() => {
+  const fromProp = (props.overrideFileId ?? "").trim();
+  if (fromProp) {
+    return fromProp;
+  }
+  return String(route.params.fileID ?? "");
+});
+
+watch(
+  () => fileID.value,
+  () => {
+    peerListAsideTempHidden.value = false;
+  },
+);
+
+function extractPublicFileDetailIdFromMarkdownRoute(routeRaw: RouteLocationRaw): string | null {
+  if (typeof routeRaw !== "object" || routeRaw == null || !("name" in routeRaw)) {
+    return null;
+  }
+  if (routeRaw.name !== "public-file-detail") {
+    return null;
+  }
+  const rawId = routeRaw.params?.fileID;
+  const part =
+    rawId === undefined || rawId === null ? "" : Array.isArray(rawId) ? String(rawId[0] ?? "") : String(rawId);
+  const nextId = decodeURIComponent(part).trim();
+  return nextId || null;
+}
+
+/** 抽屉内浏览器地址仍是首页：`./其它文件 id` 须相对 `/files/当前 id` 解析；全文页则仅用拦截逻辑 */
+function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
+  let resolutionBaseHref: string | undefined;
+  if (props.panelPresentation && fileID.value.trim() && typeof window !== "undefined") {
+    try {
+      const loc = router.resolve({
+        name: "public-file-detail",
+        params: { fileID: fileID.value.trim() },
+      });
+      resolutionBaseHref = new URL(loc.href, window.location.origin).href;
+    } catch {
+      resolutionBaseHref = undefined;
+    }
+  }
+
+  function interceptMarkdownInternalFileNavigate(routeRaw: RouteLocationRaw): boolean {
+    const nextId = extractPublicFileDetailIdFromMarkdownRoute(routeRaw);
+    if (!nextId) {
+      return false;
+    }
+
+    if (props.panelPresentation) {
+      if (!isViewportTailwindXlMin()) {
+        return false;
+      }
+      emit("navigatePanelFile", nextId);
+      return true;
+    }
+
+    if ((props.overrideFileId ?? "").trim()) {
+      return false;
+    }
+
+    if (nextId === fileID.value.trim()) {
+      return true;
+    }
+    if (!isViewportTailwindXlMin()) {
+      return false;
+    }
+    markdownPeekFileId.value = nextId;
+    return true;
+  }
+
+  function promptMarkdownCatalogNavigateConfirm(route: RouteLocationRaw): Promise<boolean> {
+    return new Promise((resolve) => {
+      markdownCatalogNavigateHydrateGeneration += 1;
+      const gen = markdownCatalogNavigateHydrateGeneration;
+      markdownCatalogNavigateConfirmRoute.value = route;
+      markdownCatalogNavigatePresentation.value = markdownCatalogNavigateInitialPresentation(route);
+      markdownCatalogNavigateConfirmResolve = resolve;
+      syncMarkdownPeekBodyScrollLock();
+      void hydrateMarkdownCatalogNavigatePresentation(route).then((presentation) => {
+        if (gen !== markdownCatalogNavigateHydrateGeneration) {
+          return;
+        }
+        markdownCatalogNavigatePresentation.value = presentation;
+      });
+    });
+  }
+
+  onMarkdownLinkClickCapture(ev, router, {
+    ...(resolutionBaseHref ? { resolutionBaseHref } : {}),
+    interceptPush: interceptMarkdownInternalFileNavigate,
+    confirmBeforeMarkdownCatalogNavigate: promptMarkdownCatalogNavigateConfirm,
+  });
+}
+
+function dismissMarkdownCatalogNavigateConfirm(ok: boolean) {
+  markdownCatalogNavigateHydrateGeneration += 1;
+  markdownCatalogNavigateConfirmRoute.value = null;
+  markdownCatalogNavigatePresentation.value = null;
+  markdownCatalogNavigateConfirmResolve?.(ok);
+  markdownCatalogNavigateConfirmResolve = null;
+  syncMarkdownPeekBodyScrollLock();
+}
+
+function closeMarkdownPeekDrawer() {
+  markdownPeekFileId.value = null;
+  syncMarkdownPeekBodyScrollLock();
+}
+
+function onMarkdownPeekOpenFullPage() {
+  const id = markdownPeekFileId.value?.trim() ?? "";
+  markdownPeekFileId.value = null;
+  syncMarkdownPeekBodyScrollLock();
+  if (id) {
+    void router.push({ name: "public-file-detail", params: { fileID: id } });
+  }
+}
+
+function onMarkdownPeekNavigate(nextId: string) {
+  markdownPeekFileId.value = nextId;
+}
+
+function onMarkdownPeekLeaveCatalog() {
+  markdownPeekFileId.value = null;
+  syncMarkdownPeekBodyScrollLock();
+  void router.push({ name: "public-home" });
+}
+
+function syncMarkdownPeekBodyScrollLock() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  if (props.panelPresentation) {
+    return;
+  }
+  const lock = markdownPeekFileId.value != null || markdownCatalogNavigateConfirmRoute.value != null;
+  document.body.style.overflow = lock ? "hidden" : "";
+}
+
 const backendDownloadPath = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
 
 const downloadActionsAllowed = computed(() => detail.value?.download_allowed !== false);
@@ -334,6 +515,17 @@ const previewVisualKind = computed((): DetailPreviewVisualKind | null =>
   detail.value ? fileDetailPreviewVisualKind(detail.value) : null,
 );
 
+/** NetCDF：工具栏复制托管磁盘绝对路径（非网页 URL） */
+const showNcCopyServerStoragePath = computed(() => {
+  if (!detail.value) {
+    return false;
+  }
+  if (normalizedFileExtension(detail.value) !== "nc") {
+    return false;
+  }
+  return (detail.value.storage_path ?? "").trim().length > 0;
+});
+
 const TEXTUAL_PREVIEW_KINDS = new Set<DetailPreviewVisualKind>(["markdown", "plain", "csv"]);
 
 const needsFetchedTextPreview = computed(() => {
@@ -344,14 +536,35 @@ const needsFetchedTextPreview = computed(() => {
   return TEXTUAL_PREVIEW_KINDS.has(k) || k === "netcdf";
 });
 
+/** Markdown / PDF / 纯文本(txt、ncl) / NetCDF(nc)：先展示简介再展示内嵌预览（与只读静态页对齐） */
+const showFileDescriptionAbovePreview = computed(() => {
+  if (!detail.value || isVideo.value) {
+    return false;
+  }
+  const k = previewVisualKind.value;
+  return k === "markdown" || k === "pdf" || k === "plain" || k === "netcdf";
+});
+
 const previewFetchedText = ref("");
 /** NetCDF API 返回的 `structure`，用于 Markdown 结构化预览 */
 const previewNetcdfStructure = ref<NetCDFDumpGroup | null>(null);
 const previewTextLoading = ref(false);
 const previewTextError = ref("");
 const previewTextTruncated = ref(false);
+const fetchedTextPreviewCollapsed = ref(false);
 const previewImageFailed = ref(false);
 let previewTextAbortController: AbortController | null = null;
+
+function onFetchedPreviewHeaderClick(ev: MouseEvent) {
+  if ((ev.target as HTMLElement).closest("button")) {
+    return;
+  }
+  fetchedTextPreviewCollapsed.value = !fetchedTextPreviewCollapsed.value;
+}
+
+function toggleFetchedTextPreviewCollapsedKey() {
+  fetchedTextPreviewCollapsed.value = !fetchedTextPreviewCollapsed.value;
+}
 
 const previewMarkdownRendered = computed(() => {
   if (previewVisualKind.value !== "markdown") {
@@ -368,11 +581,17 @@ const previewNetcdfMarkdownHtml = computed(() => {
 });
 
 const pdfPeerSidebar = computed(
-  () => peerSidebarSameExtLabel.value === "pdf" && Boolean(folderIdForPeers.value),
+  () =>
+    !props.panelPresentation &&
+    peerSidebarSameExtLabel.value === "pdf" &&
+    Boolean(folderIdForPeers.value),
 );
 
 const netcdfPeerSidebar = computed(
-  () => peerSidebarSameExtLabel.value === "nc" && Boolean(folderIdForPeers.value),
+  () =>
+    !props.panelPresentation &&
+    peerSidebarSameExtLabel.value === "nc" &&
+    Boolean(folderIdForPeers.value),
 );
 
 /** plain 中的 .ncl 与 csv 使用等宽展示 */
@@ -498,6 +717,7 @@ watch(
     }) as const,
   async ({ id, kind, src }) => {
     abortInlineTextPreview();
+    fetchedTextPreviewCollapsed.value = false;
     previewFetchedText.value = "";
     previewNetcdfStructure.value = null;
     previewTextError.value = "";
@@ -588,14 +808,42 @@ onBeforeUnmount(() => {
   abortPdfBlobFetch();
   revokePdfBlobUrl();
   teardownVideoStageObserver();
+  markdownPeekFileId.value = null;
+  markdownCatalogNavigateHydrateGeneration += 1;
+  markdownCatalogNavigateConfirmResolve?.(false);
+  markdownCatalogNavigateConfirmResolve = null;
+  markdownCatalogNavigateConfirmRoute.value = null;
+  markdownCatalogNavigatePresentation.value = null;
+  if (!props.panelPresentation && typeof document !== "undefined") {
+    document.body.style.overflow = "";
+  }
 });
 
 const folderIdForPeers = computed(() => detail.value?.folder_id?.trim() ?? "");
 
-/** 有文件夹且为视频 / PDF / NetCDF 时加宽容器，并显示同目录同后缀列表 */
+/** 临时收起右侧「同目录」列表以加宽容器内预览；换文件会自动恢复展开 */
+const peerListAsideTempHidden = ref(false);
+
+/** 有文件夹且为视频 / PDF / NetCDF 时加宽容器，并显示同目录同后缀列表（抽屉内不展示侧栏） */
 const layoutWide = computed(
-  () => Boolean(folderIdForPeers.value) && peerSidebarSameExtLabel.value !== null,
+  () =>
+    !props.panelPresentation &&
+    Boolean(folderIdForPeers.value) &&
+    peerSidebarSameExtLabel.value !== null,
 );
+
+const detailInnerMaxWidthClass = computed(() => {
+  if (props.panelPresentation) {
+    return "max-w-none";
+  }
+  return layoutWide.value ? "max-w-screen-2xl" : "max-w-6xl";
+});
+
+const showVideoPeerAsideExpanded = computed(
+  () => layoutWide.value && !peerListAsideTempHidden.value,
+);
+const showPdfPeerAsideExpanded = computed(() => pdfPeerSidebar.value && !peerListAsideTempHidden.value);
+const showNetcdfPeerAsideExpanded = computed(() => netcdfPeerSidebar.value && !peerListAsideTempHidden.value);
 
 const peerSidebarCopy = computed(() => {
   switch (peerSidebarSameExtLabel.value) {
@@ -624,11 +872,11 @@ const peerSidebarListIcon = computed(() => {
     case "video":
       return FileVideo;
     case "pdf":
-      return FileText;
+      return NotebookText;
     case "nc":
-      return FileType;
+      return Database;
     default:
-      return FileText;
+      return NotebookText;
   }
 });
 
@@ -761,13 +1009,9 @@ const detailCoverImageHref = computed(() =>
   detail.value ? fileCoverImageHrefFromFields(detail.value.cover_url, detail.value.description ?? "") : null,
 );
 const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
-const primaryDetailRows = computed(() => {
-  if (!detail.value) {
-    return [];
-  }
+/** 资料目录面包屑（与返回文件夹同目标）；提至标题区展示，避免淹没在「文件信息」里 */
+const detailFolderPathLabel = computed(() => (detail.value?.path || "主页根目录").trim() || "主页根目录");
 
-  return [{ label: "所属文件夹", value: detail.value.path || "主页根目录" }];
-});
 const secondaryDetailRows = computed(() => {
   if (!detail.value) {
     return [];
@@ -835,8 +1079,49 @@ async function loadLargeDownloadPolicy() {
 }
 
 watch(fileID, () => {
+  markdownPeekFileId.value = null;
+  if (markdownCatalogNavigateConfirmRoute.value) {
+    dismissMarkdownCatalogNavigateConfirm(false);
+  }
   videoFileMetaVisible.value = false;
   void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
+});
+
+watch(markdownPeekFileId, (id, _prev, onCleanup) => {
+  if (props.panelPresentation) {
+    return;
+  }
+  syncMarkdownPeekBodyScrollLock();
+  if (!id) {
+    return;
+  }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      closeMarkdownPeekDrawer();
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKeyDown);
+  });
+});
+
+watch(markdownCatalogNavigateConfirmRoute, (r, _p, onCleanup) => {
+  if (!props.panelPresentation) {
+    syncMarkdownPeekBodyScrollLock();
+  }
+  if (!r) {
+    return;
+  }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      dismissMarkdownCatalogNavigateConfirm(false);
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKeyDown);
+  });
 });
 
 watch(
@@ -869,7 +1154,7 @@ async function loadDetail() {
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       const fid = detail.value.folder_id?.trim() ?? "";
-      if (fid) {
+      if (fid && !props.panelPresentation) {
         if (isVideoDetail(detail.value)) {
           void loadFolderVideoPeers(fid, detail.value.id);
         } else {
@@ -1072,12 +1357,36 @@ function formatSizeBytes(n: number) {
 }
 
 function goBack() {
+  if (props.panelPresentation) {
+    emit("closePanel");
+    return;
+  }
   const folderID = detail.value?.folder_id?.trim() ?? "";
   if (folderID) {
     void router.push({ name: "public-home", query: { folder: folderID } });
     return;
   }
   void router.push({ name: "public-home" });
+}
+
+function leaveToPublicCatalogHome() {
+  if (props.panelPresentation) {
+    emit("leaveToPublicCatalog");
+    return;
+  }
+  void router.push({ name: "public-home" });
+}
+
+function emitOpenFullPage() {
+  emit("openFullPage");
+}
+
+function onPeerListNavigate(peerId: string) {
+  if (props.panelPresentation) {
+    emit("navigatePanelFile", peerId);
+    return;
+  }
+  void router.push({ name: "public-file-detail", params: { fileID: peerId } });
 }
 
 function showLinkCopyHint(text: string) {
@@ -1101,6 +1410,20 @@ async function copyLink(label: string, url: string) {
     showLinkCopyHint(`已复制${label}`);
   } else {
     showLinkCopyHint("复制失败，请手动长按或右键复制地址栏。");
+  }
+}
+
+async function copyServerStoragePath() {
+  const raw = (detail.value?.storage_path ?? "").trim();
+  if (!raw) {
+    showLinkCopyHint("暂无服务器磁盘路径。");
+    return;
+  }
+  const ok = await copyPlainTextToClipboard(raw);
+  if (ok) {
+    showLinkCopyHint("已复制服务器路径");
+  } else {
+    showLinkCopyHint("复制失败，请手动复制。");
   }
 }
 
@@ -1180,8 +1503,8 @@ function performDownloadFile() {
 </script>
 
 <template>
-  <section class="app-container py-2 sm:py-8 lg:py-2">
-    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-screen-2xl' : 'max-w-6xl'">
+  <section :class="panelPresentation ? 'px-3 py-3 sm:px-4 sm:py-4' : 'app-container py-2 sm:py-8 lg:py-8'">
+    <div class="mx-auto w-full space-y-6" :class="detailInnerMaxWidthClass">
       <SurfaceCard>
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
 
@@ -1189,7 +1512,7 @@ function performDownloadFile() {
           <p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
           <div class="flex flex-col gap-3 sm:flex-row">
             <button type="button" class="btn-secondary w-full sm:w-auto" @click="goBack">返回上一页</button>
-            <button type="button" class="btn-primary w-full sm:w-auto" @click="$router.push({ name: 'public-home' })">返回首页</button>
+            <button type="button" class="btn-primary w-full sm:w-auto" @click="leaveToPublicCatalogHome">返回首页</button>
           </div>
         </div>
 
@@ -1206,28 +1529,48 @@ function performDownloadFile() {
             <div class="space-y-4">
               <div class="flex flex-col gap-4">
                 <div class="min-w-0 w-full space-y-2">
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                      aria-label="返回"
-                      @click="goBack"
+                  <button
+                    type="button"
+                    class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-blue-200/90 hover:from-blue-50/80 hover:to-slate-50 hover:shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-900/80 dark:hover:border-blue-800/70 dark:hover:from-slate-800/90"
+                    :title="props.panelPresentation ? '关闭并回到目录' : '在资料目录中打开该文件夹'"
+                    @click="goBack"
+                  >
+                    <Folder
+                      class="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400"
+                      aria-hidden="true"
+                    />
+                    <span
+                      class="min-w-0 flex-1 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere] dark:text-slate-100 sm:text-[1.0625rem]"
+                      :title="detailFolderPathLabel"
                     >
-                      <ChevronLeft class="h-4 w-4" />
-                    </button>
-                    <p class="text-l font-semibold text-blue-600">返回文件夹</p>
-                  </div>
+                      {{ detailFolderPathLabel }}
+                    </span>
+                  </button>
                   <h3
                     class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl"
                     :title="detail.name"
                   >
                     {{ detail.name }}
                   </h3>
+                  <p
+                    v-if="(detail.remark ?? '').trim()"
+                    class="text-sm leading-relaxed text-slate-700"
+                  >
+                    <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
+                  </p>
                 </div>
                 <div class="w-full min-w-0">
                   <div
                     class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3"
                   >
+                  <button
+                    v-if="panelPresentation"
+                    type="button"
+                    class="btn-primary shrink-0 whitespace-nowrap"
+                    @click="emitOpenFullPage"
+                  >
+                    在单独页中显示
+                  </button>
                   <button
                     v-if="isVideo"
                     type="button"
@@ -1274,6 +1617,16 @@ function performDownloadFile() {
                     <Link2 class="h-4 w-4" />
                   </button>
                   <button
+                    v-if="showNcCopyServerStoragePath"
+                    type="button"
+                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    title="复制文件在托管服务器磁盘上的路径（POSIX 路径，不是网页链接）"
+                    aria-label="复制服务器磁盘路径"
+                    @click="copyServerStoragePath"
+                  >
+                    <Server class="h-4 w-4" />
+                  </button>
+                  <button
                     type="button"
                     class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     title="复制本文件详情页链接（不含时间）"
@@ -1310,21 +1663,6 @@ function performDownloadFile() {
                 id="video-file-meta-panel"
                 class="min-w-0 space-y-3"
               >
-                <div class="grid gap-x-8 gap-y-3 lg:grid-cols-2">
-                  <div
-                    v-for="item in primaryDetailRows"
-                    :key="item.label"
-                    class="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] items-baseline gap-x-3 text-sm"
-                  >
-                    <span class="text-slate-500">{{ item.label }}</span>
-                    <span
-                      class="min-w-0 truncate font-medium text-slate-900"
-                      :title="item.value"
-                    >
-                      {{ item.value }}
-                    </span>
-                  </div>
-                </div>
                 <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
                   <div
                     v-for="item in secondaryDetailRows"
@@ -1343,12 +1681,53 @@ function performDownloadFile() {
               </div>
 
               <div
-                v-if="isVideo"
-                class="flex flex-col gap-4 lg:flex-row lg:items-start"
+                v-if="showFileDescriptionAbovePreview"
+                class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
               >
                 <div
+                  v-if="detailCoverImageHref && previewVisualKind !== 'image'"
+                  class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
+                >
+                  <img
+                    :src="detailCoverImageHref"
+                    alt=""
+                    class="max-h-72 w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
+                <div
+                  v-if="descriptionHTML"
+                  class="markdown-content"
+                  v-html="descriptionHTML"
+                  @click.capture="handleMarkdownInternalLinkNavigate"
+                />
+                <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
+              </div>
+
+              <div
+                v-if="isVideo"
+                :class="
+                  showVideoPeerAsideExpanded
+                    ? 'flex flex-col gap-4 lg:flex-row lg:items-start'
+                    : 'relative min-w-0 w-full'
+                "
+              >
+                <button
+                  v-if="layoutWide && peerListAsideTempHidden"
+                  type="button"
+                  class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-700/40 bg-slate-950/85 px-2.5 py-1 text-xs font-medium text-white shadow-md backdrop-blur-sm transition hover:bg-slate-950"
+                  aria-label="显示同目录列表"
+                  title="展开同文件夹列表"
+                  @click="peerListAsideTempHidden = false"
+                >
+                  <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  同目录
+                </button>
+                <div
                   ref="videoStageRef"
-                  class="min-w-0 flex-1 self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
+                  class="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
+                  :class="showVideoPeerAsideExpanded ? 'flex-1 self-start' : 'w-full'"
                 >
                   <video
                     :key="`${fileID}:${videoPlaybackStep}:${videoPlaybackActiveSrc}`"
@@ -1366,14 +1745,24 @@ function performDownloadFile() {
                 </div>
 
                 <aside
-                  v-if="folderIdForPeers"
+                  v-if="showVideoPeerAsideExpanded"
                   class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
                   :style="peerAsideMaxStyle"
                 >
-                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-                    <p class="mt-1 text-sm font-medium text-slate-900">
+                  <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 sm:px-4">
+                    <p class="min-w-0 text-sm font-medium text-slate-900">
                       {{ peerSidebarCopy.title }}
                     </p>
+                    <button
+                      type="button"
+                      class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                      title="收起侧栏以加宽预览区域"
+                      aria-label="收起同目录列表"
+                      @click="peerListAsideTempHidden = true"
+                    >
+                      <PanelRightClose class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span class="hidden sm:inline">收起</span>
+                    </button>
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                     <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
@@ -1381,7 +1770,21 @@ function performDownloadFile() {
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
                       <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <button
+                          v-if="panelPresentation"
+                          type="button"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          @click="onPeerListNavigate(peer.id)"
+                        >
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </button>
                         <RouterLink
+                          v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
                           class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
                         >
@@ -1423,11 +1826,25 @@ function performDownloadFile() {
 
               <div
                 v-else-if="previewVisualKind === 'pdf' && absoluteDownloadURL"
-                :class="pdfPeerSidebar ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : ''"
+                :class="[
+                  showPdfPeerAsideExpanded ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : '',
+                  pdfPeerSidebar && peerListAsideTempHidden ? 'relative min-w-0 w-full' : '',
+                ]"
               >
+                <button
+                  v-if="pdfPeerSidebar && peerListAsideTempHidden"
+                  type="button"
+                  class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
+                  aria-label="显示同目录列表"
+                  title="展开同文件夹 PDF 列表"
+                  @click="peerListAsideTempHidden = false"
+                >
+                  <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  同目录
+                </button>
                 <div
                   class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5"
-                  :class="pdfPeerSidebar ? 'min-w-0 flex-1' : ''"
+                  :class="showPdfPeerAsideExpanded && pdfPeerSidebar ? 'min-w-0 flex-1' : ''"
                 >
                 <div class="relative min-h-[min(70vh,720px)] w-full bg-white">
                   <p
@@ -1458,14 +1875,24 @@ function performDownloadFile() {
                 </div>
 
                 <aside
-                  v-if="pdfPeerSidebar"
+                  v-if="showPdfPeerAsideExpanded"
                   class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
                   :style="peerAsideMaxStyle"
                 >
-                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-                    <p class="mt-1 text-sm font-medium text-slate-900">
+                  <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 sm:px-4">
+                    <p class="min-w-0 text-sm font-medium text-slate-900">
                       {{ peerSidebarCopy.title }}
                     </p>
+                    <button
+                      type="button"
+                      class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                      title="收起侧栏以加宽预览区域"
+                      aria-label="收起同目录列表"
+                      @click="peerListAsideTempHidden = true"
+                    >
+                      <PanelRightClose class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span class="hidden sm:inline">收起</span>
+                    </button>
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                     <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
@@ -1473,7 +1900,21 @@ function performDownloadFile() {
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
                       <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <button
+                          v-if="panelPresentation"
+                          type="button"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          @click="onPeerListNavigate(peer.id)"
+                        >
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </button>
                         <RouterLink
+                          v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
                           class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
                         >
@@ -1495,26 +1936,60 @@ function performDownloadFile() {
 
               <div
                 v-else-if="needsFetchedTextPreview"
-                :class="netcdfPeerSidebar ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : ''"
+                :class="[
+                  showNetcdfPeerAsideExpanded ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : '',
+                  netcdfPeerSidebar && peerListAsideTempHidden ? 'relative min-w-0 w-full' : '',
+                ]"
               >
+              <button
+                v-if="netcdfPeerSidebar && peerListAsideTempHidden"
+                type="button"
+                class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
+                aria-label="显示同目录列表"
+                title="展开同文件夹 NetCDF 列表"
+                @click="peerListAsideTempHidden = false"
+              >
+                <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                同目录
+              </button>
               <div
                 class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"
-                :class="netcdfPeerSidebar ? 'min-w-0 flex-1' : ''"
+                :class="showNetcdfPeerAsideExpanded && netcdfPeerSidebar ? 'min-w-0 flex-1' : ''"
               >
-                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2">
-                  <p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>
+                <div
+                  class="flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2 transition hover:bg-slate-50/70"
+                  role="button"
+                  tabindex="0"
+                  aria-label="展开或收起文件预览"
+                  :aria-expanded="!fetchedTextPreviewCollapsed"
+                  aria-controls="fetched-text-preview-panel"
+                  @click="onFetchedPreviewHeaderClick"
+                  @keydown.enter.prevent="toggleFetchedTextPreviewCollapsedKey"
+                  @keydown.space.prevent="toggleFetchedTextPreviewCollapsedKey"
+                >
+                  <span class="flex min-w-0 flex-1 items-center gap-2">
+                    <ChevronDown
+                      class="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ease-out"
+                      :class="{ '-rotate-90': fetchedTextPreviewCollapsed }"
+                      aria-hidden="true"
+                    />
+                    <span class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</span>
+                  </span>
                   <button
                     v-if="!previewTextLoading && !previewTextError"
                     type="button"
                     class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     :disabled="!previewFetchedText.length && !previewNetcdfStructure"
                     aria-label="复制预览区文本"
-                    @click="copyFetchedPreviewText"
+                    @click.stop="copyFetchedPreviewText"
                   >
                     复制
                   </button>
                 </div>
-                <div>
+                <div
+                  v-show="!fetchedTextPreviewCollapsed"
+                  id="fetched-text-preview-panel"
+                >
                   <p v-if="previewTextLoading" class="text-sm text-slate-500">
                     {{ previewVisualKind === "netcdf" ? "正在加载 NetCDF 结构摘要…" : "正在加载预览内容…" }}
                   </p>
@@ -1559,14 +2034,24 @@ function performDownloadFile() {
               </div>
 
                 <aside
-                  v-if="netcdfPeerSidebar"
+                  v-if="showNetcdfPeerAsideExpanded"
                   class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
                   :style="peerAsideMaxStyle"
                 >
-                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-                    <p class="mt-1 text-sm font-medium text-slate-900">
+                  <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 sm:px-4">
+                    <p class="min-w-0 text-sm font-medium text-slate-900">
                       {{ peerSidebarCopy.title }}
                     </p>
+                    <button
+                      type="button"
+                      class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                      title="收起侧栏以加宽预览区域"
+                      aria-label="收起同目录列表"
+                      @click="peerListAsideTempHidden = true"
+                    >
+                      <PanelRightClose class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span class="hidden sm:inline">收起</span>
+                    </button>
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                     <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
@@ -1574,7 +2059,21 @@ function performDownloadFile() {
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
                       <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <button
+                          v-if="panelPresentation"
+                          type="button"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          @click="onPeerListNavigate(peer.id)"
+                        >
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </button>
                         <RouterLink
+                          v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
                           class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
                         >
@@ -1595,13 +2094,10 @@ function performDownloadFile() {
               </div>
             </div>
 
-            <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
-              <p
-                v-if="(detail.remark ?? '').trim()"
-                class="mb-3 text-sm leading-relaxed text-slate-700"
-              >
-                <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
-              </p>
+            <div
+              v-if="!showFileDescriptionAbovePreview"
+              class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
+            >
               <div
                 v-if="detailCoverImageHref && !isVideo && previewVisualKind !== 'image'"
                 class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
@@ -1907,6 +2403,165 @@ function performDownloadFile() {
           </div>
         </div>
       </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="modal-shell">
+        <div
+          v-if="markdownCatalogNavigateConfirmRoute"
+          class="fixed inset-0 z-[126] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[1px]"
+          @click.self="dismissMarkdownCatalogNavigateConfirm(false)"
+        >
+          <div
+            class="modal-card panel w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-900"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="md-catalog-confirm-title"
+            @click.stop
+          >
+            <h3 id="md-catalog-confirm-title" class="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              前往文件夹浏览
+            </h3>
+            <template v-if="markdownCatalogNavigatePresentation">
+              <div
+                v-if="
+                  markdownCatalogNavigatePresentation.variant !== 'folder'
+                    || markdownCatalogNavigatePresentation.loading
+                "
+                class="mt-3 space-y-2"
+              >
+                <p
+                  class="text-base font-semibold leading-snug text-slate-900 dark:text-slate-50 sm:text-lg sm:leading-snug"
+                >
+                  {{ markdownCatalogNavigatePresentation.headline }}
+                </p>
+                <p
+                  v-if="markdownCatalogNavigatePresentation.detail"
+                  class="text-sm leading-6 text-slate-600 dark:text-slate-300"
+                >
+                  {{ markdownCatalogNavigatePresentation.detail }}
+                </p>
+                <p
+                  v-if="markdownCatalogNavigatePresentation.loading"
+                  class="text-xs leading-5 text-slate-500 dark:text-slate-400"
+                >
+                  正在向服务器查询文件夹名称、路径与简介等信息……
+                </p>
+              </div>
+              <div
+                v-else-if="
+                  markdownCatalogNavigatePresentation.variant === 'folder'
+                    && markdownCatalogNavigatePresentation.folderDetailLoaded
+                "
+                class="mt-3 max-h-[min(62vh,28rem)] space-y-3 overflow-y-auto pr-1 text-sm leading-relaxed"
+              >
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    文件夹名
+                  </p>
+                  <p class="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                    {{ markdownCatalogNavigatePresentation.headline }}
+                  </p>
+                </div>
+                <div v-if="markdownCatalogNavigatePresentation.folderPathTrail">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    路径
+                  </p>
+                  <p class="mt-1 text-slate-700 dark:text-slate-300">
+                    {{ markdownCatalogNavigatePresentation.folderPathTrail }}
+                  </p>
+                </div>
+                <div v-if="markdownCatalogNavigatePresentation.folderIdLine">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    标识
+                  </p>
+                  <p class="mt-1 font-mono text-xs text-slate-600 dark:text-slate-400">
+                    {{ markdownCatalogNavigatePresentation.folderIdLine }}
+                  </p>
+                </div>
+                <div v-if="markdownCatalogNavigatePresentation.remark">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    备注
+                  </p>
+                  <p class="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                    {{ markdownCatalogNavigatePresentation.remark }}
+                  </p>
+                </div>
+                <div v-if="markdownCatalogNavigatePresentation.filesSummary">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    内容与大小
+                  </p>
+                  <p class="mt-1 tabular-nums text-slate-700 dark:text-slate-300">
+                    {{ markdownCatalogNavigatePresentation.filesSummary }}
+                  </p>
+                </div>
+                <div v-if="markdownCatalogNavigatePresentation.descriptionHtml">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    简介
+                  </p>
+                  <div
+                    class="markdown-content mt-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/50"
+                    v-html="markdownCatalogNavigatePresentation.descriptionHtml"
+                  />
+                </div>
+              </div>
+              <div v-else class="mt-3 space-y-2">
+                <p
+                  class="text-base font-semibold leading-snug text-slate-900 dark:text-slate-50 sm:text-lg sm:leading-snug"
+                >
+                  {{ markdownCatalogNavigatePresentation.headline }}
+                </p>
+                <p
+                  v-if="markdownCatalogNavigatePresentation.detail"
+                  class="text-sm leading-6 text-slate-600 dark:text-slate-300"
+                >
+                  {{ markdownCatalogNavigatePresentation.detail }}
+                </p>
+              </div>
+              <p class="mt-4 text-sm text-slate-500 dark:text-slate-400">
+                将从当前视图切换到上方所示目录的资料列表（相当于在首页打开对应文件夹）。
+              </p>
+            </template>
+            <div class="mt-6 flex flex-wrap justify-end gap-3">
+              <button type="button" class="btn-secondary" @click="dismissMarkdownCatalogNavigateConfirm(false)">
+                取消
+              </button>
+              <button type="button" class="btn-primary" @click="dismissMarkdownCatalogNavigateConfirm(true)">
+                前往
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="file-detail-drawer-shell">
+        <div v-if="markdownPeekFileId" class="fixed inset-0 z-[118]">
+          <div
+            class="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px]"
+            aria-hidden="true"
+            @click="closeMarkdownPeekDrawer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="文件详情预览"
+            class="file-detail-drawer-panel absolute right-0 top-0 flex h-full w-[min(100vw,50rem)] min-w-0 flex-col overflow-hidden border-l border-slate-200 bg-[#fafafa] shadow-[0_0_0_1px_rgba(15,23,42,0.06),-12px_0_48px_-24px_rgba(15,23,42,0.25)] dark:border-slate-800 dark:bg-slate-950"
+            @click.stop
+          >
+            <PublicFileDetailPeek
+              class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto"
+              :override-file-id="markdownPeekFileId"
+              panel-presentation
+              @close-panel="closeMarkdownPeekDrawer"
+              @open-full-page="onMarkdownPeekOpenFullPage"
+              @navigate-panel-file="onMarkdownPeekNavigate"
+              @leave-to-public-catalog="onMarkdownPeekLeaveCatalog"
+            />
+          </div>
+        </div>
       </Transition>
     </Teleport>
   </section>

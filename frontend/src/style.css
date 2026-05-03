@@ -332,6 +332,26 @@
   transform: translateY(18px) scale(0.98);
 }
 
+.file-detail-drawer-shell-enter-active,
+.file-detail-drawer-shell-leave-active {
+  transition: opacity 260ms ease;
+}
+
+.file-detail-drawer-shell-enter-active .file-detail-drawer-panel,
+.file-detail-drawer-shell-leave-active .file-detail-drawer-panel {
+  transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.file-detail-drawer-shell-enter-from,
+.file-detail-drawer-shell-leave-to {
+  opacity: 0;
+}
+
+.file-detail-drawer-shell-enter-from .file-detail-drawer-panel,
+.file-detail-drawer-shell-leave-to .file-detail-drawer-panel {
+  transform: translateX(100%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
