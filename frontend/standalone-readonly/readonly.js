@@ -3,6 +3,8 @@
  * 大文件与文件夹下载前会弹出确认（阈值来自 GET /public/download-policy）。
  * API 基址默认 /api（同域），可通过 localStorage「openshare_readonly_api_base」或页面内设置保存。
  * 所有请求 credentials: omit，不发送 Cookie。
+ *
+ * 控制台可用 window.OpenShare（nav / home），与主站 SPA 对齐，见文件末尾 mount。
  */
 const LS_API = "openshare_readonly_api_base";
 const LS_VIEW = "public-home-view-mode";
@@ -507,17 +509,34 @@ function parseHashRoute() {
   };
 }
 
-function setHashRoute(route) {
+function hashFragmentFromRoute(route) {
   if (route.view === "file" && route.fileId) {
     const t = route.t && String(route.t).trim() !== "" ? `?t=${encodeURIComponent(String(route.t))}` : "";
-    location.hash = `#/files/${encodeURIComponent(route.fileId)}${t}`;
-    return;
+    return `#/files/${encodeURIComponent(route.fileId)}${t}`;
   }
   const sp = new URLSearchParams();
   if (route.folder) sp.set("folder", route.folder);
   if (route.root === "1") sp.set("root", "1");
   const qs = sp.toString();
-  location.hash = qs ? `#/?${qs}` : "#/";
+  return qs ? `#/?${qs}` : "#/";
+}
+
+/** @param {{ replace?: boolean }} [opts] replace 时用 replaceState + bootstrap，不产生历史条目、也不触发 hashchange */
+function setHashRoute(route, opts = {}) {
+  const replace = Boolean(opts.replace);
+  const full = hashFragmentFromRoute(route);
+  if (replace) {
+    try {
+      const u = new URL(window.location.href);
+      history.replaceState({}, "", `${u.pathname}${u.search}${full}`);
+    } catch {
+      location.replace(`${window.location.pathname}${window.location.search}${full}`);
+    }
+    consumeApiFromHashQuery();
+    void bootstrapRoute();
+    return;
+  }
+  location.hash = full.startsWith("#") ? full.slice(1) : full;
 }
 
 function formatSize(size) {
@@ -1301,10 +1320,11 @@ function formatTimestampParam(seconds) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-function goBackFromDetail() {
+function goBackFromDetail(navOpts = {}) {
   const folderID = state.fileDetail?.folder_id?.trim() ?? "";
-  if (folderID) setHashRoute({ view: "home", folder: folderID, root: "", fileId: "", t: "" });
-  else setHashRoute({ view: "home", folder: "", root: "", fileId: "", t: "" });
+  const ro = navOpts ?? {};
+  if (folderID) setHashRoute({ view: "home", folder: folderID, root: "", fileId: "", t: "" }, ro);
+  else setHashRoute({ view: "home", folder: "", root: "", fileId: "", t: "" }, ro);
 }
 
 function rowNeedsDownloadConfirm(row) {
@@ -2630,6 +2650,137 @@ function consumeApiFromHashQuery() {
     /* ignore */
   }
 }
+
+let openShareReadonlyWarnedUpload = false;
+
+function buildOpenSharePublicFileInfoReadonly(payload) {
+  const id = String(payload?.id ?? "").trim();
+  const playbackUrlTrim = String(payload?.playback_url ?? "").trim();
+  const fallbackTrim = String(payload?.playback_fallback_url ?? "").trim();
+  const folderDirectTrim = String(payload?.folder_direct_download_url ?? "").trim();
+  const coverTrim = typeof payload?.cover_url === "string" ? payload.cover_url.trim() : "";
+  const eff = fileEffectiveDownloadHref(id, payload?.playback_url, payload?.folder_direct_download_url);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  let absEff = eff;
+  if (eff.trim() && !/^https?:\/\//i.test(eff.trim())) {
+    absEff = origin ? new URL(eff.startsWith("/") ? eff : `/${eff}`, origin).href : eff;
+  }
+  return {
+    id,
+    name: String(payload?.name ?? ""),
+    extension: String(payload?.extension ?? ""),
+    sizeBytes: Number(payload?.size) || 0,
+    mimeType: String(payload?.mime_type ?? ""),
+    folderId: String(payload?.folder_id ?? ""),
+    path: String(payload?.path ?? ""),
+    description: String(payload?.description ?? ""),
+    remark: String(payload?.remark ?? ""),
+    uploadedAt: String(payload?.uploaded_at ?? ""),
+    downloadCount: Number(payload?.download_count) || 0,
+    downloadAllowed: payload?.download_allowed !== false,
+    downloadPolicy: typeof payload?.download_policy === "string" ? payload.download_policy : undefined,
+    coverUrl: coverTrim || undefined,
+    playbackUrl: playbackUrlTrim ? playbackUrlTrim : null,
+    playbackFallbackUrl: fallbackTrim ? fallbackTrim : null,
+    folderDirectDownloadUrl: folderDirectTrim ? folderDirectTrim : null,
+    effectiveDownloadHref: eff,
+    effectiveDownloadAbsoluteUrl: absEff,
+    siteDownloadHref: `/api/public/files/${encodeURIComponent(id || "unknown")}/download`,
+  };
+}
+
+window.OpenShare = {
+  version: "1.0",
+  runtime: "readonly",
+  nav: {
+    getRoute() {
+      return { ...parseHashRoute(), hash: location.hash };
+    },
+    goHome(opts = {}) {
+      const replace = Boolean(opts.replace);
+      const folder = String(opts.folder ?? "").trim();
+      if (folder) {
+        setHashRoute({ view: "home", folder, root: "", fileId: "", t: "" }, { replace });
+        return Promise.resolve();
+      }
+      if (opts.root) {
+        setHashRoute({ view: "home", folder: "", root: "1", fileId: "", t: "" }, { replace });
+        return Promise.resolve();
+      }
+      setHashRoute({ view: "home", folder: "", root: "", fileId: "", t: "" }, { replace });
+      return Promise.resolve();
+    },
+    goFile(fileID, opts = {}) {
+      const id = String(fileID ?? "").trim();
+      if (!id) {
+        return Promise.reject(new Error("[OpenShare.nav.goFile] 需要有效的 file id"));
+      }
+      const t = opts.t != null && opts.t !== "" ? String(opts.t) : "";
+      setHashRoute({ view: "file", fileId: id, folder: "", root: "", t }, { replace: Boolean(opts.replace) });
+      return Promise.resolve();
+    },
+    goUpload() {
+      if (!openShareReadonlyWarnedUpload) {
+        openShareReadonlyWarnedUpload = true;
+        console.warn("[OpenShare.nav.goUpload] 只读静态页不包含上传路由，调用已忽略。");
+      }
+      return Promise.resolve(false);
+    },
+    back() {
+      history.back();
+    },
+    getFileInfo(fileID) {
+      const id = String(fileID ?? "").trim();
+      if (!id) {
+        return Promise.reject(new Error("[OpenShare.nav.getFileInfo] 需要有效的 file id"));
+      }
+      return apiRequest(`/public/files/${encodeURIComponent(id)}`, { method: "GET" }).then((payload) =>
+        buildOpenSharePublicFileInfoReadonly(payload),
+      );
+    },
+    leaveFileTowardFolder(opts = {}) {
+      if (parseHashRoute().view !== "file") {
+        return Promise.resolve(false);
+      }
+      goBackFromDetail({ replace: Boolean(opts.replace) });
+      return Promise.resolve(true);
+    },
+  },
+  home: {
+    setListView(mode) {
+      if (mode !== "cards" && mode !== "table") {
+        console.warn("[OpenShare.home.setListView] 仅支持 cards 或 table");
+        return false;
+      }
+      state.viewMode = mode;
+      savePref(LS_VIEW, mode);
+      state.viewMenuOpen = false;
+      if (parseHashRoute().view === "home") render();
+      return true;
+    },
+    setSortMode(mode) {
+      if (!["name", "download", "format", "modified"].includes(mode)) {
+        console.warn("[OpenShare.home.setSortMode] mode 取值无效");
+        return false;
+      }
+      state.sortMode = mode;
+      savePref(LS_SORT, mode);
+      if (parseHashRoute().view === "home") render();
+      return true;
+    },
+    setSortDirection(direction) {
+      if (direction !== "asc" && direction !== "desc") {
+        console.warn("[OpenShare.home.setSortDirection] 仅支持 asc 或 desc");
+        return false;
+      }
+      state.sortDirection = direction;
+      savePref(LS_SORT_DIR, direction);
+      state.sortMenuOpen = false;
+      if (parseHashRoute().view === "home") render();
+      return true;
+    },
+  },
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   initMarkdownCodeCopyDelegation();

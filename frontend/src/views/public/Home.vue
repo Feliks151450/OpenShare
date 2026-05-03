@@ -23,6 +23,7 @@ import {
 
 import InfoPanelCard, { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vue";
 import SearchSection from "../../components/resources/SearchSection.vue";
+import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
@@ -684,6 +685,11 @@ function onDocumentPointerDownCloseToolbarMenus(event: PointerEvent) {
 }
 
 onMounted(async () => {
+  registerHomeConsoleHooks({
+    setListView: setViewMode,
+    setListSort: setSortMode,
+    setListSortDirection: setSortDirection,
+  });
   document.addEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
   const storedViewMode = window.localStorage.getItem("public-home-view-mode");
   if (storedViewMode === "cards" || storedViewMode === "table") {
@@ -721,6 +727,7 @@ async function loadLargeDownloadPolicy() {
 }
 
 onBeforeUnmount(() => {
+  unregisterHomeConsoleHooks();
   document.removeEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
   folderMarkdownResizeObserver?.disconnect();
   if (transientWarningTimer.value !== null) {

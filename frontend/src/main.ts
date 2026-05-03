@@ -2,6 +2,7 @@ import { createPinia } from "pinia";
 import { createApp } from "vue";
 
 import App from "./App.vue";
+import { mountOpenShareConsole } from "./lib/openShareConsole";
 import { initMarkdownCodeCopyDelegation } from "./lib/markdownCodeCopy";
 import router from "./router";
 import "./style.css";
@@ -28,4 +29,5 @@ const app = createApp(App);
 
 app.use(createPinia());
 app.use(router);
+mountOpenShareConsole(router);
 app.mount("#app");

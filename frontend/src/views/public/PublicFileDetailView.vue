@@ -1432,7 +1432,7 @@ function performDownloadFile() {
                     正在加载 PDF…
                   </p>
                   <div v-else-if="pdfPreviewError" class="space-y-4 px-4 py-12 text-center">
-                    <p class="text-sm text-rose-700">{{ pdfPreviewError }}</p>
+                    <p class=" px-4 py-3 text-sm text-rose-700">{{ pdfPreviewError }}</p>
                     <a
                       :href="absoluteDownloadURL"
                       target="_blank"
@@ -1513,7 +1513,7 @@ function performDownloadFile() {
                   <p v-if="previewTextLoading" class="text-sm text-slate-500">
                     {{ previewVisualKind === "netcdf" ? "正在加载 NetCDF 结构摘要…" : "正在加载预览内容…" }}
                   </p>
-                  <p v-else-if="previewTextError" class="text-sm text-rose-700">{{ previewTextError }}</p>
+                  <p v-else-if="previewTextError" class="px-4 py-3 text-sm text-rose-700">{{ previewTextError }}</p>
                   <template v-else>
                     <p
                       v-if="previewTextTruncated"
