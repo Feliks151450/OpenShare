@@ -12,10 +12,11 @@ import (
 )
 
 type FolderTreeFolderRow struct {
-	ID         string
-	ParentID   *string
-	Name       string
-	SourcePath *string
+	ID                string
+	ParentID          *string
+	Name              string
+	SourcePath        *string
+	HidePublicCatalog bool
 }
 
 type FolderTreeFileRow struct {
@@ -56,7 +57,7 @@ func (r *ImportRepository) ListFolders(ctx context.Context) ([]FolderTreeFolderR
 	var rows []FolderTreeFolderRow
 	err := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, source_path").
+		Select("id, parent_id, name, source_path, hide_public_catalog").
 		Order("name ASC").
 		Find(&rows).Error
 	if err != nil {

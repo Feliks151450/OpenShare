@@ -521,6 +521,72 @@ function hashFragmentFromRoute(route) {
   return qs ? `#/?${qs}` : "#/";
 }
 
+/**
+ * Markdown 内相对/站内链 → 只读 hash 路由（与主站 `frontend/src/lib/publicMarkdownLinks.ts` 语义对齐）。
+ * @param {string} hrefRaw
+ * @returns {{ view: "file"|"home", fileId: string, folder: string, root: string, t: string } | null}
+ */
+function tryMarkdownHrefToReadonlyHashRoute(hrefRaw) {
+  const trimmed = String(hrefRaw ?? "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^(mailto:|tel:|javascript:)/i.test(trimmed)) {
+    return null;
+  }
+  if (trimmed.startsWith("#") && !trimmed.slice(1).includes("/")) {
+    return null;
+  }
+  let u;
+  try {
+    u = new URL(trimmed, window.location.href);
+  } catch {
+    return null;
+  }
+  const sameFileDoc = window.location.protocol === "file:" && u.protocol === "file:";
+  if (!sameFileDoc && u.origin !== window.location.origin) {
+    return null;
+  }
+  const pm = u.pathname.match(/^\/files\/([^/]+)\/?$/);
+  if (pm) {
+    const fileId = decodeURIComponent(pm[1] || "").trim();
+    if (!fileId) {
+      return null;
+    }
+    const tv = u.searchParams.get("t");
+    const t = tv != null && String(tv).trim() !== "" ? String(tv) : "";
+    return { view: "file", fileId, folder: "", root: "", t };
+  }
+  if (u.pathname === "/upload" || u.pathname === "/upload/") {
+    return null;
+  }
+  const isHomePath = u.pathname === "/" || u.pathname === "";
+  if (!isHomePath) {
+    return null;
+  }
+  for (const k of u.searchParams.keys()) {
+    if (k !== "folder" && k !== "root") {
+      return null;
+    }
+  }
+  const folderRaw = u.searchParams.get("folder");
+  const folder = folderRaw != null ? String(folderRaw).trim() : "";
+  const rootRaw = u.searchParams.get("root");
+  const rootOn = rootRaw === "1" || rootRaw === "true";
+
+  const empty = { view: "home", fileId: "", folder: "", root: "", t: "" };
+  if (folder) {
+    return { ...empty, folder };
+  }
+  if (rootOn) {
+    return { ...empty, root: "1" };
+  }
+  if ([...u.searchParams.keys()].length === 0) {
+    return empty;
+  }
+  return null;
+}
+
 /** @param {{ replace?: boolean }} [opts] replace 时用 replaceState + bootstrap，不产生历史条目、也不触发 hashchange */
 function setHashRoute(route, opts = {}) {
   const replace = Boolean(opts.replace);
@@ -692,7 +758,6 @@ const Ico = {
   x: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
   grid: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>',
   list: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>',
-  github: '<svg class="h-[17.2px] w-[17.2px]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>',
   link2: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
   share: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>',
   fileVideo: '<svg class="h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
@@ -1497,19 +1562,12 @@ function syncRouteFromHash() {
 function renderNavbar() {
   return `
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur">
-    <div class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8 xl:max-w-[2150px]">
-      <div class="min-w-0 flex items-center justify-start">
-        <a href="#/" class="inline-flex min-w-0 items-center gap-2 sm:gap-2.5" data-nav="home">
-          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">OS</span>
-          <span class="truncate font-serif text-[15px] font-extrabold tracking-tight text-slate-900 sm:text-[16px]">OpenShare</span>
-        </a>
-      </div>
-      <nav class="flex items-center justify-center gap-1 overflow-x-auto">
+    <div class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-3 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]">
+      <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
         <a href="#/" class="shrink-0 rounded-lg bg-slate-200/70 px-2.5 py-2 text-sm font-medium text-slate-900 sm:px-4">首页</a>
       </nav>
-      <div class="flex min-w-0 items-center justify-end gap-2">
+      <div class="flex shrink-0 items-center justify-end gap-2">
         <button type="button" class="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50" data-action="toggle-settings" title="API 基址">API</button>
-        <a href="https://github.com/zzzzquan/OpenShare" target="_blank" rel="noreferrer" aria-label="GitHub" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black text-white transition hover:bg-neutral-800">${Ico.github}</a>
       </div>
     </div>
   </header>`;
@@ -2277,6 +2335,21 @@ function appClickHandler(e) {
   if (!(t instanceof Element)) return;
   if (t.closest("[data-stop-modal]")) {
     e.stopPropagation();
+  }
+
+  if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const mdA = t.closest(".markdown-content a[href]");
+    if (mdA instanceof HTMLAnchorElement) {
+      const r = tryMarkdownHrefToReadonlyHashRoute(mdA.getAttribute("href") || "");
+      if (r) {
+        e.preventDefault();
+        if (r.view === "home") {
+          clearSearchState();
+        }
+        setHashRoute(r);
+        return;
+      }
+    }
   }
 
   if (t.closest("[data-action=\"download-confirm-yes\"]")) {

@@ -42,12 +42,7 @@ async function trackVisit() {
 
 <template>
   <div class="app-shell">
-    <Navbar
-      v-if="showPublicNavbar"
-      :items="links"
-      :current-path="route.path"
-      github-href="https://github.com/zzzzquan/OpenShare"
-    />
+    <Navbar v-if="showPublicNavbar" :items="links" :current-path="route.path" />
 
     <main :class="showPublicNavbar ? 'pt-16' : 'pt-0'">
       <RouterView :key="viewKey" />

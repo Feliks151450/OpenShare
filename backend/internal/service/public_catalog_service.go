@@ -46,18 +46,18 @@ type PublicFileFeedResult struct {
 }
 
 type PublicFileItem struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	Remark        string    `json:"remark"`
-	Extension     string    `json:"extension"`
-	CoverURL      string    `json:"cover_url"`
-	PlaybackURL   string    `json:"playback_url"`
-	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
-	DownloadAllowed bool    `json:"download_allowed"`
-	UploadedAt    time.Time `json:"uploaded_at"`
-	DownloadCount int64     `json:"download_count"`
-	Size          int64     `json:"size"`
+	ID                      string    `json:"id"`
+	Name                    string    `json:"name"`
+	Description             string    `json:"description"`
+	Remark                  string    `json:"remark"`
+	Extension               string    `json:"extension"`
+	CoverURL                string    `json:"cover_url"`
+	PlaybackURL             string    `json:"playback_url"`
+	FolderDirectDownloadURL string    `json:"folder_direct_download_url"`
+	DownloadAllowed         bool      `json:"download_allowed"`
+	UploadedAt              time.Time `json:"uploaded_at"`
+	DownloadCount           int64     `json:"download_count"`
+	Size                    int64     `json:"size"`
 }
 
 type PublicFolderItem struct {
@@ -78,19 +78,21 @@ type PublicFolderBreadcrumbItem struct {
 }
 
 type PublicFolderDetail struct {
-	ID            string                       `json:"id"`
-	Name          string                       `json:"name"`
-	Description   string                       `json:"description"`
-	Remark        string                       `json:"remark"`
-	ParentID      *string                      `json:"parent_id"`
-	Breadcrumbs   []PublicFolderBreadcrumbItem `json:"breadcrumbs"`
-	FileCount     int64                        `json:"file_count"`
-	DownloadCount int64                        `json:"download_count"`
-	TotalSize     int64                        `json:"total_size"`
-	UpdatedAt     time.Time                    `json:"updated_at"`
-	DirectLinkPrefix string                    `json:"direct_link_prefix"`
-	DownloadAllowed bool                       `json:"download_allowed"`
-	DownloadPolicy  string                     `json:"download_policy"`
+	ID               string                       `json:"id"`
+	Name             string                       `json:"name"`
+	Description      string                       `json:"description"`
+	Remark           string                       `json:"remark"`
+	ParentID         *string                      `json:"parent_id"`
+	Breadcrumbs      []PublicFolderBreadcrumbItem `json:"breadcrumbs"`
+	FileCount        int64                        `json:"file_count"`
+	DownloadCount    int64                        `json:"download_count"`
+	TotalSize        int64                        `json:"total_size"`
+	UpdatedAt        time.Time                    `json:"updated_at"`
+	DirectLinkPrefix string                       `json:"direct_link_prefix"`
+	DownloadAllowed  bool                         `json:"download_allowed"`
+	DownloadPolicy   string                       `json:"download_policy"`
+	// HidePublicCatalog 仅托管根目录返回：访客首页根列表是否隐藏该托管树。
+	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
 }
 
 func NewPublicCatalogService(repository *repository.PublicCatalogRepository, download *PublicDownloadService) *PublicCatalogService {
@@ -257,21 +259,26 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		}
 	}
 
-	return &PublicFolderDetail{
-		ID:            current.ID,
-		Name:          current.Name,
-		Description:   current.Description,
-		Remark:        current.Remark,
-		ParentID:      current.ParentID,
-		Breadcrumbs:   breadcrumbs,
-		FileCount:     current.FileCount,
-		DownloadCount: current.DownloadCount,
-		TotalSize:     current.TotalSize,
-		UpdatedAt:     current.UpdatedAt,
+	detail := PublicFolderDetail{
+		ID:               current.ID,
+		Name:             current.Name,
+		Description:      current.Description,
+		Remark:           current.Remark,
+		ParentID:         current.ParentID,
+		Breadcrumbs:      breadcrumbs,
+		FileCount:        current.FileCount,
+		DownloadCount:    current.DownloadCount,
+		TotalSize:        current.TotalSize,
+		UpdatedAt:        current.UpdatedAt,
 		DirectLinkPrefix: strings.TrimSpace(current.DirectLinkPrefix),
 		DownloadAllowed:  dlAllowed,
 		DownloadPolicy:   DownloadPolicyString(current.AllowDownload),
-	}, nil
+	}
+	if current.ParentID == nil {
+		h := current.HidePublicCatalog
+		detail.HidePublicCatalog = &h
+	}
+	return &detail, nil
 }
 
 type normalizedPublicFolderFileListInput struct {
@@ -372,13 +379,13 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			}
 		}
 		items = append(items, PublicFileItem{
-			ID:            file.ID,
-			Name:          file.Name,
-			Description:   file.Description,
-			Remark:        file.Remark,
-			Extension:     file.Extension,
-			CoverURL:      strings.TrimSpace(file.CoverURL),
-			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
+			ID:                      file.ID,
+			Name:                    file.Name,
+			Description:             file.Description,
+			Remark:                  file.Remark,
+			Extension:               file.Extension,
+			CoverURL:                strings.TrimSpace(file.CoverURL),
+			PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
 			FolderDirectDownloadURL: fd,
 			DownloadAllowed:         allowed,
 			UploadedAt:              file.CreatedAt,

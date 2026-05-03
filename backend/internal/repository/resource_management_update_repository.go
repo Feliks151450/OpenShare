@@ -97,6 +97,37 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	})
 }
 
+func (r *ResourceManagementRepository) UpdateRootFolderHidePublicCatalog(
+	ctx context.Context,
+	folderID string,
+	hide bool,
+	operatorID string,
+	operatorIP string,
+	logID string,
+	now time.Time,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Folder{}).
+			Where("id = ? AND parent_id IS NULL", folderID).
+			Updates(map[string]any{
+				"hide_public_catalog": hide,
+				"updated_at":          now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("update root folder catalog visibility: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		detail := "show"
+		if hide {
+			detail = "hide"
+		}
+		return createOperationLogTx(tx, logID, operatorID, "folder_catalog_visibility", "folder", folderID, detail, operatorIP, now)
+	})
+}
+
 func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	ctx context.Context,
 	folderID string,

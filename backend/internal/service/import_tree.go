@@ -6,18 +6,19 @@ import (
 )
 
 type FolderTreeNode struct {
-	ID         string               `json:"id"`
-	Name       string               `json:"name"`
-	SourcePath string               `json:"source_path"`
-	Folders    []FolderTreeNode     `json:"folders"`
-	Files      []FolderTreeFile     `json:"files"`
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	SourcePath        string           `json:"source_path"`
+	HidePublicCatalog bool             `json:"hide_public_catalog"`
+	Folders           []FolderTreeNode `json:"folders"`
+	Files             []FolderTreeFile `json:"files"`
 }
 
 type FolderTreeFile struct {
-	ID            string               `json:"id"`
-	Name          string               `json:"name"`
-	Size          int64                `json:"size"`
-	DownloadCount int64                `json:"download_count"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Size          int64  `json:"size"`
+	DownloadCount int64  `json:"download_count"`
 }
 
 func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, error) {
@@ -36,11 +37,12 @@ func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, er
 
 	for _, folder := range folders {
 		nodes[folder.ID] = &FolderTreeNode{
-			ID:         folder.ID,
-			Name:       folder.Name,
-			SourcePath: derefString(folder.SourcePath),
-			Folders:    []FolderTreeNode{},
-			Files:      []FolderTreeFile{},
+			ID:                folder.ID,
+			Name:              folder.Name,
+			SourcePath:        derefString(folder.SourcePath),
+			HidePublicCatalog: folder.HidePublicCatalog,
+			Folders:           []FolderTreeNode{},
+			Files:             []FolderTreeFile{},
 		}
 	}
 	for _, folder := range folders {

@@ -32,6 +32,7 @@ import {
   fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
 } from "../../lib/markdown";
+import { onMarkdownLinkClickCapture } from "../../lib/publicMarkdownLinks";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 import {
@@ -112,6 +113,10 @@ interface SearchResultResponse {
 const route = useRoute();
 const router = useRouter();
 
+function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
+  onMarkdownLinkClickCapture(ev, router);
+}
+
 const announcements = ref<AnnouncementItem[]>([]);
 const announcementDetail = ref<AnnouncementItem | null>(null);
 const announcementListOpen = ref(false);
@@ -181,6 +186,7 @@ const folderDescriptionDraft = ref("");
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
+const folderHidePublicCatalogDraft = ref(false);
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
 const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
@@ -378,19 +384,37 @@ watch(
     folderMarkdownExpanded.value = false;
   },
 );
-const folderEditorDirty = computed(() => {
+function folderDetailIsManagingRoot(d: FolderDetailResponse | null) {
+  if (!d) {
+    return false;
+  }
+  const p = d.parent_id;
+  return p == null || String(p).trim() === "";
+}
+
+const folderEditorMetaDirty = computed(() => {
   if (!currentFolderDetail.value) {
     return false;
   }
-
+  const d = currentFolderDetail.value;
   return (
-    folderNameDraft.value.trim() !== currentFolderDetail.value.name ||
-    folderDescriptionDraft.value.trim() !== (currentFolderDetail.value.description ?? "") ||
-    folderRemarkDraft.value.trim() !== (currentFolderDetail.value.remark ?? "").trim() ||
-    folderDirectPrefixDraft.value.trim() !== (currentFolderDetail.value.direct_link_prefix ?? "").trim() ||
-    folderDownloadPolicyDraft.value !== (currentFolderDetail.value.download_policy ?? "inherit")
+    folderNameDraft.value.trim() !== d.name ||
+    folderDescriptionDraft.value.trim() !== (d.description ?? "") ||
+    folderRemarkDraft.value.trim() !== (d.remark ?? "").trim() ||
+    folderDirectPrefixDraft.value.trim() !== (d.direct_link_prefix ?? "").trim() ||
+    folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit")
   );
 });
+
+const folderEditorHideCatalogDirty = computed(() => {
+  if (!currentFolderDetail.value || !folderDetailIsManagingRoot(currentFolderDetail.value)) {
+    return false;
+  }
+  const on = Boolean(currentFolderDetail.value.hide_public_catalog);
+  return folderHidePublicCatalogDraft.value !== on;
+});
+
+const folderEditorDirty = computed(() => folderEditorMetaDirty.value || folderEditorHideCatalogDirty.value);
 const folderDescriptionPreviewHTML = computed(() => renderSimpleMarkdown(folderDescriptionDraft.value));
 const currentFolderStats = computed(() => {
   if (!currentFolderDetail.value) {
@@ -1496,6 +1520,7 @@ function openFolderDescriptionEditor() {
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
+  folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   folderDescriptionError.value = "";
   folderDescriptionEditorOpen.value = true;
   syncBodyScrollLock();
@@ -1510,6 +1535,7 @@ function closeFolderDescriptionEditor() {
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
+  folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   syncBodyScrollLock();
 }
 
@@ -1520,24 +1546,39 @@ async function saveFolderDescription() {
 
   folderDescriptionSaving.value = true;
   folderDescriptionError.value = "";
+  const d = currentFolderDetail.value;
+  const isRoot = folderDetailIsManagingRoot(d);
   try {
-    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(currentFolderDetail.value.id)}`, {
-      method: "PUT",
-      body: {
-        name: folderNameDraft.value.trim(),
-        description: folderDescriptionDraft.value.trim(),
-        remark: folderRemarkDraft.value.trim(),
-        direct_link_prefix: folderDirectPrefixDraft.value.trim(),
-        download_policy: folderDownloadPolicyDraft.value,
-      },
-    });
+    if (folderEditorMetaDirty.value) {
+      await httpClient.request(`/admin/resources/folders/${encodeURIComponent(d.id)}`, {
+        method: "PUT",
+        body: {
+          name: folderNameDraft.value.trim(),
+          description: folderDescriptionDraft.value.trim(),
+          remark: folderRemarkDraft.value.trim(),
+          direct_link_prefix: folderDirectPrefixDraft.value.trim(),
+          download_policy: folderDownloadPolicyDraft.value,
+        },
+      });
+    }
+    if (folderEditorHideCatalogDirty.value && isRoot) {
+      await httpClient.request(
+        `/admin/resources/folders/${encodeURIComponent(d.id)}/catalog-visibility`,
+        {
+          method: "PUT",
+          body: { hide_public_catalog: folderHidePublicCatalogDraft.value },
+        },
+      );
+    }
+
     currentFolderDetail.value = {
-      ...currentFolderDetail.value,
+      ...d,
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
       remark: folderRemarkDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
+      hide_public_catalog: isRoot ? folderHidePublicCatalogDraft.value : d.hide_public_catalog,
     };
     breadcrumbs.value = breadcrumbs.value.map((item, index) => (
       index === breadcrumbs.value.length - 1
@@ -1552,7 +1593,7 @@ async function saveFolderDescription() {
     }
     await loadDirectory({ force: true });
   } catch (err: unknown) {
-    folderDescriptionError.value = readApiError(err, "更新文件夹简介失败。");
+    folderDescriptionError.value = readApiError(err, "更新文件夹信息失败。");
   } finally {
     folderDescriptionSaving.value = false;
   }
@@ -1840,6 +1881,7 @@ async function syncSessionReceiptCode() {
                       class="markdown-content"
                       :class="!folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
                       v-html="currentFolderDescriptionHTML"
+                      @click.capture="handleMarkdownInternalLinkNavigate"
                     />
                     <div
                       v-if="!folderMarkdownExpanded && folderMarkdownFooterVisible"
@@ -2772,27 +2814,30 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
-    <div v-if="folderDescriptionEditorOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
-      <div class="flex min-h-screen items-center justify-center px-4 py-6">
-          <div class="modal-card panel w-full max-w-5xl overflow-hidden p-6">
-            <div class="border-b border-slate-200 pb-4">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <h3 class="text-lg font-semibold text-slate-900">编辑文件夹信息</h3>
-                <div class="flex shrink-0 flex-wrap justify-end gap-3">
-                  <button type="button" class="btn-secondary" @click="closeFolderDescriptionEditor">取消</button>
-                  <button
-                    type="button"
-                    class="btn-primary"
-                    :disabled="folderDescriptionSaving || !folderEditorDirty"
-                    @click="saveFolderDescription"
-                  >
-                    {{ folderDescriptionSaving ? "保存中…" : "保存更改" }}
-                  </button>
-                </div>
+    <div v-if="folderDescriptionEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+      <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+        <div
+          class="modal-card panel relative my-auto flex w-full max-w-5xl max-h-[min(90dvh,calc(100dvh-2.5rem))] min-h-0 flex-col overflow-hidden p-6"
+        >
+          <div class="shrink-0 border-b border-slate-200 pb-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h3 class="text-lg font-semibold text-slate-900">编辑文件夹信息</h3>
+              <div class="flex shrink-0 flex-wrap justify-end gap-3">
+                <button type="button" class="btn-secondary" @click="closeFolderDescriptionEditor">取消</button>
+                <button
+                  type="button"
+                  class="btn-primary"
+                  :disabled="folderDescriptionSaving || !folderEditorDirty"
+                  @click="saveFolderDescription"
+                >
+                  {{ folderDescriptionSaving ? "保存中…" : "保存更改" }}
+                </button>
               </div>
             </div>
+          </div>
 
-          <div class="mt-5 space-y-4">
+          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-5 [-webkit-overflow-scrolling:touch]">
+            <div class="space-y-4 pb-2">
             <label class="space-y-2">
               <span class="text-sm font-medium text-slate-700">文件夹名</span>
               <input
@@ -2834,7 +2879,12 @@ async function syncSessionReceiptCode() {
                 class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
               >
                 <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                  <div v-if="folderDescriptionPreviewHTML" class="markdown-content" v-html="folderDescriptionPreviewHTML" />
+                  <div
+                    v-if="folderDescriptionPreviewHTML"
+                    class="markdown-content"
+                    v-html="folderDescriptionPreviewHTML"
+                    @click.capture="handleMarkdownInternalLinkNavigate"
+                  />
                   <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
                 </div>
               </div>
@@ -2866,9 +2916,23 @@ async function syncSessionReceiptCode() {
               </p>
             </label>
 
+            <label
+              v-if="currentFolderDetail && folderDetailIsManagingRoot(currentFolderDetail)"
+              class="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3"
+            >
+              <input v-model="folderHidePublicCatalogDraft" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300" />
+              <span class="min-w-0 text-sm text-slate-700">
+                <span class="font-medium text-slate-900">访客首页隐藏此托管根目录</span>
+                <span class="mt-1 block text-xs text-slate-500">
+                  开启后公开首页的根目录列表不出现此项；书签或链接仍可打开（暂不封锁其它入口）。有资源审核权限的管理员可随时取消勾选恢复。
+                </span>
+              </span>
+            </label>
+
             <p v-if="folderDescriptionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ folderDescriptionError }}
             </p>
+            </div>
           </div>
         </div>
       </div>

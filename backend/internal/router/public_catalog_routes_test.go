@@ -67,6 +67,51 @@ func TestPublicHotFilesListsMostDownloadedFiles(t *testing.T) {
 	}
 }
 
+func TestPublicHotFilesOmitsFilesUnderHiddenCatalogRoot(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	publicRoot := createPublicTestFolder(t, db, "公开卷")
+	hiddenRoot := createPublicTestFolderWithParent(t, db, publicTestFolder{
+		name:              "隐身卷",
+		hidePublicCatalog: true,
+	})
+	now := time.Now().UTC()
+	seen := createPublicTestFile(t, db, publicTestFile{
+		title:         "公开可见",
+		folderID:      &publicRoot,
+		downloadCount: 1,
+	})
+	hiddenCand := createPublicTestFile(t, db, publicTestFile{
+		title:         "应当不出现在热门",
+		folderID:      &hiddenRoot,
+		downloadCount: 999,
+	})
+	createFileDailyDownloadAggregate(t, db, seen.ID, now.AddDate(0, 0, -1), 50)
+	createFileDailyDownloadAggregate(t, db, hiddenCand.ID, now.AddDate(0, 0, -1), 5000)
+
+	engine := New(db, cfg, newRouterSessionManager(db))
+	request := httptest.NewRequest(http.MethodGet, "/api/public/files/hot?limit=10", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if len(response.Items) != 1 || response.Items[0].ID != seen.ID {
+		t.Fatalf("expected only visible-root file %q, got %+v", seen.ID, response.Items)
+	}
+}
+
 func TestPublicFolderFilesSupportsFolderBrowsing(t *testing.T) {
 	cfg := newRouterTestConfig(t)
 	db := newRouterTestDB(t)
@@ -147,6 +192,57 @@ func TestPublicLatestFilesReturnsNewestFirst(t *testing.T) {
 	}
 	if response.Items[0].Name != "中下载.pdf" || response.Items[1].Name != "高下载.pdf" {
 		t.Fatalf("unexpected latest file order: %+v", response.Items)
+	}
+}
+
+func TestPublicLatestFilesOmitsFilesUnderHiddenCatalogRoot(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	visibleFolder := createPublicTestFolder(t, db, "公开资料库")
+	hiddenFolder := createPublicTestFolderWithParent(t, db, publicTestFolder{
+		name:              "内部资料库",
+		hidePublicCatalog: true,
+	})
+	newHidden := createPublicTestFile(t, db, publicTestFile{
+		title:     "校内专用",
+		folderID:  &hiddenFolder,
+		createdAt: time.Date(2026, 7, 1, 18, 0, 0, 0, time.UTC),
+	})
+	newPub := createPublicTestFile(t, db, publicTestFile{
+		title:     "公开上新",
+		folderID:  &visibleFolder,
+		createdAt: time.Date(2026, 7, 1, 17, 0, 0, 0, time.UTC),
+	})
+
+	engine := New(db, cfg, newRouterSessionManager(db))
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/public/files/latest?limit=50", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	for _, it := range response.Items {
+		if it.ID == newHidden.ID {
+			t.Fatalf("did not expect hidden-root file %q in latest feed", newHidden.ID)
+		}
+	}
+	foundPub := false
+	for _, it := range response.Items {
+		if it.ID == newPub.ID {
+			foundPub = true
+			break
+		}
+	}
+	if !foundPub {
+		t.Fatalf("expected file %q in latest feed", newPub.ID)
 	}
 }
 
@@ -295,6 +391,34 @@ func TestPublicFoldersReturnsAggregatedStats(t *testing.T) {
 	}
 }
 
+func TestPublicRootFoldersOmitsHiddenCatalogRoots(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	visibleRoot := createPublicTestFolderWithParent(t, db, publicTestFolder{name: "公开"})
+	_ = createPublicTestFolderWithParent(t, db, publicTestFolder{name: "隐藏", hidePublicCatalog: true})
+
+	engine := New(db, cfg, newRouterSessionManager(db))
+	request := httptest.NewRequest(http.MethodGet, "/api/public/folders", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if len(response.Items) != 1 || response.Items[0].ID != visibleRoot {
+		t.Fatalf("expected only visible root %q, got %+v", visibleRoot, response.Items)
+	}
+}
+
 type publicTestFile struct {
 	title         string
 	folderID      *string
@@ -346,9 +470,10 @@ func createFileDailyDownloadAggregate(t *testing.T, db *gorm.DB, fileID string, 
 }
 
 type publicTestFolder struct {
-	name        string
-	parentID    *string
-	description string
+	name              string
+	parentID          *string
+	description       string
+	hidePublicCatalog bool
 }
 
 func createPublicTestFolder(t *testing.T, db *gorm.DB, name string) string {
@@ -365,13 +490,14 @@ func createPublicTestFolderWithParent(t *testing.T, db *gorm.DB, input publicTes
 		t.Fatalf("create public test folder path failed: %v", err)
 	}
 	folder := &model.Folder{
-		ID:          folderID,
-		ParentID:    input.parentID,
-		Name:        input.name,
-		Description: input.description,
-		SourcePath:  &sourcePath,
-		CreatedAt:   time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
-		UpdatedAt:   time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
+		ID:                folderID,
+		ParentID:          input.parentID,
+		Name:              input.name,
+		Description:       input.description,
+		SourcePath:        &sourcePath,
+		HidePublicCatalog: input.hidePublicCatalog,
+		CreatedAt:         time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
 	}
 	if err := db.Create(folder).Error; err != nil {
 		t.Fatalf("create public test folder failed: %v", err)

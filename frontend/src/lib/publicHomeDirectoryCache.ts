@@ -39,6 +39,8 @@ export interface FolderDetailResponse {
   direct_link_prefix?: string;
   download_allowed?: boolean;
   download_policy?: "inherit" | "allow" | "deny";
+  /** 仅托管根目录：为 true 时访客首页根列表不出现该托管树 */
+  hide_public_catalog?: boolean;
   breadcrumbs: Array<{
     id: string;
     name: string;

@@ -18,6 +18,7 @@ interface ManagedFolderNode {
   id: string;
   name: string;
   source_path: string;
+  hide_public_catalog?: boolean;
   folders: ManagedFolderNode[];
 }
 
@@ -38,9 +39,10 @@ const pendingImportPath = ref("");
 const manualBrowsePath = ref("");
 const confirmedImportPath = ref("");
 const importFilter = ref("");
-const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string }>>([]);
+const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string; hidePublicCatalog: boolean }>>([]);
 const managedFoldersLoading = ref(false);
 const managedFoldersError = ref("");
+const catalogVisibilitySaving = ref("");
 const unmanagingFolderID = ref("");
 const unmanagePassword = ref("");
 const unmanageError = ref("");
@@ -275,6 +277,7 @@ async function loadManagedFolders() {
       id: item.id,
       name: item.name,
       sourcePath: item.source_path,
+      hidePublicCatalog: Boolean(item.hide_public_catalog),
     }));
   } catch (err: unknown) {
     managedFolders.value = [];
@@ -363,6 +366,22 @@ async function importDirectory() {
     importError.value = readApiError(err, "导入目录失败。");
   } finally {
     importLoading.value = false;
+  }
+}
+
+async function patchManagedRootCatalogVisibility(folderID: string, hide: boolean) {
+  catalogVisibilitySaving.value = folderID;
+  managedFoldersError.value = "";
+  try {
+    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(folderID)}/catalog-visibility`, {
+      method: "PUT",
+      body: { hide_public_catalog: hide },
+    });
+    await loadManagedFolders();
+  } catch (err: unknown) {
+    managedFoldersError.value = readApiError(err, "更新访客首页可见性失败。");
+  } finally {
+    catalogVisibilitySaving.value = "";
   }
 }
 
@@ -466,14 +485,38 @@ function isManagedRootClientChild(path: string, root: string) {
           >
             <div class="flex items-start justify-between gap-4">
               <div class="min-w-0">
-                <p class="text-sm font-medium text-slate-900">{{ folder.name }}</p>
+                <p class="text-sm font-medium text-slate-900">
+                  {{ folder.name }}
+                  <span
+                    v-if="folder.hidePublicCatalog"
+                    class="ml-2 inline-block rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900"
+                  >访客首页已隐藏</span>
+                </p>
                 <p class="mt-1 break-all text-sm text-slate-500">{{ folder.sourcePath || "未记录源目录" }}</p>
               </div>
-              <div class="flex shrink-0 items-center gap-3">
+              <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  class="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="
+                    managedFoldersLoading ||
+                    rescanningFolderID === folder.id ||
+                    catalogVisibilitySaving === folder.id
+                  "
+                  @click="patchManagedRootCatalogVisibility(folder.id, !folder.hidePublicCatalog)"
+                >
+                  {{
+                    catalogVisibilitySaving === folder.id
+                      ? "更新中…"
+                      : folder.hidePublicCatalog
+                        ? "恢复访客首页展示"
+                        : "访客首页隐藏"
+                  }}
+                </button>
                 <button
                   type="button"
                   class="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  :disabled="managedFoldersLoading || rescanningFolderID === folder.id"
+                  :disabled="managedFoldersLoading || rescanningFolderID === folder.id || catalogVisibilitySaving === folder.id"
                   @click="rescanManagedFolder(folder.id)"
                 >
                   {{ rescanningFolderID === folder.id ? "扫描中…" : "重新扫描" }}
@@ -481,7 +524,7 @@ function isManagedRootClientChild(path: string, root: string) {
                 <button
                   type="button"
                   class="inline-flex h-11 items-center justify-center rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  :disabled="managedFoldersLoading || rescanningFolderID === folder.id"
+                  :disabled="managedFoldersLoading || rescanningFolderID === folder.id || catalogVisibilitySaving === folder.id"
                   @click="beginUnmanageManagedFolder(folder.id)"
                 >
                   取消托管

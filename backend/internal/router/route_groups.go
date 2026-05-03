@@ -126,6 +126,17 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.UpdateFolderDescription,
 	)
+	patchCatalogVisibility := handlers.resourceManagement.PatchFolderCatalogVisibility
+	adminProtected.PATCH(
+		"/resources/folders/:folderID/catalog-visibility",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		patchCatalogVisibility,
+	)
+	adminProtected.PUT(
+		"/resources/folders/:folderID/catalog-visibility",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		patchCatalogVisibility,
+	)
 	adminProtected.PUT(
 		"/resources/files/:fileID",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),

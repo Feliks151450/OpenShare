@@ -164,6 +164,75 @@ func TestSearchPrefersDirectFolderMatchesWithinScope(t *testing.T) {
 	}
 }
 
+func TestSearchOmitsResourcesUnderHiddenCatalogRoot(t *testing.T) {
+	db := newTestSQLite(t)
+	service := NewSearchService(repository.NewSearchRepository(db), nil)
+
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	mustCreateSearchFolder(t, db, model.Folder{
+		ID:                "open-root",
+		Name:              "公开课",
+		HidePublicCatalog: false,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+	mustCreateSearchFolder(t, db, model.Folder{
+		ID:                "hid-root",
+		Name:              "内部根",
+		HidePublicCatalog: true,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+	mustCreateSearchFolder(t, db, model.Folder{
+		ID:        "hid-sub",
+		ParentID:  ptrString("hid-root"),
+		Name:      "子目录",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	mustCreateSearchFolder(t, db, model.Folder{
+		ID:          "hit-folder",
+		ParentID:    ptrString("hid-root"),
+		Name:        "相同关键词目录",
+		Description: "",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	mustCreateSearchFile(t, db, model.File{
+		ID:        "open-hit",
+		FolderID:  ptrString("open-root"),
+		Name:      "相同关键词公开.pdf",
+		Extension: "pdf",
+		Size:      2048,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	mustCreateSearchFile(t, db, model.File{
+		ID:        "hid-hit",
+		FolderID:  ptrString("hid-sub"),
+		Name:      "相同关键词内部.pdf",
+		Extension: "pdf",
+		Size:      2048,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	result, err := service.Search(context.Background(), SearchInput{
+		Keyword:  "相同关键词",
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected 1 candidate total, got %d", result.Total)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != "open-hit" {
+		t.Fatalf("expected only open-hit, got %+v", result.Items)
+	}
+}
+
 func TestSearchEscapesLikeWildcards(t *testing.T) {
 	db := newTestSQLite(t)
 	service := NewSearchService(repository.NewSearchRepository(db), nil)

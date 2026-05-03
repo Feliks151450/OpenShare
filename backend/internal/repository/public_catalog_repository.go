@@ -32,16 +32,16 @@ type PublicHotFileFeedQuery struct {
 }
 
 type PublicFolderRow struct {
-	ID             string
-	ParentID       *string
-	Name           string
-	Description    string
-	Remark         string
-	AllowDownload  *bool
-	UpdatedAt      time.Time
-	FileCount      int64
-	DownloadCount  int64
-	TotalSize      int64
+	ID            string
+	ParentID      *string
+	Name          string
+	Description   string
+	Remark        string
+	AllowDownload *bool
+	UpdatedAt     time.Time
+	FileCount     int64
+	DownloadCount int64
+	TotalSize     int64
 }
 
 func NewPublicCatalogRepository(db *gorm.DB) *PublicCatalogRepository {
@@ -72,7 +72,9 @@ func (r *PublicCatalogRepository) ListPublicFolderFiles(ctx context.Context, que
 }
 
 func (r *PublicCatalogRepository) ListManagedFileFeed(ctx context.Context, query PublicFileFeedQuery) ([]model.File, error) {
-	listQuery := r.db.WithContext(ctx).Model(&model.File{})
+	listQuery := r.db.WithContext(ctx).
+		Model(&model.File{}).
+		Scopes(FilesNotUnderHiddenPublicCatalogRoot())
 	for _, orderBy := range query.OrderBy {
 		listQuery = listQuery.Order(orderBy)
 	}
@@ -94,6 +96,7 @@ func (r *PublicCatalogRepository) ListRecentHotManagedFiles(ctx context.Context,
 	var files []model.File
 	if err := r.db.WithContext(ctx).
 		Model(&model.File{}).
+		Scopes(FilesNotUnderHiddenPublicCatalogRoot()).
 		Select("files.*").
 		Joins("JOIN (?) AS hot ON hot.file_id = files.id", aggregated).
 		Order("hot.hot_downloads DESC").
@@ -126,7 +129,7 @@ func (r *PublicCatalogRepository) ListPublicFolders(ctx context.Context, parentI
 		Select("id, parent_id, name, description, remark, allow_download, updated_at, file_count, download_count, total_size")
 
 	if parentID == nil {
-		query = query.Where("parent_id IS NULL")
+		query = query.Where("parent_id IS NULL AND hide_public_catalog = ?", false)
 	} else {
 		query = query.Where("parent_id = ?", *parentID)
 	}

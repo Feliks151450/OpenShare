@@ -25,6 +25,7 @@ import {
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
+import { onMarkdownLinkClickCapture } from "../../lib/publicMarkdownLinks";
 import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
 
 interface FileDetailResponse {
@@ -56,6 +57,10 @@ interface FileDetailResponse {
 
 const route = useRoute();
 const router = useRouter();
+
+function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
+  onMarkdownLinkClickCapture(ev, router);
+}
 const detail = ref<FileDetailResponse | null>(null);
 const loading = ref(false);
 const error = ref("");
@@ -1531,13 +1536,18 @@ function performDownloadFile() {
                       class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"
                     >
                       <p v-if="!previewFetchedText.trim()" class="text-sm text-slate-400">（空白文件）</p>
-                      <div v-else class="markdown-content" v-html="previewMarkdownRendered" />
+                      <div
+                        v-else
+                        class="markdown-content"
+                        v-html="previewMarkdownRendered"
+                        @click.capture="handleMarkdownInternalLinkNavigate"
+                      />
                     </div>
                     <div
                       v-else-if="previewVisualKind === 'netcdf' && previewNetcdfStructure"
                       class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"
                     >
-                      <div class="markdown-content" v-html="previewNetcdfMarkdownHtml" />
+                      <div class="markdown-content" v-html="previewNetcdfMarkdownHtml" @click.capture="handleMarkdownInternalLinkNavigate" />
                     </div>
                     <pre
                       v-else
@@ -1608,6 +1618,7 @@ function performDownloadFile() {
                 v-if="descriptionHTML"
                 class="markdown-content"
                 v-html="descriptionHTML"
+                @click.capture="handleMarkdownInternalLinkNavigate"
               />
               <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
             </div>
@@ -1763,10 +1774,12 @@ function performDownloadFile() {
 
     <Teleport to="body">
       <Transition name="modal-shell">
-      <div v-if="descriptionEditorOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
-        <div class="flex min-h-screen items-center justify-center px-4 py-6">
-          <div class="modal-card panel w-full max-w-5xl overflow-hidden p-6">
-            <div class="border-b border-slate-200 pb-4">
+      <div v-if="descriptionEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+          <div
+            class="modal-card panel relative my-auto flex w-full max-w-5xl max-h-[min(90dvh,calc(100dvh-2.5rem))] min-h-0 flex-col overflow-hidden p-6"
+          >
+            <div class="shrink-0 border-b border-slate-200 pb-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-lg font-semibold text-slate-900">编辑文件信息</h3>
                 <div class="flex shrink-0 flex-wrap justify-end gap-3">
@@ -1778,7 +1791,8 @@ function performDownloadFile() {
               </div>
             </div>
 
-            <div class="mt-5 space-y-4">
+            <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-5 [-webkit-overflow-scrolling:touch]">
+              <div class="space-y-4 pb-2">
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">文件名</span>
                 <input
@@ -1820,7 +1834,12 @@ function performDownloadFile() {
                   class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
                 >
                   <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                    <div v-if="fileDescriptionPreviewHTML" class="markdown-content" v-html="fileDescriptionPreviewHTML" />
+                    <div
+                      v-if="fileDescriptionPreviewHTML"
+                      class="markdown-content"
+                      v-html="fileDescriptionPreviewHTML"
+                      @click.capture="handleMarkdownInternalLinkNavigate"
+                    />
                     <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
                   </div>
                 </div>
@@ -1883,6 +1902,7 @@ function performDownloadFile() {
               <p v-if="saveError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {{ saveError }}
               </p>
+              </div>
             </div>
           </div>
         </div>

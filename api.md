@@ -240,6 +240,53 @@ OpenShare.home.setSortDirection("desc");
 
 ---
 
+## 详情／目录简介里的 Markdown 站内链接
+
+在 **公开文件详情页**（简介、Markdown 文件预览、NetCDF 结构化摘要预览）以及 **首页当前文件夹简介**（含站内编辑简介时的预览区域）中，正文为简单 Markdown；其中 **站内超链接**在用户 **普通左键单击**时会 **走站内路由**，避免整页刷新；**按住 Ctrl／Cmd（新标签）、中键、`mailto:`、`tel:`、`http(s):` 外链**等保持浏览器默认。
+
+链接目标先按 **`new URL(链接, 当前页的 location.href)`** 解析为绝对地址，再在 **与同页同源**（含 **`file://` 静态页与同源规则**）前提下匹配下文路径；语义实现见 **`frontend/src/lib/publicMarkdownLinks.ts`**（SPA）与只读 **`readonly.js`** 内 **`tryMarkdownHrefToReadonlyHashRoute`**（需与 SPA 对齐时一并改两处）。
+
+### 可识别为站内跳转的写法（示例）
+
+| 语义 | SPA 路径（解析结果） | Markdown 写法示例 |
+|------|---------------------|-------------------|
+| 另一文件详情 | **`/files/<fileID>`**，可选 **`?t=秒`** | `[标签](/files/<fileID>?t=120)`、`[标签](./<同目录其它 fileID>)`（当前在 **`/files/…`** 时 `./` 会落在同一 **`/files/…`** 段下） |
+| 首页 — 指定目录 | **`/`** + 查询 **`folder=<folderID>`** | `[目录](/?folder=<folderID>)`、`[目录](../?folder=<folderID>)`（从 **`/files/…`** 进首页带 query） |
+| 首页 — 根视图 | **`/`** + **`root=1`** | `[根目录](/?root=1)` |
+| 首页 — 无前缀首页 | **`/`**，无额外 query | `[首页](/)` |
+| 上传访客页（仅 SPA） | **`/upload`** | **`[上传](/upload)`** |
+
+首页查询串 **仅识别** **`folder`** 与 **`root`**；若还带其它参数，当前实现 **不按站内路由拦截**（走默认 `<a>` 行为）。
+
+**只读**：上述绝对路径在 **`file://`** 或带 **hash** 的真实 URL 下同样先经 **`URL` 解析**；站内命中后改为 **`#/files/…`、`#/?folder=…`** 等。只读页 **没有** `/upload`，指向 **`/upload`** 的 Markdown 链接 **不会**被改成 hash 跳转。
+
+**控制台**：若在自动化里需要程序化跳转，请继续用 **`OpenShare.nav.goFile` / `goHome`**；Markdown 出站链与本文所述行为一致，等价于与用户点击对齐的浏览器侧 **`URL`** 解析（含相对路径）。
+
+---
+
+## 公开目录「隐藏托管根」与相关 API
+
+管理员可将 **托管根目录**（`parent_id` 为空）标记为 **不在公开目录中展示**（字段 `hide_public_catalog`）。该设置影响的是 **发现与聚合类** 公开接口，**不会**拦掉 **已知 id 的直达访问**（与站内直链、书签、`OpenShare.nav.getFileInfo` / `goFile` 等场景一致）。
+
+**会排除**「隐藏托管根」及其 **整棵子目录** 下资源的接口示例：
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/public/folders` | 仅当 **根视图**（无 `parent_id` 或等价「列根」）时，不返回被隐藏的托管根；进入某 **已列出的** 子目录后，列子项行为与此前一致。 |
+| `GET /api/public/search` | 搜索结果中不出现落在隐藏托管根子树内的文件与目录。 |
+| `GET /api/public/files/hot` | 热门列表不包含上述子树内的文件。 |
+| `GET /api/public/files/latest` | 上新／最近列表不包含上述子树内的文件。 |
+
+**不做上述「目录发现过滤」** 的典型情况（仍可 404 等已由业务定义的校验）：
+
+- 按 **`fileID`** 读取元数据：**`GET /api/public/files/<fileID>`**（即控制台 **`getFileInfo`** 所用）。
+- 按约定路径的 **本站下载**：**`GET /api/public/files/<fileID>/download`** 等（以实际路由为准）。
+- 按 **`folderID`** 拉取 **目录详情**、列目录内文件等 **已知 id** 的公开接口：服务端不会因「根被隐藏」而单独拒绝；访客若拿不到 id，通常仍无法从未过滤的首页／搜索／热门进入该树。
+
+SPA 与只读静态页共用同一套后端行为，控制台脚本无需分叉处理。
+
+---
+
 ## 兼容性说明摘要
 
 | 能力 | SPA | 只读 |
@@ -250,5 +297,6 @@ OpenShare.home.setSortDirection("desc");
 | `getFileInfo` | `GET`，`credentials: include`，同源 `/api` | `GET`，`credentials: omit`，走 **`apiUrl(...)`** |
 | `replace` | `router.replace` | `replaceState` + `bootstrapRoute` |
 | 路由重复（同目标） | 忽略 `NavigationDuplicated`，其它 `console.warn` | 由 hash／replace 实现决定 |
+| 简介／预览区 Markdown 站内链（左键） | `publicMarkdownLinks` → **`router.push`** | `tryMarkdownHrefToReadonlyHashRoute` → **`setHashRoute`**；`/upload` 不拦截 |
 
 若你在扩展更多控制台能力，请同时更新 **`frontend/src/lib/openShareConsole.ts`**、**`frontend/src/lib/openSharePublicFileInfo.ts`** 与 **`frontend/standalone-readonly/readonly.js`**，并同步本文档。

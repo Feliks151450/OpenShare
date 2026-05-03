@@ -93,6 +93,10 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
+type patchFolderCatalogVisibilityRequest struct {
+	HidePublicCatalog bool `json:"hide_public_catalog"`
+}
+
 func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 	identity, ok := session.GetAdminIdentity(ctx)
 	if !ok {
@@ -125,6 +129,40 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update folder"})
+		}
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+func (h *ResourceManagementHandler) PatchFolderCatalogVisibility(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req patchFolderCatalogVisibilityRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	err := h.service.PatchRootFolderHidePublicCatalog(
+		ctx.Request.Context(),
+		ctx.Param("folderID"),
+		req.HidePublicCatalog,
+		identity.AdminID,
+		ctx.ClientIP(),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "managed root folder required"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update folder visibility"})
 		}
 		return
 	}

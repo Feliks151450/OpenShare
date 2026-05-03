@@ -70,17 +70,19 @@ type Admin struct {
 
 // Folder is the hierarchical container for files and subfolders.
 type Folder struct {
-	ID            EntityID  `gorm:"column:id;type:text;primaryKey"`
-	ParentID      *EntityID `gorm:"column:parent_id;type:text;index:idx_folders_parent_id_status"`
-	SourcePath    *string   `gorm:"column:source_path;type:text;uniqueIndex:ux_folders_source_path"`
-	Name          string    `gorm:"column:name;type:text;not null"`
-	Description   string    `gorm:"column:description;type:text;not null;default:''"`
+	ID          EntityID  `gorm:"column:id;type:text;primaryKey"`
+	ParentID    *EntityID `gorm:"column:parent_id;type:text;index:idx_folders_parent_id_status"`
+	SourcePath  *string   `gorm:"column:source_path;type:text;uniqueIndex:ux_folders_source_path"`
+	Name        string    `gorm:"column:name;type:text;not null"`
+	Description string    `gorm:"column:description;type:text;not null;default:''"`
 	// Remark 单行展示用文案（卡片等）；与 Markdown 简介 description 分离
 	Remark string `gorm:"column:remark;type:text;not null;default:''"`
 	// DirectLinkPrefix 为 http(s) 根地址时，其下文件直链为该前缀 + 相对路径（相对最内层已配置前缀的祖先文件夹）
 	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
+	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。
+	HidePublicCatalog bool `gorm:"column:hide_public_catalog;not null;default:false"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载
-	AllowDownload *bool `gorm:"column:allow_download"`
+	AllowDownload *bool     `gorm:"column:allow_download"`
 	FileCount     int64     `gorm:"column:file_count;type:integer;not null;default:0"`
 	TotalSize     int64     `gorm:"column:total_size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
@@ -95,18 +97,18 @@ type Folder struct {
 
 // File is the managed resource metadata stored in SQLite.
 type File struct {
-	ID            EntityID  `gorm:"column:id;type:text;primaryKey"`
-	FolderID      *EntityID `gorm:"column:folder_id;type:text;index:idx_files_folder_id"`
-	Name          string    `gorm:"column:name;type:text;not null;default:''"`
-	Description   string    `gorm:"column:description;type:text;not null;default:''"`
-	Remark        string    `gorm:"column:remark;type:text;not null;default:''"`
-	Extension     string    `gorm:"column:extension;type:text;not null;default:''"`
-	MimeType      string    `gorm:"column:mime_type;type:text;not null;default:''"`
-	PlaybackURL          string `gorm:"column:playback_url;type:text;not null;default:''"`
-	PlaybackFallbackURL  string `gorm:"column:playback_fallback_url;type:text;not null;default:''"`
-	CoverURL      string    `gorm:"column:cover_url;type:text;not null;default:''"`
+	ID                  EntityID  `gorm:"column:id;type:text;primaryKey"`
+	FolderID            *EntityID `gorm:"column:folder_id;type:text;index:idx_files_folder_id"`
+	Name                string    `gorm:"column:name;type:text;not null;default:''"`
+	Description         string    `gorm:"column:description;type:text;not null;default:''"`
+	Remark              string    `gorm:"column:remark;type:text;not null;default:''"`
+	Extension           string    `gorm:"column:extension;type:text;not null;default:''"`
+	MimeType            string    `gorm:"column:mime_type;type:text;not null;default:''"`
+	PlaybackURL         string    `gorm:"column:playback_url;type:text;not null;default:''"`
+	PlaybackFallbackURL string    `gorm:"column:playback_fallback_url;type:text;not null;default:''"`
+	CoverURL            string    `gorm:"column:cover_url;type:text;not null;default:''"`
 	// AllowDownload nil = 继承所在文件夹链；均未设置则默认允许下载
-	AllowDownload *bool `gorm:"column:allow_download"`
+	AllowDownload *bool     `gorm:"column:allow_download"`
 	Size          int64     `gorm:"column:size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime;index:idx_files_created_at,sort:desc"`

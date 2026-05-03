@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Check, Github, UserRound } from "lucide-vue-next";
+import { Check, UserRound } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import { HttpError, httpClient } from "../../lib/http/client";
@@ -31,7 +31,6 @@ const props = withDefaults(
   defineProps<{
     items?: NavbarItem[];
     currentPath?: string;
-    githubHref?: string;
   }>(),
   {
     items: () => [
@@ -39,7 +38,6 @@ const props = withDefaults(
       { label: "回执查询", to: "/upload" },
     ],
     currentPath: "/",
-    githubHref: "https://github.com/zzzzquan/OpenShare",
   },
 );
 
@@ -161,21 +159,9 @@ function onPointerDown(event: PointerEvent) {
 <template>
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
     <div
-      class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8 xl:max-w-[2150px]"
+      class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-3 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]"
     >
-      <div class="min-w-0 flex items-center justify-start">
-        <RouterLink to="/" class="inline-flex min-w-0 items-center gap-2 sm:gap-2.5">
-          <img src="/favicon.svg" alt="OpenShare" class="h-8 w-8" />
-          <span
-            class="truncate text-[15px] font-extrabold tracking-tight text-slate-900 dark:text-slate-100 sm:text-[16px]"
-            style="font-family: 'Roboto Slab', serif"
-          >
-            OpenShare
-          </span>
-        </RouterLink>
-      </div>
-
-      <nav class="flex items-center justify-center gap-1 overflow-x-auto">
+      <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
         <RouterLink
           v-for="item in items"
           :key="item.to"
@@ -191,19 +177,7 @@ function onPointerDown(event: PointerEvent) {
         </RouterLink>
       </nav>
 
-      <div ref="panelRef" class="relative flex min-w-0 items-center justify-end gap-2 leading-none">
-        <div class="relative h-9 w-9 shrink-0">
-          <a
-            :href="githubHref"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Open GitHub"
-            class="absolute inset-0 inline-flex items-center justify-center rounded-full bg-black text-white transition hover:bg-neutral-800"
-          >
-            <Github class="h-[17.2px] w-[17.2px]" />
-          </a>
-        </div>
-
+      <div ref="panelRef" class="relative flex shrink-0 items-center justify-end gap-2 leading-none">
         <div class="relative h-9 w-9 shrink-0">
           <button
             type="button"
