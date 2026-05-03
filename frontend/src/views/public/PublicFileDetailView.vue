@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
-import { ChevronLeft, Clock, Download, FileText, FileVideo, Flag, Link2, Share2 } from "lucide-vue-next";
+import {
+  ChevronLeft,
+  Clock,
+  Download,
+  FileText,
+  FileType,
+  FileVideo,
+  Flag,
+  Link2,
+  Share2,
+} from "lucide-vue-next";
 
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
@@ -257,6 +267,24 @@ function isVideoDetail(d: FileDetailResponse): boolean {
 
 const isVideo = computed(() => (detail.value ? isVideoDetail(detail.value) : false));
 
+/** 与视频类似：详情页右侧可显示「同目录同后缀」列表（视频=常见视频后缀；PDF/NetCDF 仅本后缀） */
+const peerSidebarSameExtLabel = computed((): "video" | "pdf" | "nc" | null => {
+  if (!detail.value) {
+    return null;
+  }
+  if (isVideoDetail(detail.value)) {
+    return "video";
+  }
+  const ext = normalizedFileExtension(detail.value);
+  if (ext === "pdf") {
+    return "pdf";
+  }
+  if (ext === "nc") {
+    return "nc";
+  }
+  return null;
+});
+
 /** 非视频文件的浏览器内预览类型 */
 type DetailPreviewVisualKind = "image" | "pdf" | "markdown" | "plain" | "csv" | "netcdf";
 
@@ -333,6 +361,14 @@ const previewNetcdfMarkdownHtml = computed(() => {
   }
   return renderSimpleMarkdown(netcdfStructureToMarkdown(previewNetcdfStructure.value));
 });
+
+const pdfPeerSidebar = computed(
+  () => peerSidebarSameExtLabel.value === "pdf" && Boolean(folderIdForPeers.value),
+);
+
+const netcdfPeerSidebar = computed(
+  () => peerSidebarSameExtLabel.value === "nc" && Boolean(folderIdForPeers.value),
+);
 
 /** plain 中的 .ncl 与 csv 使用等宽展示 */
 const previewFetchedTextUseMonospace = computed(() => {
@@ -551,8 +587,45 @@ onBeforeUnmount(() => {
 
 const folderIdForPeers = computed(() => detail.value?.folder_id?.trim() ?? "");
 
-/** 有文件夹且为视频时拉取同目录列表，用于加宽布局 */
-const layoutWide = computed(() => isVideo.value && Boolean(folderIdForPeers.value));
+/** 有文件夹且为视频 / PDF / NetCDF 时加宽容器，并显示同目录同后缀列表 */
+const layoutWide = computed(
+  () => Boolean(folderIdForPeers.value) && peerSidebarSameExtLabel.value !== null,
+);
+
+const peerSidebarCopy = computed(() => {
+  switch (peerSidebarSameExtLabel.value) {
+    case "video":
+      return {
+        title: "同文件夹视频",
+        empty: "当前文件夹没有其他视频",
+      };
+    case "pdf":
+      return {
+        title: "同文件夹 PDF",
+        empty: "当前文件夹没有其他 PDF",
+      };
+    case "nc":
+      return {
+        title: "同文件夹 NetCDF",
+        empty: "当前文件夹没有其他 NetCDF",
+      };
+    default:
+      return { title: "", empty: "" };
+  }
+});
+
+const peerSidebarListIcon = computed(() => {
+  switch (peerSidebarSameExtLabel.value) {
+    case "video":
+      return FileVideo;
+    case "pdf":
+      return FileText;
+    case "nc":
+      return FileType;
+    default:
+      return FileText;
+  }
+});
 
 const videoStageRef = ref<HTMLElement | null>(null);
 const videoStageHeightPx = ref<number | null>(null);
@@ -595,9 +668,9 @@ const peerAsideMaxStyle = computed((): Record<string, string> => {
 });
 
 watch(
-  () => [layoutWide.value, detail.value?.id ?? ""] as const,
-  ([wide]) => {
-    if (wide) {
+  () => [isVideo.value, folderIdForPeers.value, detail.value?.id ?? ""] as const,
+  ([video, fid]) => {
+    if (video && fid) {
       void nextTick(() => setupVideoStageObserver());
     } else {
       teardownVideoStageObserver();
@@ -626,6 +699,31 @@ function extensionOfListItem(item: FolderFileListItem): string {
   }
   const match = /\.([^.]+)$/.exec(item.name);
   return match ? match[1].toLowerCase() : "";
+}
+
+async function loadFolderSameExtensionPeers(folderID: string, currentFileId: string, ext: string) {
+  const want = ext.replace(/^\./, "").toLowerCase();
+  folderVideoPeersLoading.value = true;
+  folderVideoPeers.value = [];
+  try {
+    const params = new URLSearchParams({
+      page: "1",
+      page_size: "100",
+      sort: "name_asc",
+    });
+    const response = await httpClient.get<{ items: FolderFileListItem[] }>(
+      `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
+    );
+    const items = response.items ?? [];
+    folderVideoPeers.value = items
+      .filter((f) => f.id !== currentFileId)
+      .filter((f) => extensionOfListItem(f) === want)
+      .map((f) => ({ id: f.id, name: f.name }));
+  } catch {
+    folderVideoPeers.value = [];
+  } finally {
+    folderVideoPeersLoading.value = false;
+  }
 }
 
 async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
@@ -765,10 +863,15 @@ async function loadDetail() {
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
-      if (isVideoDetail(detail.value)) {
-        const fid = detail.value.folder_id?.trim() ?? "";
-        if (fid) {
+      const fid = detail.value.folder_id?.trim() ?? "";
+      if (fid) {
+        if (isVideoDetail(detail.value)) {
           void loadFolderVideoPeers(fid, detail.value.id);
+        } else {
+          const ext = normalizedFileExtension(detail.value);
+          if (ext === "pdf" || ext === "nc") {
+            void loadFolderSameExtensionPeers(fid, detail.value.id, ext);
+          }
         }
       }
     }
@@ -1072,8 +1175,8 @@ function performDownloadFile() {
 </script>
 
 <template>
-  <section class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-7xl' : 'max-w-6xl'">
+  <section class="app-container py-2 sm:py-8 lg:py-2">
+    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-screen-2xl' : 'max-w-6xl'">
       <SurfaceCard>
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
 
@@ -1107,7 +1210,7 @@ function performDownloadFile() {
                     >
                       <ChevronLeft class="h-4 w-4" />
                     </button>
-                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
+                    <p class="text-l font-semibold text-blue-600">返回文件夹</p>
                   </div>
                   <h3
                     class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl"
@@ -1263,8 +1366,9 @@ function performDownloadFile() {
                   :style="peerAsideMaxStyle"
                 >
                   <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-                    <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Playlist</p>
-                    <p class="mt-1 text-sm font-medium text-slate-900">同文件夹视频</p>
+                    <p class="mt-1 text-sm font-medium text-slate-900">
+                      {{ peerSidebarCopy.title }}
+                    </p>
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                     <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
@@ -1276,13 +1380,17 @@ function performDownloadFile() {
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
                           class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
                         >
-                          <FileVideo class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
                           <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
                         </RouterLink>
                       </li>
                     </ul>
                     <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
-                      当前文件夹没有其他视频
+                      {{ peerSidebarCopy.empty }}
                     </p>
                   </div>
                 </aside>
@@ -1310,8 +1418,12 @@ function performDownloadFile() {
 
               <div
                 v-else-if="previewVisualKind === 'pdf' && absoluteDownloadURL"
-                class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5"
+                :class="pdfPeerSidebar ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : ''"
               >
+                <div
+                  class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5"
+                  :class="pdfPeerSidebar ? 'min-w-0 flex-1' : ''"
+                >
                 <div class="relative min-h-[min(70vh,720px)] w-full bg-white">
                   <p
                     v-if="pdfPreviewUsesBackendBlob && pdfPreviewLoading"
@@ -1338,11 +1450,51 @@ function performDownloadFile() {
                     :src="pdfIframeSrc"
                   />
                 </div>
+                </div>
+
+                <aside
+                  v-if="pdfPeerSidebar"
+                  class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
+                  :style="peerAsideMaxStyle"
+                >
+                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
+                    <p class="mt-1 text-sm font-medium text-slate-900">
+                      {{ peerSidebarCopy.title }}
+                    </p>
+                  </div>
+                  <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                    <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
+                      加载列表…
+                    </p>
+                    <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <RouterLink
+                          :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                        >
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </RouterLink>
+                      </li>
+                    </ul>
+                    <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
+                      {{ peerSidebarCopy.empty }}
+                    </p>
+                  </div>
+                </aside>
               </div>
 
               <div
                 v-else-if="needsFetchedTextPreview"
+                :class="netcdfPeerSidebar ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : ''"
+              >
+              <div
                 class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"
+                :class="netcdfPeerSidebar ? 'min-w-0 flex-1' : ''"
               >
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2">
                   <p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>
@@ -1394,6 +1546,42 @@ function performDownloadFile() {
                     ><template v-if="previewFetchedText.length">{{ previewFetchedText }}</template><span v-else class="text-slate-400">（空白文件）</span></pre>
                   </template>
                 </div>
+              </div>
+
+                <aside
+                  v-if="netcdfPeerSidebar"
+                  class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
+                  :style="peerAsideMaxStyle"
+                >
+                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
+                    <p class="mt-1 text-sm font-medium text-slate-900">
+                      {{ peerSidebarCopy.title }}
+                    </p>
+                  </div>
+                  <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                    <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
+                      加载列表…
+                    </p>
+                    <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                        <RouterLink
+                          :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                        >
+                          <component
+                            :is="peerSidebarListIcon"
+                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                        </RouterLink>
+                      </li>
+                    </ul>
+                    <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
+                      {{ peerSidebarCopy.empty }}
+                    </p>
+                  </div>
+                </aside>
               </div>
             </div>
 

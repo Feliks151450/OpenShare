@@ -50,7 +50,7 @@ function clearSearch() {
               v-model="keyword"
               type="text"
               placeholder="在该目录下搜索文件/文件夹"
-              class="h-14 w-full rounded-lg border border-slate-300 bg-white pl-14 pr-14 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-800"
+              class="h-11 w-full rounded-xl border border-slate-300 bg-white pl-14 pr-14 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-800"
             />
             <button
               v-if="keyword"
@@ -65,7 +65,7 @@ function clearSearch() {
 
           <button
             type="submit"
-            class="h-11 rounded-lg px-6 text-sm font-medium transition xl:shrink-0"
+            class="h-11 rounded-xl px-6 text-sm font-medium transition xl:shrink-0"
             :class="
               canSearch
                 ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white'

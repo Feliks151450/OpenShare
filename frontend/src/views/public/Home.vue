@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 import {
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Download,
   FileArchive,
   FileAudio,
@@ -169,6 +168,8 @@ const searchRows = ref<DirectoryRow[]>([]);
 const breadcrumbs = ref<Array<{ id: string; name: string }>>([]);
 const currentFolderDetail = ref<FolderDetailResponse | null>(null);
 const selectedResourceKeys = ref<string[]>([]);
+/** 卡片布局下仅在此模式下显示右上角复选框并可点选卡片多选；表格布局始终可多选 */
+const cardMultiSelectMode = ref(false);
 const canManageResourceDescriptions = ref(false);
 const canManageAnnouncements = ref(false);
 const homeSessionAdminId = ref("");
@@ -553,6 +554,27 @@ function toggleSelectAllVisibleRows() {
   selectAllVisibleRows();
 }
 
+function toggleCardMultiSelectMode() {
+  if (cardMultiSelectMode.value) {
+    cardMultiSelectMode.value = false;
+    clearSelection();
+    return;
+  }
+  cardMultiSelectMode.value = true;
+}
+
+function onCardOpenClick(row: DirectoryRow) {
+  if (viewMode.value === "cards" && cardMultiSelectMode.value) {
+    toggleRowSelection(row);
+    return;
+  }
+  if (row.kind === "folder") {
+    openFolder(row.id);
+  } else {
+    openFile(row.id);
+  }
+}
+
 async function downloadSelectedResources() {
   if (!hasSelectedRows.value || batchDownloadSubmitting.value) {
     return;
@@ -624,6 +646,7 @@ async function performBatchDownload() {
     }
     await loadHotDownloads();
     clearSelection();
+    cardMultiSelectMode.value = false;
   } catch (err: unknown) {
     actionError.value = readApiError(err, "批量下载失败。");
   } finally {
@@ -1397,6 +1420,16 @@ watch(sortedRows, (rows) => {
   selectedResourceKeys.value = selectedResourceKeys.value.filter((key) => allowedKeys.has(key));
 }, { immediate: true });
 
+watch(viewMode, (mode) => {
+  if (mode === "table") {
+    cardMultiSelectMode.value = false;
+    return;
+  }
+  if (mode === "cards" && selectedResourceKeys.value.length > 0) {
+    cardMultiSelectMode.value = true;
+  }
+});
+
 function setSortMode(mode: "name" | "download" | "format" | "modified") {
   sortMode.value = mode;
   window.localStorage.setItem("public-home-sort-mode", mode);
@@ -1688,7 +1721,7 @@ async function syncSessionReceiptCode() {
     </div>
   </Teleport>
 
-  <main class="app-container py-2 sm:py-8 lg:py-10">
+  <main class="app-container py-2 sm:py-8 lg:py-2">
     <div class="space-y-6">
       <div class="block xl:hidden">
         <InfoPanelCard
@@ -1867,9 +1900,23 @@ async function syncSessionReceiptCode() {
               </button>
 
               <button
-                v-if="sortedRows.length > 0"
+                v-if="viewMode === 'cards' && sortedRows.length > 0"
                 type="button"
-                class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition hover:border-slate-300 hover:text-slate-900"
+                :class="
+                  cardMultiSelectMode
+                    ? 'border-blue-200 bg-blue-50/90 text-blue-900 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100'
+                    : 'border-slate-200 text-slate-600 dark:border-slate-600 dark:text-slate-300'
+                "
+                @click="toggleCardMultiSelectMode"
+              >
+                {{ cardMultiSelectMode ? "完成" : "多选" }}
+              </button>
+
+              <button
+                v-if="sortedRows.length > 0 && (viewMode === 'table' || cardMultiSelectMode)"
+                type="button"
+                class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-600 dark:text-slate-300"
                 @click="toggleSelectAllVisibleRows"
               >
                 {{ allVisibleRowsSelected ? "取消全选" : "全选" }}
@@ -1990,8 +2037,8 @@ async function syncSessionReceiptCode() {
               v-for="row in sortedRows"
               :key="`${row.kind}-${row.id}`"
               class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm"
-              :class="row.coverUrl ? 'min-h-0' : 'min-h-[168px] px-4 pt-3.5 sm:px-5'"
-              @click="row.kind === 'folder' ? openFolder(row.id) : openFile(row.id)"
+              :class="row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5'"
+              @click="onCardOpenClick(row)"
             >
               <template v-if="row.coverUrl">
                 <div class="relative aspect-[16/10] min-h-[132px] w-full max-h-[220px] shrink-0 overflow-hidden bg-slate-100 sm:min-h-[148px] sm:max-h-[240px]">
@@ -2001,7 +2048,10 @@ async function syncSessionReceiptCode() {
                     class="absolute inset-0 h-full w-full object-cover"
                     loading="lazy"
                   />
-                  <div class="absolute right-3 top-3 z-10 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm">
+                  <div
+                    v-if="cardMultiSelectMode"
+                    class="absolute right-3 top-3 z-10 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm"
+                  >
                     <input
                       :checked="isRowSelected(row)"
                       type="checkbox"
@@ -2014,33 +2064,32 @@ async function syncSessionReceiptCode() {
                 <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
                   <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{{ row.name }}</h3>
                   <p
-                    v-if="cardRemarkPreview(row.remark)"
+                    v-if="row.kind === 'folder' && cardRemarkPreview(row.remark)"
                     class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500"
                   >
                     {{ cardRemarkPreview(row.remark) }}
                   </p>
-                  <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                  <div
+                    class="mt-3 flex w-full min-w-0 text-xs"
+                    :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"
+                  >
                     <template v-if="row.kind === 'file'">
-                      <span class="inline-flex items-center gap-1.5">
-                        <Download class="h-3.5 w-3.5" />
-                        {{ row.downloadCount }}
-                      </span>
-                      <span>{{ row.sizeText }}</span>
+                      <div
+                        v-if="cardRemarkPreview(row.remark)"
+                        class="min-w-0 flex-1 overflow-hidden"
+                      >
+                        <p class="line-clamp-2 text-left leading-snug text-slate-600">
+                          {{ cardRemarkPreview(row.remark) }}
+                        </p>
+                      </div>
+                      <span class="ml-auto shrink-0 tabular-nums text-slate-500">{{ row.sizeText }}</span>
                     </template>
                     <template v-else>
-                      <span class="inline-flex items-center gap-1.5">
-                        <Download class="h-3.5 w-3.5" />
-                        {{ row.downloadCount }}
-                      </span>
-                      <span>{{ row.fileCount }} 个文件</span>
-                      <span>{{ row.sizeText }}</span>
+                      <span class="text-slate-500">{{ row.fileCount }} 个文件</span>
+                      <span class="text-slate-500">{{ row.sizeText }}</span>
                     </template>
-                    <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
-                      <Clock3 class="h-3.5 w-3.5" />
-                      <span class="truncate">{{ row.updatedAt }}</span>
-                    </span>
                   </div>
-                  <div class="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
+                  <div class="mt-2 flex items-center justify-between border-t border-slate-100 pt-3">
                     <button
                       type="button"
                       class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
@@ -2060,7 +2109,7 @@ async function syncSessionReceiptCode() {
                 </div>
               </template>
               <template v-else>
-                <div class="absolute right-5 top-4 z-10">
+                <div v-if="cardMultiSelectMode" class="absolute right-5 top-4 z-10">
                   <input
                     :checked="isRowSelected(row)"
                     type="checkbox"
@@ -2069,9 +2118,9 @@ async function syncSessionReceiptCode() {
                     @change="toggleRowSelection(row)"
                   />
                 </div>
-                <div class="flex items-start gap-4">
+                <div class="flex items-start gap-2.5 sm:gap-2.5">
                   <div
-                    class="flex h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-slate-100 text-slate-500"
+                    class="flex h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-slate-100 text-slate-500"
                     :class="row.coverUrl ? '' : 'items-center justify-center'"
                   >
                     <img
@@ -2081,43 +2130,49 @@ async function syncSessionReceiptCode() {
                       class="h-full w-full object-cover"
                       loading="lazy"
                     />
-                    <Folder v-else-if="row.kind === 'folder'" class="h-7 w-7 text-blue-500" />
-                    <component v-else :is="fileIconComponent(row.extension)" class="h-7 w-7" />
+                    <Folder v-else-if="row.kind === 'folder'" class="h-6 w-6 text-blue-500" />
+                    <component v-else :is="fileIconComponent(row.extension)" class="h-6 w-6" />
                   </div>
-                  <div class="min-w-0 flex-1 pr-10 pt-0.5">
-                    <h3 class="truncate text-base font-semibold leading-6 text-slate-900">{{ row.name }}</h3>
+                  <div
+                    class="min-w-0 flex-1 pt-0.5"
+                    :class="cardMultiSelectMode ? 'pr-9 sm:pr-10' : 'pr-0'"
+                  >
+                    <h3
+                      class="line-clamp-2 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]"
+                    >
+                      {{ row.name }}
+                    </h3>
                     <p
-                      v-if="cardRemarkPreview(row.remark)"
-                      class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500"
+                      v-if="row.kind === 'folder' && cardRemarkPreview(row.remark)"
+                      class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500"
                     >
                       {{ cardRemarkPreview(row.remark) }}
                     </p>
                   </div>
                 </div>
 
-                <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                <div
+                  class="mt-3 flex w-full min-w-0 text-xs"
+                  :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"
+                >
                   <template v-if="row.kind === 'file'">
-                    <span class="inline-flex items-center gap-1.5">
-                      <Download class="h-3.5 w-3.5" />
-                      {{ row.downloadCount }}
-                    </span>
-                    <span>{{ row.sizeText }}</span>
+                    <div
+                      v-if="cardRemarkPreview(row.remark)"
+                      class="min-w-0 flex-1 overflow-hidden"
+                    >
+                      <p class="line-clamp-2 text-left leading-snug text-slate-600">
+                        {{ cardRemarkPreview(row.remark) }}
+                      </p>
+                    </div>
+                    <span class="ml-auto shrink-0 tabular-nums text-slate-500">{{ row.sizeText }}</span>
                   </template>
                   <template v-else>
-                    <span class="inline-flex items-center gap-1.5">
-                      <Download class="h-3.5 w-3.5" />
-                      {{ row.downloadCount }}
-                    </span>
-                    <span>{{ row.fileCount }} 个文件</span>
-                    <span>{{ row.sizeText }}</span>
+                    <span class="text-slate-500">{{ row.fileCount }} 个文件</span>
+                    <span class="text-slate-500">{{ row.sizeText }}</span>
                   </template>
-                  <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
-                    <Clock3 class="h-3.5 w-3.5" />
-                    <span class="truncate">{{ row.updatedAt }}</span>
-                  </span>
                 </div>
 
-                <div class="mt-auto flex items-center justify-between border-t border-slate-100 py-2.5">
+                <div class="mt-2 flex items-center justify-between border-t border-slate-100 py-2.5">
                   <button
                     type="button"
                     class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"

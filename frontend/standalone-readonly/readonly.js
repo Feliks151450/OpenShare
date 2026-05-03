@@ -583,6 +583,17 @@ function fileDetailPreviewVisualKind(d) {
   return null;
 }
 
+/** 详情页右侧「同目录同后缀」列表：视频 / PDF / NetCDF（与主站 PublicFileDetailView 一致） */
+/** @param {object} d @returns {"video"|"pdf"|"nc"|null} */
+function fileDetailPeerSidebarKind(d) {
+  if (!d) return null;
+  if (isVideoDetail(d)) return "video";
+  const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase() || extractExtension(d.name);
+  if (ext === "pdf") return "pdf";
+  if (ext === "nc") return "nc";
+  return null;
+}
+
 function isBackendPublicFileDownloadHref(href) {
   const u = String(href ?? "").trim();
   if (u.startsWith("/api/public/files/") && u.includes("/download")) return true;
@@ -667,16 +678,20 @@ const Ico = {
   share: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>',
   fileVideo: '<svg class="h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
   fileText: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+  filePeerPdf:
+    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+  filePeerNc:
+    '<svg class="mt-0.5 h-4 w-4 shrink-0 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/><path d="M4.037 14.367a.492.492 0 0 1 .697 0l2.829 2.829a.49.49 0 0 1-.697.697l-2.83-2.829a.49.49 0 0 1 0-.697Z"/><path d="m10 11 2 2 4-4"/></svg>',
   clockBig: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
 };
 
 function fileIconSvg(ext) {
   const e = String(ext || "").toLowerCase();
   if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(e)) {
-    return '<svg class="h-7 w-7 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+    return '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
   }
   if (VIDEO_EXT.has(e)) {
-    return '<svg class="h-7 w-7 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
+    return '<svg class="h-6 w-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
   }
   return Ico.file;
 }
@@ -1039,6 +1054,11 @@ async function loadFileDetail() {
       const fid = (d.folder_id ?? "").trim();
       if (fid) await loadFolderVideoPeers(fid, d.id);
     } else if (d) {
+      const fid = (d.folder_id ?? "").trim();
+      const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase() || extractExtension(d.name);
+      if (fid && (ext === "pdf" || ext === "nc")) {
+        await loadFolderSameExtensionPeers(fid, d.id, ext);
+      }
       const pv = fileDetailPreviewVisualKind(d);
       if (pv === "pdf" && isBackendPublicFileDownloadHref(absoluteMediaDownloadURL(d, d.id))) {
         state.filePdfPreviewLoading = true;
@@ -1186,6 +1206,30 @@ async function loadFilePdfBlobPreview(d) {
   } finally {
     state.filePdfPreviewLoading = false;
     render();
+  }
+}
+
+async function loadFolderSameExtensionPeers(folderID, currentFileId, ext) {
+  const want = String(ext ?? "")
+    .replace(/^\./, "")
+    .toLowerCase();
+  state.folderVideoPeersLoading = true;
+  state.folderVideoPeers = [];
+  try {
+    const params = new URLSearchParams({ page: "1", page_size: "100", sort: "name_asc" });
+    const response = await apiRequest(`/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`);
+    const items = response.items ?? [];
+    state.folderVideoPeers = items
+      .filter((f) => f.id !== currentFileId)
+      .filter((f) => {
+        const e = ((f.extension ?? "").replace(/^\./, "") || extractExtension(f.name)).toLowerCase();
+        return e === want;
+      })
+      .map((f) => ({ id: f.id, name: f.name }));
+  } catch {
+    state.folderVideoPeers = [];
+  } finally {
+    state.folderVideoPeersLoading = false;
   }
 }
 
@@ -1563,10 +1607,10 @@ function renderHome() {
     <form class="flex flex-col gap-3 xl:flex-row xl:items-center" data-form="search">
       <label class="relative block min-w-0 flex-1">
         ${Ico.search}
-        <input type="text" name="q" value="${escapeHtml(state.searchInput)}" placeholder="在该目录下搜索文件/文件夹" class="h-14 w-full rounded-lg border border-slate-300 bg-white pl-14 pr-14 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+        <input type="text" name="q" value="${escapeHtml(state.searchInput)}" placeholder="在该目录下搜索文件/文件夹" class="h-11 w-full rounded-xl border border-slate-300 bg-white pl-14 pr-14 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
         ${state.searchInput ? `<button type="button" class="absolute right-4 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" data-action="clear-search" aria-label="清除">${Ico.x}</button>` : ""}
       </label>
-      <button type="submit" class="h-11 rounded-lg px-6 text-sm font-medium xl:shrink-0 ${state.searchInput.trim() ? "bg-slate-900 text-white hover:bg-slate-800" : "cursor-not-allowed bg-slate-200 text-slate-500"}" ${!state.searchInput.trim() || state.searchLoading ? "disabled" : ""}>${state.searchLoading ? "搜索中…" : "搜索"}</button>
+      <button type="submit" class="h-11 rounded-xl px-6 text-sm font-medium xl:shrink-0 ${state.searchInput.trim() ? "bg-slate-900 text-white hover:bg-slate-800" : "cursor-not-allowed bg-slate-200 text-slate-500"}" ${!state.searchInput.trim() || state.searchLoading ? "disabled" : ""}>${state.searchLoading ? "搜索中…" : "搜索"}</button>
     </form>
   </section>`;
 
@@ -1637,7 +1681,7 @@ function renderHome() {
 
   return `
   <main class="pt-16">
-    <div class="app-container py-2 sm:py-8 lg:py-10">
+    <div class="app-container py-2 sm:py-8 lg:py-2">
     <div class="space-y-6">
       <div class="block xl:hidden">${announcementPanel}</div>
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
@@ -1716,10 +1760,13 @@ function renderCard(row) {
       </div>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
         <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">${escapeHtml(row.name)}</h3>
-        ${remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
-        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          ${row.kind === "file" ? `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${escapeHtml(row.sizeText)}</span>` : `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${row.fileCount} 个文件</span><span>${escapeHtml(row.sizeText)}</span>`}
-          <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">${Ico.clock}<span class="truncate">${escapeHtml(row.updatedAt)}</span></span>
+        ${row.kind === "folder" && remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
+        <div class="mt-3 flex w-full min-w-0 items-start text-xs ${row.kind === "file" ? "gap-2" : "flex-wrap items-center gap-x-4 gap-y-1"}">
+          ${
+            row.kind === "file"
+              ? `${remarkPreview ? `<div class="min-w-0 flex-1 overflow-hidden"><p class="line-clamp-2 text-left leading-snug text-slate-600">${escapeHtml(remarkPreview)}</p></div>` : ""}<span class="ml-auto shrink-0 tabular-nums text-slate-500">${escapeHtml(row.sizeText)}</span>`
+              : `<span class="text-slate-500">${row.fileCount} 个文件</span><span class="text-slate-500">${escapeHtml(row.sizeText)}</span>`
+          }
         </div>
         <div class="mt-auto flex items-center justify-end border-t border-slate-100 pt-3">${dlBtn}</div>
       </div>
@@ -1727,18 +1774,21 @@ function renderCard(row) {
   }
   const icon = row.kind === "folder" ? Ico.folder : fileIconSvg(row.extension);
   return `
-  <article class="group relative min-w-0 flex min-h-[168px] cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white px-4 pt-3.5 transition hover:border-slate-300 hover:shadow-sm sm:px-5" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
-    <div class="flex items-start gap-4">
-      <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-slate-500">${icon}</div>
+  <article class="group relative min-w-0 flex min-h-[155px] cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white px-4 pt-3.5 transition hover:border-slate-300 hover:shadow-sm sm:px-5" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
+    <div class="flex items-start gap-2.5 sm:gap-2.5">
+      <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-slate-500">${icon}</div>
       <div class="min-w-0 flex-1 pr-2 pt-0.5">
-        <h3 class="truncate text-base font-semibold leading-6 text-slate-900">${escapeHtml(row.name)}</h3>
-        ${remarkPreview ? `<p class="mt-1 line-clamp-1 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
+        <h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]">${escapeHtml(row.name)}</h3>
+        ${row.kind === "folder" && remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
       </div>
     </div>
-    <div class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-      ${row.kind === "file" ? `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${escapeHtml(row.sizeText)}</span>` : `<span class="inline-flex items-center gap-1.5">${Ico.download} ${row.downloadCount}</span><span>${row.fileCount} 个文件</span><span>${escapeHtml(row.sizeText)}</span>`}
-      <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">${Ico.clock}<span class="truncate">${escapeHtml(row.updatedAt)}</span></span>
-    </div>
+      <div class="mt-3 flex w-full min-w-0 items-start text-xs ${row.kind === "file" ? "gap-2" : "flex-wrap items-center gap-x-4 gap-y-1"}">
+        ${
+          row.kind === "file"
+            ? `${remarkPreview ? `<div class="min-w-0 flex-1 overflow-hidden"><p class="line-clamp-2 text-left leading-snug text-slate-600">${escapeHtml(remarkPreview)}</p></div>` : ""}<span class="ml-auto shrink-0 tabular-nums text-slate-500">${escapeHtml(row.sizeText)}</span>`
+            : `<span class="text-slate-500">${row.fileCount} 个文件</span><span class="text-slate-500">${escapeHtml(row.sizeText)}</span>`
+        }
+      </div>
     <div class="mt-auto flex items-center justify-end border-t border-slate-100 py-2.5">${dlBtn}</div>
   </article>`;
 }
@@ -1750,10 +1800,10 @@ function renderTableRow(row) {
     row.kind === "folder"
       ? cover
         ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
-        : Ico.folder.replace("h-7 w-7", "mt-0.5 h-5 w-5 shrink-0")
+        : Ico.folder.replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0")
       : cover
         ? `<img src="${escapeHtml(cover)}" alt="" class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover" loading="lazy" />`
-        : fileIconSvg(row.extension).replace("h-7 w-7", "mt-0.5 h-5 w-5 shrink-0");
+        : fileIconSvg(row.extension).replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0");
   const remarkLine = remarkPreview
     ? `<p class="mt-0.5 truncate text-xs leading-snug text-slate-500" title="${escapeHtml(remarkPreview)}">${escapeHtml(remarkPreview)}</p>`
     : "";
@@ -1767,22 +1817,62 @@ function renderTableRow(row) {
   </tr>`;
 }
 
+/**
+ * 与视频侧栏同款 UI：Playlist 标题 + 同后缀文件链接列表。
+ * @param {"video"|"pdf"|"nc"} peerKind
+ * @param {{ asideId?: string }} [opts]
+ */
+function folderPeerAsideHtml(peerKind, opts = {}) {
+  /** @type {{ title: string; empty: string; icon: string }} */
+  let meta;
+  switch (peerKind) {
+    case "video":
+      meta = { title: "同文件夹视频", empty: "当前文件夹没有其他视频", icon: Ico.fileVideo };
+      break;
+    case "pdf":
+      meta = { title: "同文件夹 PDF", empty: "当前文件夹没有其他 PDF", icon: Ico.filePeerPdf };
+      break;
+    case "nc":
+      meta = { title: "同文件夹 NetCDF", empty: "当前文件夹没有其他 NetCDF", icon: Ico.filePeerNc };
+      break;
+    default:
+      return "";
+  }
+  const asideId = opts.asideId ?? "";
+  const idAttr = asideId ? ` id="${escapeHtml(asideId)}"` : "";
+  const listBody = state.folderVideoPeersLoading
+    ? `<p class="px-2 py-6 text-center text-sm text-slate-500">加载列表…</p>`
+    : state.folderVideoPeers.length
+      ? `<ul class="space-y-1">${state.folderVideoPeers.map((p) => `<li><a href="#/files/${encodeURIComponent(p.id)}" class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">${meta.icon}<span class="min-w-0 break-words leading-snug">${escapeHtml(p.name)}</span></a></li>`).join("")}</ul>`
+      : `<p class="px-2 py-6 text-center text-sm text-slate-500">${escapeHtml(meta.empty)}</p>`;
+  return `<aside${idAttr} class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80" style="max-height:min(70vh,720px)">
+      <div class="shrink-0 border-b border-slate-100 px-4 py-3">
+        <p class="mt-1 text-sm font-medium text-slate-900">${escapeHtml(meta.title)}</p>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        ${listBody}
+      </div>
+    </aside>`;
+}
+
 function renderFileDetail() {
   const d = state.fileDetail;
   const loading = state.fileLoading;
   const err = state.fileError;
   if (loading) {
-    return `<section class="app-container py-2 sm:py-8 lg:py-10"><div class="mx-auto max-w-4xl space-y-6"><div class="panel p-6"><p class="text-sm text-slate-500">加载中…</p></div></div></section>`;
+    return `<section class="app-container py-2 sm:py-8 lg:py-2"><div class="mx-auto max-w-4xl space-y-6"><div class="panel p-6"><p class="text-sm text-slate-500">加载中…</p></div></div></section>`;
   }
   if (err) {
-    return `<section class="app-container py-2 sm:py-8 lg:py-10"><div class="mx-auto max-w-4xl space-y-6"><div class="panel p-6 space-y-4"><p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">${escapeHtml(err)}</p><div class="flex gap-3"><button type="button" class="btn-secondary" data-action="detail-back">返回上一页</button><button type="button" class="btn-primary" data-action="detail-home">返回首页</button></div></div></div></section>`;
+    return `<section class="app-container py-2 sm:py-8 lg:py-2"><div class="mx-auto max-w-4xl space-y-6"><div class="panel p-6 space-y-4"><p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">${escapeHtml(err)}</p><div class="flex gap-3"><button type="button" class="btn-secondary" data-action="detail-back">返回上一页</button><button type="button" class="btn-primary" data-action="detail-home">返回首页</button></div></div></div></section>`;
   }
   if (!d) {
-    return `<section class="app-container py-2 sm:py-8 lg:py-10"><div class="mx-auto max-w-4xl"><p class="text-sm text-slate-500">无数据</p></div></section>`;
+    return `<section class="app-container py-2 sm:py-8 lg:py-2"><div class="mx-auto max-w-4xl"><p class="text-sm text-slate-500">无数据</p></div></section>`;
   }
 
   const isVideo = isVideoDetail(d);
-  const layoutWide = isVideo && Boolean((d.folder_id ?? "").trim());
+  const folderId = (d.folder_id ?? "").trim();
+  const peerKind = fileDetailPeerSidebarKind(d);
+  const layoutWide = Boolean(folderId) && peerKind !== null;
   const descHtml = renderSimpleMarkdown(d.description ?? "");
   const coverHref = fileCoverImageHrefFromFields(d.cover_url, d.description ?? "");
   const absDl = mediaSourceURL(d, d.id);
@@ -1807,19 +1897,7 @@ function renderFileDetail() {
     <div id="detail-video-stage" class="min-w-0 flex-1 self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5">
       <video id="detail-video" class="max-h-[min(70vh,720px)] w-full object-contain" controls playsinline preload="metadata" src="${escapeHtml(activeSrc)}"></video>
     </div>
-    ${
-      (d.folder_id ?? "").trim()
-        ? `<aside id="detail-video-peers-aside" class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80" style="max-height:min(70vh,720px)">
-      <div class="shrink-0 border-b border-slate-100 px-4 py-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Playlist</p>
-        <p class="mt-1 text-sm font-medium text-slate-900">同文件夹视频</p>
-      </div>
-      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        ${state.folderVideoPeersLoading ? `<p class="px-2 py-6 text-center text-sm text-slate-500">加载列表…</p>` : state.folderVideoPeers.length ? `<ul class="space-y-1">${state.folderVideoPeers.map((p) => `<li><a href="#/files/${encodeURIComponent(p.id)}" class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">${Ico.fileVideo}<span class="min-w-0 break-words leading-snug">${escapeHtml(p.name)}</span></a></li>`).join("")}</ul>` : `<p class="px-2 py-6 text-center text-sm text-slate-500">当前文件夹没有其他视频</p>`}
-      </div>
-    </aside>`
-        : ""
-    }
+    ${folderId ? folderPeerAsideHtml("video", { asideId: "detail-video-peers-aside" }) : ""}
   </div>`
       : "";
 
@@ -1849,7 +1927,11 @@ function renderFileDetail() {
     } else {
       pdfInner = `<iframe title="PDF 预览" class="block min-h-[min(70vh,720px)] w-full border-0 bg-white" src="${escapeHtml(absDlFull)}"></iframe>`;
     }
-    previewBlock = `<div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5">${pdfInner}</div>`;
+    const pdfCore = `<div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5">${pdfInner}</div>`;
+    previewBlock =
+      folderId && peerKind === "pdf"
+        ? `<div class="flex flex-col gap-4 lg:flex-row lg:items-start"><div class="min-w-0 flex-1 self-start">${pdfCore}</div>${folderPeerAsideHtml("pdf")}</div>`
+        : pdfCore;
   } else if (!isVideo && (pvKind === "markdown" || pvKind === "plain" || pvKind === "csv" || pvKind === "netcdf")) {
     let inner = "";
     if (state.filePreviewTextLoading) {
@@ -1896,6 +1978,9 @@ function renderFileDetail() {
         ? `<button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"${previewCopyable ? "" : " disabled"} data-action="copy-file-preview-text" aria-label="复制预览区文本">复制</button>`
         : "";
     previewBlock = `<div class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"><div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2"><p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>${previewHeaderCopy}</div><div>${inner}</div></div>`;
+    if (pvKind === "netcdf" && folderId && peerKind === "nc") {
+      previewBlock = `<div class="flex flex-col gap-4 lg:flex-row lg:items-start"><div class="min-w-0 flex-1 self-start">${previewBlock}</div>${folderPeerAsideHtml("nc")}</div>`;
+    }
   }
 
   const hint = `<p id="file-detail-copy-hint" role="status" class="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 ${state.linkCopyHint ? "" : "hidden"}">${state.linkCopyHint ? escapeHtml(state.linkCopyHint) : ""}</p>`;
@@ -1904,8 +1989,8 @@ function renderFileDetail() {
   const dlAllowed = d.download_allowed !== false;
 
   return `
-  <section class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-7xl" : "max-w-6xl"}">
+  <section class="app-container py-2 sm:py-8 lg:py-2">
+    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-screen-2xl" : "max-w-6xl"}">
       <div class="panel p-6">
         ${hint}
         <section>
@@ -1914,7 +1999,7 @@ function renderFileDetail() {
               <div class="min-w-0 w-full space-y-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300" data-action="detail-back" aria-label="返回">${Ico.chevronLeft}</button>
-                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
+                  <p class="text-l font-semibold text-blue-600">返回文件夹</p>
                 </div>
                 <h3 class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl">${escapeHtml(d.name)}</h3>
               </div>
