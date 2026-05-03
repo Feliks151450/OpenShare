@@ -51,14 +51,22 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 	if download.MimeType != "" {
 		ctx.Header("Content-Type", download.MimeType)
 	}
-	if download.PlaybackInlineOnly {
+	inlineQuery := strings.ToLower(strings.TrimSpace(ctx.Query("inline")))
+	wantInlineEmbed := inlineQuery == "1" || inlineQuery == "true" || inlineQuery == "yes"
+	inlineDisposition := download.PlaybackInlineOnly ||
+		(wantInlineEmbed && service.InlineEmbedDispositionAllowed(download.MimeType, download.FileName))
+	if inlineDisposition {
 		ctx.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", download.FileName))
 	} else {
 		ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FileName))
 	}
 	ctx.Header("Content-Length", strconv.FormatInt(download.Size, 10))
 
-	if !download.PlaybackInlineOnly {
+	shouldRecord := !download.PlaybackInlineOnly
+	if shouldRecord && wantInlineEmbed && inlineDisposition && service.InlineEmbedDispositionAllowed(download.MimeType, download.FileName) {
+		shouldRecord = false
+	}
+	if shouldRecord {
 		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
 			return
@@ -120,6 +128,24 @@ func (h *PublicDownloadHandler) DownloadFolder(ctx *gin.Context) {
 		opened.Content.Close()
 	}
 	_ = zipWriter.Close()
+}
+
+func (h *PublicDownloadHandler) GetNetCDFDump(ctx *gin.Context) {
+	text, structure, truncated, err := h.service.PrepareNetCDFDump(ctx.Request.Context(), ctx.Param("fileID"))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDownloadFileNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		case errors.Is(err, service.ErrNetCDFNotApplicable):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "file is not a NetCDF (.nc) file"})
+		case errors.Is(err, service.ErrDownloadForbidden):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "download not allowed"})
+		default:
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "failed to read NetCDF file"})
+		}
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"text": text, "structure": structure, "truncated": truncated})
 }
 
 func (h *PublicDownloadHandler) GetFileDetail(ctx *gin.Context) {

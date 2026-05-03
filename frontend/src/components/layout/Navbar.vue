@@ -161,7 +161,7 @@ function onPointerDown(event: PointerEvent) {
 <template>
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
     <div
-      class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8"
+      class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8 xl:max-w-[2150px]"
     >
       <div class="min-w-0 flex items-center justify-start">
         <RouterLink to="/" class="inline-flex min-w-0 items-center gap-2 sm:gap-2.5">

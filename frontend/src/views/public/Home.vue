@@ -27,7 +27,6 @@ import SearchSection from "../../components/resources/SearchSection.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
-import { hasAdminPermission } from "../../lib/admin/session";
 import {
   coverImageHrefFromDescription,
   fileCoverImageHrefFromFields,
@@ -35,6 +34,19 @@ import {
 } from "../../lib/markdown";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
+import {
+  invalidateDirectoryViewCacheAll,
+  invalidateDirectoryViewCacheFolder,
+  isDirectoryViewCacheEntryUsable,
+  peekDirectoryViewLoadToken,
+  readDirectoryViewCache,
+  takeDirectoryViewLoadToken,
+  writeDirectoryViewCache,
+  type DirectoryViewCacheEntry,
+  type FolderDetailResponse,
+  type PublicFileItem,
+  type PublicFolderItem,
+} from "../../lib/publicHomeDirectoryCache";
 
 interface AnnouncementItem {
   id: string;
@@ -50,37 +62,6 @@ interface AnnouncementItem {
   };
   published_at?: string;
   updated_at: string;
-}
-
-interface PublicFolderItem {
-  id: string;
-  name: string;
-  description?: string;
-  /** 单行备注，用于首页卡片展示 */
-  remark?: string;
-  /** 解析继承后的是否允许打包下载 */
-  download_allowed?: boolean;
-  updated_at: string;
-  file_count: number;
-  download_count: number;
-  total_size: number;
-}
-
-interface PublicFileItem {
-  id: string;
-  name: string;
-  description: string;
-  remark?: string;
-  extension: string;
-  /** 非空时优先作为卡片封面，高于简介中的 ![cover](...) */
-  cover_url?: string;
-  /** 由文件夹直链前缀生成；下载优先级低于 playback_url */
-  folder_direct_download_url?: string;
-  playback_url?: string;
-  download_allowed?: boolean;
-  uploaded_at: string;
-  download_count: number;
-  size: number;
 }
 
 interface HotDownloadItem {
@@ -126,26 +107,6 @@ interface SearchResultResponse {
   page: number;
   page_size: number;
   total: number;
-}
-
-interface FolderDetailResponse {
-  id: string;
-  name: string;
-  description: string;
-  remark?: string;
-  parent_id: string | null;
-  file_count: number;
-  download_count: number;
-  total_size: number;
-  updated_at: string;
-  /** 子文件直链 = 此前缀 + 相对路径（最内层有前缀的祖先生效） */
-  direct_link_prefix?: string;
-  download_allowed?: boolean;
-  download_policy?: "inherit" | "allow" | "deny";
-  breadcrumbs: Array<{
-    id: string;
-    name: string;
-  }>;
 }
 
 const route = useRoute();
@@ -209,6 +170,9 @@ const breadcrumbs = ref<Array<{ id: string; name: string }>>([]);
 const currentFolderDetail = ref<FolderDetailResponse | null>(null);
 const selectedResourceKeys = ref<string[]>([]);
 const canManageResourceDescriptions = ref(false);
+const canManageAnnouncements = ref(false);
+const homeSessionAdminId = ref("");
+const homeSessionIsSuperAdmin = ref(false);
 const folderDescriptionEditorOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
@@ -222,10 +186,20 @@ const deleteResourcePassword = ref("");
 const deleteResourceMoveToTrash = ref(true);
 const deleteResourceSubmitting = ref(false);
 const deleteResourceError = ref("");
-const currentFolderID = computed(() => {
-  const raw = route.query.folder;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : "";
-});
+function folderIdFromRouteQuery(raw: unknown): string {
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  if (Array.isArray(raw)) {
+    for (const v of raw) {
+      if (typeof v === "string" && v.trim()) {
+        return v.trim();
+      }
+    }
+  }
+  return "";
+}
+const currentFolderID = computed(() => folderIdFromRouteQuery(route.query.folder));
 const canUploadToCurrentFolder = computed(() => currentFolderID.value.length > 0);
 const rootViewLocked = computed(() => route.query.root === "1");
 const hotDownloads = computed(() => hotDownloadItems.value.slice(0, 5).map((item) => ({
@@ -415,6 +389,7 @@ const folderEditorDirty = computed(() => {
     folderDownloadPolicyDraft.value !== (currentFolderDetail.value.download_policy ?? "inherit")
   );
 });
+const folderDescriptionPreviewHTML = computed(() => renderSimpleMarkdown(folderDescriptionDraft.value));
 const currentFolderStats = computed(() => {
   if (!currentFolderDetail.value) {
     return [];
@@ -431,6 +406,50 @@ const currentFolderStats = computed(() => {
 const canGoUp = computed(() => currentFolderID.value.length > 0);
 const backButtonLabel = computed(() => (searchKeyword.value ? "返回所在目录" : "返回上一级"));
 const canUseBackButton = computed(() => searchKeyword.value.length > 0 || canGoUp.value);
+
+/** 当前详情为托管根目录（无父级）时可重新扫描磁盘，与后台 rescan API 一致。 */
+const showRescanCurrentManagedFolder = computed(() => {
+  const d = currentFolderDetail.value;
+  if (!d || !canManageResourceDescriptions.value) {
+    return false;
+  }
+  const p = d.parent_id;
+  return p == null || String(p).trim() === "";
+});
+
+const rescanningManagedFolderID = ref("");
+
+async function rescanCurrentManagedFolder() {
+  const d = currentFolderDetail.value;
+  if (!d || !showRescanCurrentManagedFolder.value) {
+    return;
+  }
+  rescanningManagedFolderID.value = d.id;
+  actionError.value = "";
+  actionMessage.value = "";
+  try {
+    const response = await httpClient.post<{
+      added_folders: number;
+      added_files: number;
+      updated_folders: number;
+      updated_files: number;
+      deleted_folders: number;
+      deleted_files: number;
+    }>(`/admin/imports/local/${encodeURIComponent(d.id)}/rescan`);
+    actionMessage.value =
+      `重新扫描完成：新增目录 ${response.added_folders} 个、文件 ${response.added_files} 个，` +
+      `更新目录 ${response.updated_folders} 个、文件 ${response.updated_files} 个，` +
+      `移除目录 ${response.deleted_folders} 个、文件 ${response.deleted_files} 个。`;
+    invalidateDirectoryViewCacheAll();
+    await loadDirectory({ force: true });
+    void loadHotDownloads();
+    void loadLatestTitles();
+  } catch (err: unknown) {
+    actionError.value = readApiError(err, "重新扫描失败。");
+  } finally {
+    rescanningManagedFolderID.value = "";
+  }
+}
 
 function rowNeedsDownloadConfirm(row: DirectoryRow) {
   if (row.kind === "folder") {
@@ -744,6 +763,25 @@ function announcementAuthorIsSuperAdmin(item: AnnouncementItem) {
   return item.creator?.role === "super_admin";
 }
 
+function canEditAnnouncementOnHome(item: AnnouncementItem | null) {
+  if (!item || !canManageAnnouncements.value) {
+    return false;
+  }
+  if (homeSessionIsSuperAdmin.value) {
+    return true;
+  }
+  const creatorId = item.creator?.id?.trim() ?? "";
+  return Boolean(creatorId && creatorId === homeSessionAdminId.value);
+}
+
+function openAnnouncementInAdminEditor() {
+  const d = announcementDetail.value;
+  if (!d || !canEditAnnouncementOnHome(d)) {
+    return;
+  }
+  void router.push({ name: "admin-announcements", query: { edit: d.id } });
+}
+
 function openSidebarDetailModal(modal: SidebarDetailModalState) {
   sidebarDetailModal.value = modal;
   syncBodyScrollLock();
@@ -810,39 +848,105 @@ async function loadLatestTitles() {
   }
 }
 
-async function loadDirectory() {
+function snapshotDirectoryViewFromRefs(): DirectoryViewCacheEntry {
+  const d = currentFolderDetail.value;
+  return {
+    folders: folders.value.map((f) => ({ ...f })),
+    files: files.value.map((f) => ({ ...f })),
+    detail: d ? (JSON.parse(JSON.stringify(d)) as FolderDetailResponse) : null,
+  };
+}
+
+function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
+  folders.value = entry.folders.map((f) => ({ ...f }));
+  files.value = entry.files.map((f) => ({ ...f }));
+  if (entry.detail) {
+    const detail = entry.detail;
+    currentFolderDetail.value = detail;
+    folderNameDraft.value = detail.name;
+    folderDescriptionDraft.value = detail.description ?? "";
+    folderRemarkDraft.value = (detail.remark ?? "").trim();
+    folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
+    folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
+    breadcrumbs.value = detail.breadcrumbs ?? [];
+  } else {
+    currentFolderDetail.value = null;
+    folderNameDraft.value = "";
+    folderDescriptionDraft.value = "";
+    folderRemarkDraft.value = "";
+    folderDirectPrefixDraft.value = "";
+    folderDownloadPolicyDraft.value = "inherit";
+    breadcrumbs.value = [];
+  }
+}
+
+async function loadDirectory(options?: { force?: boolean }) {
+  const gen = takeDirectoryViewLoadToken();
+  const requestedKey = currentFolderID.value;
+
+  if (!options?.force) {
+    const cached = readDirectoryViewCache(requestedKey);
+    if (cached && isDirectoryViewCacheEntryUsable(requestedKey, cached)) {
+      if (gen !== peekDirectoryViewLoadToken()) {
+        return;
+      }
+      error.value = "";
+      actionMessage.value = "";
+      actionError.value = "";
+      applyDirectoryViewToState(cached);
+      loading.value = false;
+      return;
+    }
+  }
+
   loading.value = true;
   error.value = "";
   actionMessage.value = "";
   actionError.value = "";
+  const fetchKey = requestedKey;
+
   try {
     const directoryParams = new URLSearchParams();
-    if (currentFolderID.value) {
-      directoryParams.set("parent_id", currentFolderID.value);
+    if (fetchKey) {
+      directoryParams.set("parent_id", fetchKey);
     }
 
     const requests: Array<Promise<unknown>> = [
       httpClient.get<{ items: PublicFolderItem[] }>(`/public/folders${directoryParams.toString() ? `?${directoryParams.toString()}` : ""}`),
     ];
 
-    if (currentFolderID.value) {
+    if (fetchKey) {
       const folderParams = new URLSearchParams({
         page: "1",
         page_size: "100",
         sort: "name_asc",
       });
-      requests.push(httpClient.get<{ items: PublicFileItem[] }>(`/public/folders/${encodeURIComponent(currentFolderID.value)}/files?${folderParams.toString()}`));
+      requests.push(
+        httpClient.get<{ items: PublicFileItem[] }>(
+          `/public/folders/${encodeURIComponent(fetchKey)}/files?${folderParams.toString()}`,
+        ),
+      );
     }
 
-    if (currentFolderID.value) {
-      requests.push(httpClient.get<FolderDetailResponse>(`/public/folders/${encodeURIComponent(currentFolderID.value)}`));
+    if (fetchKey) {
+      requests.push(httpClient.get<FolderDetailResponse>(`/public/folders/${encodeURIComponent(fetchKey)}`));
     }
 
     const [folderResponse, fileResponse, folderDetail] = await Promise.all(requests);
-    folders.value = (folderResponse as { items: PublicFolderItem[] }).items ?? [];
-    files.value = currentFolderID.value ? ((fileResponse as { items: PublicFileItem[] } | undefined)?.items ?? []) : [];
 
-    if (!currentFolderID.value && !rootViewLocked.value && folders.value.length === 1) {
+    if (gen !== peekDirectoryViewLoadToken() || currentFolderID.value !== fetchKey) {
+      return;
+    }
+
+    folders.value = (folderResponse as { items: PublicFolderItem[] }).items ?? [];
+    files.value = fetchKey ? ((fileResponse as { items: PublicFileItem[] } | undefined)?.items ?? []) : [];
+
+    if (!fetchKey && !rootViewLocked.value && folders.value.length === 1) {
+      try {
+        writeDirectoryViewCache(fetchKey, snapshotDirectoryViewFromRefs());
+      } catch {
+        invalidateDirectoryViewCacheFolder(fetchKey);
+      }
       void router.replace({ name: "public-home", query: { folder: folders.value[0].id } });
       return;
     }
@@ -865,28 +969,56 @@ async function loadDirectory() {
       folderDownloadPolicyDraft.value = "inherit";
       breadcrumbs.value = [];
     }
+
+    try {
+      writeDirectoryViewCache(fetchKey, snapshotDirectoryViewFromRefs());
+    } catch {
+      invalidateDirectoryViewCacheFolder(fetchKey);
+    }
   } catch (err: unknown) {
-    folders.value = [];
-    files.value = [];
-    breadcrumbs.value = [];
-    currentFolderDetail.value = null;
-    folderNameDraft.value = "";
-    folderDescriptionDraft.value = "";
-    folderRemarkDraft.value = "";
-    folderDirectPrefixDraft.value = "";
-    folderDownloadPolicyDraft.value = "inherit";
-    if (err instanceof HttpError && err.status === 404) {
-      error.value = "目录不存在或未公开。";
-    } else {
-      error.value = "加载目录失败。";
+    if (gen === peekDirectoryViewLoadToken() && currentFolderID.value === fetchKey) {
+      invalidateDirectoryViewCacheFolder(fetchKey);
+      folders.value = [];
+      files.value = [];
+      breadcrumbs.value = [];
+      currentFolderDetail.value = null;
+      folderNameDraft.value = "";
+      folderDescriptionDraft.value = "";
+      folderRemarkDraft.value = "";
+      folderDirectPrefixDraft.value = "";
+      folderDownloadPolicyDraft.value = "inherit";
+      if (err instanceof HttpError && err.status === 404) {
+        error.value = "目录不存在或未公开。";
+      } else {
+        error.value = "加载目录失败。";
+      }
     }
   } finally {
-    loading.value = false;
+    if (gen === peekDirectoryViewLoadToken()) {
+      loading.value = false;
+    }
   }
 }
 
 async function loadAdminPermission() {
-  canManageResourceDescriptions.value = await hasAdminPermission("resource_moderation");
+  canManageResourceDescriptions.value = false;
+  canManageAnnouncements.value = false;
+  homeSessionAdminId.value = "";
+  homeSessionIsSuperAdmin.value = false;
+  try {
+    const response = await httpClient.get<{
+      admin: { id: string; role: string; permissions: string[] };
+    }>("/admin/me");
+    const a = response.admin;
+    const perms = a.permissions ?? [];
+    const isSuper = a.role === "super_admin";
+    homeSessionIsSuperAdmin.value = isSuper;
+    homeSessionAdminId.value = String(a.id ?? "").trim();
+    canManageResourceDescriptions.value = isSuper || perms.includes("resource_moderation");
+    canManageAnnouncements.value = isSuper || perms.includes("announcements");
+  } catch {
+    /* 未登录或非管理员 */
+  }
 }
 
 function openRoot() {
@@ -991,6 +1123,7 @@ async function confirmDeleteResource() {
       body: { password: deleteResourcePassword.value, move_to_trash: movedToTrash },
     });
     const parentID = currentFolderDetail.value?.parent_id ?? "";
+    invalidateDirectoryViewCacheAll();
     closeDeleteResourceDialog();
     actionMessage.value = movedToTrash
       ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
@@ -1178,7 +1311,8 @@ async function submitUpload() {
     uploadForm.value.description = "";
     clearUploadEntries();
     if (response.status === "approved") {
-      await loadDirectory();
+      invalidateDirectoryViewCacheFolder(currentFolderID.value);
+      await loadDirectory({ force: true });
     }
     closeUploadModal();
     uploadSuccessModalOpen.value = true;
@@ -1372,7 +1506,11 @@ async function saveFolderDescription() {
     ));
     folderDescriptionEditorOpen.value = false;
     syncBodyScrollLock();
-    await loadDirectory();
+    if (currentFolderDetail.value) {
+      invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
+      invalidateDirectoryViewCacheFolder(currentFolderDetail.value.parent_id ?? "");
+    }
+    await loadDirectory({ force: true });
   } catch (err: unknown) {
     folderDescriptionError.value = readApiError(err, "更新文件夹简介失败。");
   } finally {
@@ -1624,6 +1762,17 @@ async function syncSessionReceiptCode() {
                     删除
                   </button>
                   <button
+                    v-if="showRescanCurrentManagedFolder"
+                    type="button"
+                    class="btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="Boolean(rescanningManagedFolderID)"
+                    @click="rescanCurrentManagedFolder"
+                  >
+                    {{
+                      rescanningManagedFolderID === currentFolderDetail.id ? "扫描中…" : "重新扫描"
+                    }}
+                  </button>
+                  <button
                     type="button"
                     class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     aria-label="反馈文件夹"
@@ -1835,7 +1984,7 @@ async function syncSessionReceiptCode() {
           </div>
           <div
             v-else-if="viewMode === 'cards'"
-            class="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-2 sm:px-5 md:gap-5 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4 2xl:grid-cols-4"
+            class="public-home-card-grid gap-4 px-4 py-3 sm:px-5 md:gap-5"
           >
             <article
               v-for="row in sortedRows"
@@ -2267,8 +2416,16 @@ async function syncSessionReceiptCode() {
               <span>{{ formatDateTime(announcementDetail.published_at || announcementDetail.updated_at) }}</span>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center justify-end gap-3">
             <button type="button" class="btn-secondary" @click="returnToAnnouncementList">返回</button>
+            <button
+              v-if="canEditAnnouncementOnHome(announcementDetail)"
+              type="button"
+              class="btn-secondary"
+              @click="openAnnouncementInAdminEditor"
+            >
+              编辑
+            </button>
             <button type="button" class="btn-secondary" @click="closeAnnouncementDetail">关闭</button>
           </div>
         </div>
@@ -2555,11 +2712,22 @@ async function syncSessionReceiptCode() {
     <Transition name="modal-shell">
     <div v-if="folderDescriptionEditorOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-screen items-center justify-center px-4 py-6">
-          <div class="modal-card panel w-full max-w-3xl overflow-hidden p-6">
+          <div class="modal-card panel w-full max-w-5xl overflow-hidden p-6">
             <div class="border-b border-slate-200 pb-4">
-                  <div>
-                    <h3 class="text-lg font-semibold text-slate-900">编辑文件夹信息</h3>
-                  </div>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold text-slate-900">编辑文件夹信息</h3>
+                <div class="flex shrink-0 flex-wrap justify-end gap-3">
+                  <button type="button" class="btn-secondary" @click="closeFolderDescriptionEditor">取消</button>
+                  <button
+                    type="button"
+                    class="btn-primary"
+                    :disabled="folderDescriptionSaving || !folderEditorDirty"
+                    @click="saveFolderDescription"
+                  >
+                    {{ folderDescriptionSaving ? "保存中…" : "保存更改" }}
+                  </button>
+                </div>
+              </div>
             </div>
 
           <div class="mt-5 space-y-4">
@@ -2585,15 +2753,30 @@ async function syncSessionReceiptCode() {
               />
             </label>
 
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-slate-700">简介（Markdown）</span>
-            </label>
-            <textarea
-              v-model="folderDescriptionDraft"
-              rows="10"
-              class="field-area"
-              placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。"
-            />
+            <div
+              class="grid min-h-0 grid-cols-1 gap-6 lg:min-h-[28rem] lg:grid-cols-2 lg:grid-rows-[auto_minmax(17rem,1fr)]"
+            >
+              <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
+                简介（Markdown）
+              </span>
+              <textarea
+                v-model="folderDescriptionDraft"
+                class="field-area order-2 min-h-[17rem] w-full resize-y rounded-3xl lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 lg:resize-none"
+                rows="10"
+                placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。"
+              />
+              <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
+                <h4 class="text-lg font-semibold text-slate-900">简介预览</h4>
+              </div>
+              <div
+                class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
+              >
+                <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                  <div v-if="folderDescriptionPreviewHTML" class="markdown-content" v-html="folderDescriptionPreviewHTML" />
+                  <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
+                </div>
+              </div>
+            </div>
 
             <label class="space-y-2">
               <span class="text-sm font-medium text-slate-700">子文件直链前缀（可选）</span>
@@ -2624,13 +2807,6 @@ async function syncSessionReceiptCode() {
             <p v-if="folderDescriptionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ folderDescriptionError }}
             </p>
-
-              <div class="flex justify-end gap-3">
-                <button type="button" class="btn-secondary" @click="closeFolderDescriptionEditor">取消</button>
-                <button type="button" class="btn-primary" :disabled="folderDescriptionSaving || !folderEditorDirty" @click="saveFolderDescription">
-                  {{ folderDescriptionSaving ? "保存中…" : "保存更改" }}
-                </button>
-              </div>
           </div>
         </div>
       </div>
@@ -2640,6 +2816,12 @@ async function syncSessionReceiptCode() {
 </template>
 
 <style scoped>
+.public-home-card-grid {
+  display: grid;
+  /* 列数由主内容区宽度决定（非整页视口），避免 xl 出现侧栏时仍按视口算 4 列导致卡片过窄 */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr));
+}
+
 @keyframes warning-fade-in {
   0% {
     opacity: 0;

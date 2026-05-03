@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { ChevronLeft, Clock, Download, FileText, FileVideo, Flag, Link2, Share2 } from "lucide-vue-next";
 
@@ -8,8 +8,14 @@ import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
-import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
+import {
+  fileEffectiveDownloadHref,
+  fileUsesBackendDownloadHref,
+  withBackendDownloadInlinePreviewParam,
+} from "../../lib/fileDirectUrl";
+import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
+import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
 
 interface FileDetailResponse {
   id: string;
@@ -97,6 +103,14 @@ const absoluteDownloadURL = computed(() => {
     return src;
   }
   return new URL(src, window.location.origin).href;
+});
+
+/** 内嵌预览用：本站 /download 附加 inline=1，避免 PDF 等被 Content-Disposition: attachment 强制下载 */
+const previewEmbedDownloadURL = computed(() => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return withBackendDownloadInlinePreviewParam(absoluteDownloadURL.value);
 });
 
 const absoluteDetailPageURL = computed(() => {
@@ -220,7 +234,10 @@ function applySeekFromRouteQuery() {
 }
 
 function onVideoLoadedMetadata() {
-  void nextTick(() => applySeekFromRouteQuery());
+  void nextTick(() => {
+    applySeekFromRouteQuery();
+    setupVideoStageObserver();
+  });
 }
 
 const linkCopyHint = ref("");
@@ -240,10 +257,355 @@ function isVideoDetail(d: FileDetailResponse): boolean {
 
 const isVideo = computed(() => (detail.value ? isVideoDetail(detail.value) : false));
 
+/** 非视频文件的浏览器内预览类型 */
+type DetailPreviewVisualKind = "image" | "pdf" | "markdown" | "plain" | "csv" | "netcdf";
+
+const PREVIEW_TEXT_MAX_BYTES = 1_048_576;
+/** 本站 PDF：fetch 为 Blob 再交给 iframe，绕过服务端 Content-Disposition 触发的强制下载 */
+const PDF_PREVIEW_MAX_BYTES = 52_428_800;
+
+const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpeg", "jpg", "jfif", "gif", "webp", "svg", "bmp"]);
+
+function normalizedFileExtension(d: FileDetailResponse): string {
+  return (d.extension ?? "").replace(/^\./, "").toLowerCase();
+}
+
+function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisualKind | null {
+  if (isVideoDetail(d)) {
+    return null;
+  }
+  const mime = (d.mime_type ?? "").toLowerCase();
+  const ext = normalizedFileExtension(d);
+  if (mime.startsWith("image/") || IMAGE_PREVIEW_EXTENSIONS.has(ext)) {
+    return "image";
+  }
+  if (mime === "application/pdf" || ext === "pdf") {
+    return "pdf";
+  }
+  if (mime.includes("markdown") || ext === "md" || ext === "markdown") {
+    return "markdown";
+  }
+  if (mime === "text/csv" || mime === "text/tab-separated-values" || ext === "csv" || ext === "tsv") {
+    return "csv";
+  }
+  if (ext === "nc") {
+    return "netcdf";
+  }
+  if (mime === "text/plain" || ext === "txt" || ext === "ncl") {
+    return "plain";
+  }
+  return null;
+}
+
+const previewVisualKind = computed((): DetailPreviewVisualKind | null =>
+  detail.value ? fileDetailPreviewVisualKind(detail.value) : null,
+);
+
+const TEXTUAL_PREVIEW_KINDS = new Set<DetailPreviewVisualKind>(["markdown", "plain", "csv"]);
+
+const needsFetchedTextPreview = computed(() => {
+  const k = previewVisualKind.value;
+  if (k == null) {
+    return false;
+  }
+  return TEXTUAL_PREVIEW_KINDS.has(k) || k === "netcdf";
+});
+
+const previewFetchedText = ref("");
+/** NetCDF API 返回的 `structure`，用于 Markdown 结构化预览 */
+const previewNetcdfStructure = ref<NetCDFDumpGroup | null>(null);
+const previewTextLoading = ref(false);
+const previewTextError = ref("");
+const previewTextTruncated = ref(false);
+const previewImageFailed = ref(false);
+let previewTextAbortController: AbortController | null = null;
+
+const previewMarkdownRendered = computed(() => {
+  if (previewVisualKind.value !== "markdown") {
+    return "";
+  }
+  return renderSimpleMarkdown(previewFetchedText.value);
+});
+
+const previewNetcdfMarkdownHtml = computed(() => {
+  if (previewVisualKind.value !== "netcdf" || !previewNetcdfStructure.value) {
+    return "";
+  }
+  return renderSimpleMarkdown(netcdfStructureToMarkdown(previewNetcdfStructure.value));
+});
+
+/** plain 中的 .ncl 与 csv 使用等宽展示 */
+const previewFetchedTextUseMonospace = computed(() => {
+  if (previewVisualKind.value === "csv" || previewVisualKind.value === "netcdf") {
+    return true;
+  }
+  if (previewVisualKind.value === "plain" && detail.value) {
+    return normalizedFileExtension(detail.value) === "ncl";
+  }
+  return false;
+});
+
+const pdfBlobUrl = ref("");
+const pdfPreviewLoading = ref(false);
+const pdfPreviewError = ref("");
+let pdfBlobAbortController: AbortController | null = null;
+
+function revokePdfBlobUrl() {
+  if (pdfBlobUrl.value) {
+    URL.revokeObjectURL(pdfBlobUrl.value);
+    pdfBlobUrl.value = "";
+  }
+}
+
+function abortPdfBlobFetch() {
+  pdfBlobAbortController?.abort();
+  pdfBlobAbortController = null;
+}
+
+/** PDF 是否走本站 /download（用 fetch+Blob）；外链仍直接 iframe src */
+const pdfPreviewUsesBackendBlob = computed(
+  () => previewVisualKind.value === "pdf" && fileUsesBackendDownloadHref(mediaSourceURL.value),
+);
+
+const pdfIframeSrc = computed(() => {
+  if (previewVisualKind.value !== "pdf") {
+    return "";
+  }
+  const direct = absoluteDownloadURL.value;
+  if (!direct) {
+    return "";
+  }
+  if (pdfPreviewUsesBackendBlob.value) {
+    return pdfBlobUrl.value;
+  }
+  return direct;
+});
+
+watch(
+  () =>
+    ({
+      id: fileID.value,
+      kind: previewVisualKind.value,
+      fetchSrc: previewEmbedDownloadURL.value,
+      useBlob: pdfPreviewUsesBackendBlob.value,
+    }) as const,
+  async ({ id, kind, fetchSrc, useBlob }) => {
+    abortPdfBlobFetch();
+    revokePdfBlobUrl();
+    pdfPreviewLoading.value = false;
+    pdfPreviewError.value = "";
+
+    if (!id || kind !== "pdf" || !fetchSrc || !useBlob) {
+      return;
+    }
+
+    pdfPreviewLoading.value = true;
+    const ac = new AbortController();
+    pdfBlobAbortController = ac;
+
+    try {
+      const res = await fetch(fetchSrc, { credentials: "include", signal: ac.signal });
+      if (!res.ok) {
+        pdfPreviewError.value = res.status === 403 ? "不允许访问该文件。" : "加载 PDF 失败。";
+        return;
+      }
+      const cl = res.headers.get("content-length");
+      if (cl != null) {
+        const n = Number(cl);
+        if (Number.isFinite(n) && n > PDF_PREVIEW_MAX_BYTES) {
+          pdfPreviewError.value = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+          return;
+        }
+      }
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > PDF_PREVIEW_MAX_BYTES) {
+        pdfPreviewError.value = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+        return;
+      }
+      pdfBlobUrl.value = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        return;
+      }
+      pdfPreviewError.value =
+        "无法加载 PDF 预览（网络或浏览器限制）。请尝试「在新标签页打开」或使用下载。";
+    } finally {
+      pdfPreviewLoading.value = false;
+    }
+  },
+);
+
+function abortInlineTextPreview() {
+  previewTextAbortController?.abort();
+  previewTextAbortController = null;
+}
+
+function onPreviewImageError() {
+  previewImageFailed.value = true;
+}
+
+watch(previewVisualKind, () => {
+  previewImageFailed.value = false;
+});
+
+watch(
+  () =>
+    ({
+      id: fileID.value,
+      kind: previewVisualKind.value,
+      src: previewEmbedDownloadURL.value,
+    }) as const,
+  async ({ id, kind, src }) => {
+    abortInlineTextPreview();
+    previewFetchedText.value = "";
+    previewNetcdfStructure.value = null;
+    previewTextError.value = "";
+    previewTextTruncated.value = false;
+    previewTextLoading.value = false;
+
+    if (!id || !kind) {
+      return;
+    }
+
+    if (kind === "netcdf") {
+      previewTextLoading.value = true;
+      const ac = new AbortController();
+      previewTextAbortController = ac;
+      try {
+        const res = await httpClient.get<{
+          text: string;
+          truncated?: boolean;
+          structure?: NetCDFDumpGroup;
+        }>(`/public/files/${encodeURIComponent(id)}/netcdf-dump`, { signal: ac.signal });
+        previewFetchedText.value = res.text ?? "";
+        previewTextTruncated.value = Boolean(res.truncated);
+        previewNetcdfStructure.value = res.structure ?? null;
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          return;
+        }
+        if (e instanceof HttpError) {
+          previewTextError.value =
+            e.status === 403
+              ? "不允许访问该文件。"
+              : e.status === 400
+                ? readApiError(e, "无法读取 NetCDF 摘要（可能不是有效的 .nc 文件）。")
+                : "加载 NetCDF 摘要失败。";
+        } else {
+          previewTextError.value = "加载 NetCDF 摘要失败。";
+        }
+      } finally {
+        previewTextLoading.value = false;
+      }
+      return;
+    }
+
+    if (!TEXTUAL_PREVIEW_KINDS.has(kind)) {
+      return;
+    }
+    if (!src) {
+      previewTextError.value = "无法解析预览地址。";
+      return;
+    }
+
+    previewTextLoading.value = true;
+    const ac = new AbortController();
+    previewTextAbortController = ac;
+
+    try {
+      const res = await fetch(src, { credentials: "include", signal: ac.signal });
+      if (!res.ok) {
+        previewTextError.value = res.status === 403 ? "不允许访问该文件。" : "加载预览失败。";
+        return;
+      }
+      const cl = res.headers.get("content-length");
+      if (cl != null) {
+        const n = Number(cl);
+        if (Number.isFinite(n) && n > PREVIEW_TEXT_MAX_BYTES) {
+          previewTextError.value = `文件超过预览上限（约 ${Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024)} KB），请下载后查看。`;
+          return;
+        }
+      }
+      const buf = await res.arrayBuffer();
+      previewTextTruncated.value = buf.byteLength > PREVIEW_TEXT_MAX_BYTES;
+      const slice = previewTextTruncated.value ? buf.slice(0, PREVIEW_TEXT_MAX_BYTES) : buf;
+      previewFetchedText.value = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        return;
+      }
+      previewTextError.value =
+        "预览加载失败。若文件为外链存储或未允许跨域，请使用下载或通过直链在新标签打开。";
+    } finally {
+      previewTextLoading.value = false;
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  abortInlineTextPreview();
+  abortPdfBlobFetch();
+  revokePdfBlobUrl();
+  teardownVideoStageObserver();
+});
+
 const folderIdForPeers = computed(() => detail.value?.folder_id?.trim() ?? "");
 
 /** 有文件夹且为视频时拉取同目录列表，用于加宽布局 */
 const layoutWide = computed(() => isVideo.value && Boolean(folderIdForPeers.value));
+
+const videoStageRef = ref<HTMLElement | null>(null);
+const videoStageHeightPx = ref<number | null>(null);
+let videoStageResizeObserver: ResizeObserver | null = null;
+
+function teardownVideoStageObserver() {
+  if (videoStageResizeObserver) {
+    videoStageResizeObserver.disconnect();
+    videoStageResizeObserver = null;
+  }
+}
+
+function setupVideoStageObserver() {
+  teardownVideoStageObserver();
+  if (!layoutWide.value) {
+    videoStageHeightPx.value = null;
+    return;
+  }
+  void nextTick(() => {
+    const el = videoStageRef.value;
+    if (!el) {
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height;
+      if (typeof h === "number" && h > 0) {
+        videoStageHeightPx.value = Math.round(h);
+      }
+    });
+    videoStageResizeObserver = ro;
+    ro.observe(el);
+  });
+}
+
+const peerAsideMaxStyle = computed((): Record<string, string> => {
+  if (videoStageHeightPx.value == null) {
+    return { maxHeight: "min(70vh, 720px)" };
+  }
+  return { maxHeight: `${videoStageHeightPx.value}px` };
+});
+
+watch(
+  () => [layoutWide.value, detail.value?.id ?? ""] as const,
+  ([wide]) => {
+    if (wide) {
+      void nextTick(() => setupVideoStageObserver());
+    } else {
+      teardownVideoStageObserver();
+      videoStageHeightPx.value = null;
+    }
+  },
+  { flush: "post" },
+);
 
 interface FolderFileListItem {
   id: string;
@@ -334,6 +696,8 @@ const editorDirty = computed(() => {
     editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
 });
+
+const fileDescriptionPreviewHTML = computed(() => renderSimpleMarkdown(editDescription.value));
 
 const fileDetailNeedsDownloadConfirm = computed(() => {
   const d = detail.value;
@@ -624,10 +988,10 @@ async function copyLink(label: string, url: string) {
     showLinkCopyHint("当前环境无法生成链接。");
     return;
   }
-  try {
-    await navigator.clipboard.writeText(url);
+  const ok = await copyPlainTextToClipboard(url);
+  if (ok) {
     showLinkCopyHint(`已复制${label}`);
-  } catch {
+  } else {
     showLinkCopyHint("复制失败，请手动长按或右键复制地址栏。");
   }
 }
@@ -636,6 +1000,31 @@ async function copyDetailLinkAtCurrentTime() {
   const seconds = videoRef.value?.currentTime ?? 0;
   const url = buildAbsoluteDetailPageURL({ t: formatTimestampParam(seconds) });
   await copyLink("含时间戳的链接", url);
+}
+
+async function copyFetchedPreviewText() {
+  let text = previewFetchedText.value;
+  if (previewVisualKind.value === "netcdf" && previewNetcdfStructure.value) {
+    text = netcdfStructureToMarkdown(previewNetcdfStructure.value);
+  }
+  if (!text) {
+    showLinkCopyHint("没有可复制的内容。");
+    return;
+  }
+  const ok = await copyPlainTextToClipboard(text);
+  if (ok) {
+    if (previewTextTruncated.value) {
+      showLinkCopyHint(
+        previewVisualKind.value === "netcdf"
+          ? "已复制 NetCDF 摘要（可能已截断，完整结构请下载后用专业工具查看）"
+          : "已复制预览内容（不含截断以外部分，请下载查看全文）",
+      );
+    } else {
+      showLinkCopyHint("已复制预览内容");
+    }
+  } else {
+    showLinkCopyHint("复制失败，请手动选中预览区文本后复制。");
+  }
 }
 
 function downloadFile() {
@@ -684,7 +1073,7 @@ function performDownloadFile() {
 
 <template>
   <section class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-6xl' : 'max-w-4xl'">
+    <div class="mx-auto w-full space-y-6" :class="layoutWide ? 'max-w-7xl' : 'max-w-6xl'">
       <SurfaceCard>
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
 
@@ -707,8 +1096,8 @@ function performDownloadFile() {
 
           <section>
             <div class="space-y-4">
-              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div class="space-y-2">
+              <div class="flex flex-col gap-4">
+                <div class="min-w-0 w-full space-y-2">
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
@@ -720,13 +1109,16 @@ function performDownloadFile() {
                     </button>
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
                   </div>
-                  <h3 class="break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl" :title="detail.name">
+                  <h3
+                    class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl"
+                    :title="detail.name"
+                  >
                     {{ detail.name }}
                   </h3>
                 </div>
-                <div class="min-w-0 max-w-full">
+                <div class="w-full min-w-0">
                   <div
-                    class="flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto py-2 [scrollbar-width:thin] sm:gap-3 lg:justify-end"
+                    class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3"
                   >
                   <button
                     v-if="isVideo"
@@ -844,10 +1236,11 @@ function performDownloadFile() {
 
               <div
                 v-if="isVideo"
-                class="flex flex-col gap-4 lg:flex-row lg:items-stretch"
+                class="flex flex-col gap-4 lg:flex-row lg:items-start"
               >
                 <div
-                  class="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
+                  ref="videoStageRef"
+                  class="min-w-0 flex-1 self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5"
                 >
                   <video
                     :key="`${fileID}:${videoPlaybackStep}:${videoPlaybackActiveSrc}`"
@@ -866,15 +1259,14 @@ function performDownloadFile() {
 
                 <aside
                   v-if="folderIdForPeers"
-                  class="flex w-full shrink-0 flex-col rounded-2xl border border-slate-200 bg-white lg:w-72 xl:w-80"
+                  class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80"
+                  :style="peerAsideMaxStyle"
                 >
-                  <div class="border-b border-slate-100 px-4 py-3">
+                  <div class="shrink-0 border-b border-slate-100 px-4 py-3">
                     <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Playlist</p>
                     <p class="mt-1 text-sm font-medium text-slate-900">同文件夹视频</p>
                   </div>
-                  <div
-                    class="min-h-[120px] max-h-[min(70vh,720px)] overflow-y-auto px-2 py-2"
-                  >
+                  <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
                     <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
                       加载列表…
                     </p>
@@ -895,6 +1287,114 @@ function performDownloadFile() {
                   </div>
                 </aside>
               </div>
+
+              <div
+                v-else-if="previewVisualKind === 'image' && previewEmbedDownloadURL"
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"
+              >
+                <template v-if="!previewImageFailed">
+                  <img
+                    :key="`${fileID}:${previewEmbedDownloadURL}`"
+                    :src="previewEmbedDownloadURL"
+                    alt=""
+                    class="max-h-[min(70vh,720px)] w-full object-contain"
+                    loading="lazy"
+                    decoding="async"
+                    @error="onPreviewImageError"
+                  />
+                </template>
+                <p v-else class="px-4 py-8 text-center text-sm text-slate-600">
+                  无法在页面内预览该图片，请使用复制直链在新标签打开或下载查看。
+                </p>
+              </div>
+
+              <div
+                v-else-if="previewVisualKind === 'pdf' && absoluteDownloadURL"
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5"
+              >
+                <div class="relative min-h-[min(70vh,720px)] w-full bg-white">
+                  <p
+                    v-if="pdfPreviewUsesBackendBlob && pdfPreviewLoading"
+                    class="px-4 py-16 text-center text-sm text-slate-600"
+                  >
+                    正在加载 PDF…
+                  </p>
+                  <div v-else-if="pdfPreviewError" class="space-y-4 px-4 py-12 text-center">
+                    <p class="text-sm text-rose-700">{{ pdfPreviewError }}</p>
+                    <a
+                      :href="absoluteDownloadURL"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-block text-sm font-medium text-blue-600 underline hover:text-blue-800"
+                    >
+                      在新标签页打开 PDF
+                    </a>
+                  </div>
+                  <iframe
+                    v-else-if="pdfIframeSrc"
+                    :key="`${fileID}:${pdfIframeSrc}`"
+                    title="PDF 预览"
+                    class="block min-h-[min(70vh,720px)] w-full border-0 bg-white"
+                    :src="pdfIframeSrc"
+                  />
+                </div>
+              </div>
+
+              <div
+                v-else-if="needsFetchedTextPreview"
+                class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2">
+                  <p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>
+                  <button
+                    v-if="!previewTextLoading && !previewTextError"
+                    type="button"
+                    class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="!previewFetchedText.length && !previewNetcdfStructure"
+                    aria-label="复制预览区文本"
+                    @click="copyFetchedPreviewText"
+                  >
+                    复制
+                  </button>
+                </div>
+                <div>
+                  <p v-if="previewTextLoading" class="text-sm text-slate-500">
+                    {{ previewVisualKind === "netcdf" ? "正在加载 NetCDF 结构摘要…" : "正在加载预览内容…" }}
+                  </p>
+                  <p v-else-if="previewTextError" class="text-sm text-rose-700">{{ previewTextError }}</p>
+                  <template v-else>
+                    <p
+                      v-if="previewTextTruncated"
+                      class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                    >
+                      <template v-if="previewVisualKind === 'netcdf'">
+                        摘要因长度上限已截断；完整结构请下载后使用 ncdump、Python 等工具查看。
+                      </template>
+                      <template v-else>
+                        文件较大，已截断至约 {{ Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024) }} KB；完整内容请下载查看。
+                      </template>
+                    </p>
+                    <div
+                      v-if="previewVisualKind === 'markdown'"
+                      class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"
+                    >
+                      <p v-if="!previewFetchedText.trim()" class="text-sm text-slate-400">（空白文件）</p>
+                      <div v-else class="markdown-content" v-html="previewMarkdownRendered" />
+                    </div>
+                    <div
+                      v-else-if="previewVisualKind === 'netcdf' && previewNetcdfStructure"
+                      class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"
+                    >
+                      <div class="markdown-content" v-html="previewNetcdfMarkdownHtml" />
+                    </div>
+                    <pre
+                      v-else
+                      class="max-h-[min(70vh,720px)] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-white px-4 py-3 text-slate-800 ring-1 ring-slate-950/[0.04]"
+                      :class="previewFetchedTextUseMonospace ? 'font-mono text-xs leading-relaxed' : 'font-sans text-sm leading-relaxed'"
+                    ><template v-if="previewFetchedText.length">{{ previewFetchedText }}</template><span v-else class="text-slate-400">（空白文件）</span></pre>
+                  </template>
+                </div>
+              </div>
             </div>
 
             <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
@@ -905,7 +1405,7 @@ function performDownloadFile() {
                 <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
               </p>
               <div
-                v-if="detailCoverImageHref && !isVideo"
+                v-if="detailCoverImageHref && !isVideo && previewVisualKind !== 'image'"
                 class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
               >
                 <img
@@ -1077,10 +1577,16 @@ function performDownloadFile() {
       <Transition name="modal-shell">
       <div v-if="descriptionEditorOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
         <div class="flex min-h-screen items-center justify-center px-4 py-6">
-          <div class="modal-card panel w-full max-w-3xl overflow-hidden p-6">
+          <div class="modal-card panel w-full max-w-5xl overflow-hidden p-6">
             <div class="border-b border-slate-200 pb-4">
-              <div>
+              <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-lg font-semibold text-slate-900">编辑文件信息</h3>
+                <div class="flex shrink-0 flex-wrap justify-end gap-3">
+                  <button type="button" class="btn-secondary" @click="closeDescriptionEditor">取消</button>
+                  <button type="button" class="btn-primary" :disabled="saving || !editorDirty" @click="saveDescription">
+                    {{ saving ? "保存中…" : "保存更改" }}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1107,15 +1613,30 @@ function performDownloadFile() {
                 />
               </label>
 
-              <label class="space-y-2">
-                <span class="text-sm font-medium text-slate-700">简介（Markdown）</span>
-              </label>
-              <textarea
-                v-model="editDescription"
-                rows="10"
-                class="field-area"
-                placeholder="仅在文件详情页展示；支持简单 Markdown。"
-              />
+              <div
+                class="grid min-h-0 grid-cols-1 gap-4 lg:min-h-[28rem] lg:grid-cols-2 lg:grid-rows-[auto_minmax(17rem,1fr)]"
+              >
+                <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
+                  简介（Markdown）
+                </span>
+                <textarea
+                  v-model="editDescription"
+                  class="field-area order-2 min-h-[17rem] w-full resize-y rounded-3xl lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 lg:resize-none"
+                  rows="10"
+                  placeholder="仅在文件详情页展示；支持简单 Markdown。"
+                />
+                <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
+                  <h4 class="text-sm font-medium text-slate-700">简介预览</h4>
+                </div>
+                <div
+                  class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
+                >
+                  <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                    <div v-if="fileDescriptionPreviewHTML" class="markdown-content" v-html="fileDescriptionPreviewHTML" />
+                    <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
+                  </div>
+                </div>
+              </div>
 
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">封面图地址（可选）</span>
@@ -1174,13 +1695,6 @@ function performDownloadFile() {
               <p v-if="saveError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {{ saveError }}
               </p>
-
-              <div class="flex justify-end gap-3">
-                <button type="button" class="btn-secondary" @click="closeDescriptionEditor">取消</button>
-                <button type="button" class="btn-primary" :disabled="saving || !editorDirty" @click="saveDescription">
-                  {{ saving ? "保存中…" : "保存更改" }}
-                </button>
-              </div>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import EmptyState from "../../components/ui/EmptyState.vue";
 import PageHeader from "../../components/ui/PageHeader.vue";
@@ -24,6 +25,8 @@ interface AnnouncementItem {
 }
 
 const sessionStore = useSessionStore();
+const route = useRoute();
+const router = useRouter();
 const items = ref<AnnouncementItem[]>([]);
 const loading = ref(false);
 const loaded = ref(false);
@@ -59,9 +62,22 @@ const formDirty = computed(() => {
 
 onMounted(() => {
   if (canManageAnnouncements.value) {
-    void loadItems();
+    void (async () => {
+      await loadItems();
+      await tryOpenEditorFromQuery();
+    })();
   }
 });
+
+watch(
+  () => route.query.edit,
+  () => {
+    if (!canManageAnnouncements.value || !loaded.value) {
+      return;
+    }
+    void tryOpenEditorFromQuery();
+  },
+);
 
 async function loadItems() {
   loading.value = true;
@@ -74,6 +90,33 @@ async function loadItems() {
   } finally {
     loaded.value = true;
     loading.value = false;
+  }
+}
+
+function normalizeRouteEditId(raw: unknown): string {
+  if (typeof raw === "string") {
+    return raw.trim();
+  }
+  if (Array.isArray(raw) && typeof raw[0] === "string") {
+    return raw[0].trim();
+  }
+  return "";
+}
+
+async function tryOpenEditorFromQuery() {
+  const id = normalizeRouteEditId(route.query.edit);
+  if (!id) {
+    return;
+  }
+  if (!canManageAnnouncements.value) {
+    return;
+  }
+  const item = items.value.find((x) => x.id === id);
+  if (item && canEdit(item)) {
+    openEditEditor(item);
+    await router.replace({ name: "admin-announcements", query: {} });
+  } else if (loaded.value) {
+    await router.replace({ name: "admin-announcements", query: {} });
   }
 }
 

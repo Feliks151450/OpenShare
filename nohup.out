@@ -1,0 +1,54 @@
+==> 使用现有本地配置
+==> 安装前端依赖
+==> 启动前端开发服务器
+==> 启动后端服务
+
+OpenShare 已启动
+Public: http://localhost:5173/
+Admin : http://localhost:5173/admin
+Health: http://127.0.0.1:8080/healthz
+Logs  : /home/llf/OpenShare/.localdata/logs
+
+按 Ctrl+C 停止服务
+./start.sh：行 71: 855607 挂起                  npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1  (工作目录: ~/OpenShare/frontend)
+==> 使用现有本地配置
+==> 安装前端依赖
+==> 启动前端开发服务器
+==> 启动后端服务
+
+OpenShare 已启动
+Public: http://localhost:5173/
+Admin : http://localhost:5173/admin
+Health: http://127.0.0.1:8080/healthz
+Logs  : /home/llf/OpenShare/.localdata/logs
+
+按 Ctrl+C 停止服务
+./start.sh：行 71: 1792957 挂起                  npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1  (工作目录: ~/OpenShare/frontend)
+==> 使用现有本地配置
+==> 安装前端依赖
+==> 启动前端开发服务器
+==> 启动后端服务
+
+OpenShare 已启动
+Public: http://localhost:5173/
+Admin : http://localhost:5173/admin
+Health: http://127.0.0.1:8080/healthz
+Logs  : /home/llf/OpenShare/.localdata/logs
+
+按 Ctrl+C 停止服务
+./start.sh：行 71: 2093910 挂起                  npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1  (工作目录: ~/OpenShare/frontend)
+==> 使用现有本地配置
+==> 安装前端依赖
+==> 启动前端开发服务器（后台永久运行）
+==> 启动后端服务（后台永久运行）
+
+OpenShare 已启动（守护模式）
+Public: http://localhost:5173/
+Admin : http://localhost:5173/admin
+Health: http://127.0.0.1:8080/healthz
+Logs  : /home/llf/OpenShare/.localdata/logs
+PID文件: /home/llf/OpenShare/.localdata/frontend.pid , /home/llf/OpenShare/.localdata/backend.pid
+
+服务已在后台运行，退出终端不会中断
+如需停止服务，请执行：
+  kill $(cat /home/llf/OpenShare/.localdata/frontend.pid) $(cat /home/llf/OpenShare/.localdata/backend.pid) 2>/dev/null

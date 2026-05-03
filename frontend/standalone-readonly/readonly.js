@@ -9,6 +9,40 @@ const LS_VIEW = "public-home-view-mode";
 const LS_SORT = "public-home-sort-mode";
 const LS_SORT_DIR = "public-home-sort-direction";
 
+/** 视频详情：右侧「同文件夹视频」栏 max-height 与播放器区域对齐（与 Vue PublicFileDetailView 一致） */
+let detailVideoStageResizeObserver = null;
+
+function teardownDetailVideoStageObserver() {
+  if (detailVideoStageResizeObserver) {
+    detailVideoStageResizeObserver.disconnect();
+    detailVideoStageResizeObserver = null;
+  }
+}
+
+function syncDetailVideoPeersAsideMaxHeight() {
+  const stage = document.getElementById("detail-video-stage");
+  const aside = document.getElementById("detail-video-peers-aside");
+  if (!stage || !aside) return;
+  const h = stage.getBoundingClientRect().height;
+  if (h > 0) {
+    aside.style.maxHeight = `${Math.round(h)}px`;
+  } else {
+    aside.style.maxHeight = "min(70vh, 720px)";
+  }
+}
+
+function setupDetailVideoStageObserver() {
+  teardownDetailVideoStageObserver();
+  const stage = document.getElementById("detail-video-stage");
+  const aside = document.getElementById("detail-video-peers-aside");
+  if (!stage || !aside) return;
+  detailVideoStageResizeObserver = new ResizeObserver(() => {
+    syncDetailVideoPeersAsideMaxHeight();
+  });
+  detailVideoStageResizeObserver.observe(stage);
+  syncDetailVideoPeersAsideMaxHeight();
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -16,6 +50,76 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+async function copyPlainTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function markdownFencedCodeHtml(token) {
+  const rawLang = String(token.lang ?? "").trim();
+  const langMatch = rawLang.match(/^\S+/);
+  const langToken = langMatch ? langMatch[0] : "";
+  const langClass = langToken ? ` class="language-${escapeHtml(langToken)}"` : "";
+  const langLabel = langToken ? escapeHtml(langToken) : "";
+  const text = String(token.text).replace(/\n$/, "") + "\n";
+  const inner = token.escaped ? text : escapeHtml(text);
+  return (
+    `<div class="markdown-code-wrap">` +
+    `<div class="markdown-code-toolbar">` +
+    `<span class="markdown-code-lang">${langLabel}</span>` +
+    `<button type="button" class="markdown-code-copy" aria-label="复制代码块">复制</button>` +
+    `</div>` +
+    `<pre><code${langClass}>${inner}</code></pre>` +
+    `</div>`
+  );
+}
+
+let markdownCodeCopyDelegationInstalled = false;
+function initMarkdownCodeCopyDelegation() {
+  if (markdownCodeCopyDelegationInstalled || typeof document === "undefined") return;
+  markdownCodeCopyDelegationInstalled = true;
+  document.body.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest(".markdown-code-copy");
+    if (!(button instanceof HTMLButtonElement)) return;
+    const wrap = button.closest(".markdown-code-wrap");
+    if (!wrap) return;
+    const codeEl = wrap.querySelector("pre code");
+    const text = codeEl?.textContent ?? "";
+    if (!text) return;
+    void (async () => {
+      const ok = await copyPlainTextToClipboard(text);
+      if (!ok) return;
+      const prev = button.textContent ?? "复制";
+      button.textContent = "已复制";
+      button.disabled = true;
+      window.setTimeout(() => {
+        button.textContent = prev;
+        button.disabled = false;
+      }, 1600);
+    })();
+  });
 }
 
 function getApiBase() {
@@ -195,6 +299,9 @@ function ensureMarkdownRenderer() {
         }
         return `<a href="${hrefAttr}"${title}>${inner}</a>`;
       },
+      code(token) {
+        return markdownFencedCodeHtml(token);
+      },
     },
   });
 }
@@ -209,12 +316,160 @@ function renderSimpleMarkdown(source) {
   try {
     const html = marked.parse(normalized, { async: false });
     return DOMPurify.sanitize(html, {
-      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start"],
-      ADD_TAGS: ["input"],
+      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open"],
+      ADD_TAGS: ["input", "details", "summary", "section", "header"],
     });
   } catch {
     return escapeHtml(normalized);
   }
+}
+
+/* --- NetCDF：属性折叠块（全局 / 变量，与 src/lib/netcdfStructureToMarkdown.ts 对齐）--- */
+function netcdfAttributesDisclosureHtml(attrs, summaryInnerHtml) {
+  const rows = attrs
+    .map(
+      (a) =>
+        `<tr><td>${escapeHtml(String(a.key ?? ""))}</td><td>${escapeHtml(String(a.value ?? ""))}</td></tr>`,
+    )
+    .join("");
+  return (
+    `<details class="netcdf-attrs-disclosure">\n` +
+    `<summary class="netcdf-attrs-disclosure-summary">${summaryInnerHtml}</summary>\n` +
+    `<div class="netcdf-attrs-disclosure-body">\n` +
+    `<table>\n<thead><tr><th>名称</th><th>值</th></tr></thead>\n` +
+    `<tbody>${rows}</tbody>\n</table>\n` +
+    `</div>\n` +
+    `</details>`
+  );
+}
+
+function netcdfGlobalAttributesDisclosureHtml(attrs) {
+  const n = attrs.length;
+  return netcdfAttributesDisclosureHtml(
+    attrs,
+    `全局属性 <span class="netcdf-attrs-disclosure-count">（${n} 项）</span>`,
+  );
+}
+
+function netcdfVariableAttributesDisclosureHtml(v) {
+  const attrs = v.attributes ?? [];
+  const n = attrs.length;
+  const name = escapeHtml(String(v.name ?? ""));
+  return netcdfAttributesDisclosureHtml(
+    attrs,
+    `属性 <span class="netcdf-attrs-disclosure-varname">${name}</span> <span class="netcdf-attrs-disclosure-count">（${n} 项）</span>`,
+  );
+}
+
+function netcdfVariableCardHtml(v) {
+  const vDims = v.dimensions ?? [];
+  const sh = v.shape ?? [];
+  const vAttr = v.attributes ?? [];
+  const metaParts = [];
+  if (vDims.length > 0) {
+    const dimText = vDims.map((d) => escapeHtml(String(d ?? ""))).join("，");
+    metaParts.push(
+      `<div class="netcdf-var-card-meta-row"><span class="netcdf-var-card-meta-label">维度</span><span class="netcdf-var-card-meta-value">${dimText}</span></div>`,
+    );
+  }
+  if (sh.length > 0) {
+    const shapeText = escapeHtml(mdNcShapeLabel(sh));
+    metaParts.push(
+      `<div class="netcdf-var-card-meta-row"><span class="netcdf-var-card-meta-label">形状</span><span class="netcdf-var-card-meta-value">${shapeText}</span></div>`,
+    );
+  }
+  const metaHtml =
+    metaParts.length > 0 ? `<div class="netcdf-var-card-meta">${metaParts.join("")}</div>` : "";
+  const attrsHtml = vAttr.length > 0 ? netcdfVariableAttributesDisclosureHtml(v) : "";
+  const bodyInner = [metaHtml, attrsHtml].filter(Boolean).join("\n");
+  const name = escapeHtml(String(v.name ?? ""));
+  const type = escapeHtml(String(v.type ?? ""));
+  return (
+    `<section class="netcdf-var-card">\n` +
+    `<header class="netcdf-var-card-head">\n` +
+    `<span class="netcdf-var-card-name">${name}</span>\n` +
+    `<span class="netcdf-var-card-type">${type}</span>\n` +
+    `</header>\n` +
+    `<div class="netcdf-var-card-body">\n` +
+    bodyInner +
+    `</div>\n` +
+    `</section>`
+  );
+}
+
+function netcdfVariableUnreadableCardHtml(v) {
+  const name = escapeHtml(String(v.name ?? ""));
+  return (
+    `<section class="netcdf-var-card netcdf-var-card--unreadable">\n` +
+    `<header class="netcdf-var-card-head">\n` +
+    `<span class="netcdf-var-card-name">${name}</span>\n` +
+    `<span class="netcdf-var-card-type netcdf-var-card-type--muted">无法读取</span>\n` +
+    `</header>\n` +
+    `<div class="netcdf-var-card-body">\n` +
+    `<p class="netcdf-var-card-unreadable-msg">无法读取该变量的结构与属性。</p>\n` +
+    `</div>\n` +
+    `</section>`
+  );
+}
+
+/* --- NetCDF 结构化摘要 → Markdown（与 src/lib/netcdfStructureToMarkdown.ts 对齐）--- */
+function mdNcInlineCode(s) {
+  const t = String(s ?? "").replace(/`/g, "'");
+  return `\`${t}\``;
+}
+function mdNcTableCell(s) {
+  return String(s ?? "")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, " ");
+}
+function mdNcShapeLabel(shape) {
+  if (!shape || !shape.length) return "—";
+  return shape.map((n) => String(n)).join(" × ");
+}
+function netcdfAppendGroupMd(lines, g, depth) {
+  const hGroup = Math.min(2 + depth, 6);
+  const pathTitle = !g.path || g.path === "/" ? "根组（`/`）" : `组 ${mdNcInlineCode(g.path)}`;
+  lines.push(`${"#".repeat(hGroup)} ${pathTitle}`, "");
+
+  const hSec = Math.min(hGroup + 1, 6);
+  const attrs = g.global_attributes ?? [];
+  if (attrs.length > 0) {
+    lines.push(netcdfGlobalAttributesDisclosureHtml(attrs), "");
+  }
+
+  const dims = g.dimensions ?? [];
+  if (dims.length > 0) {
+    lines.push(`${"#".repeat(hSec)} 维度`, "");
+    lines.push("| 名称 | 长度 |", "| --- | --- |");
+    for (const d of dims) {
+      lines.push(`| ${mdNcTableCell(d.name)} | ${d.size} |`);
+    }
+    lines.push("");
+  }
+
+  const vars = g.variables ?? [];
+  if (vars.length > 0) {
+    lines.push(`${"#".repeat(hSec)} 变量`, "");
+    for (const v of vars) {
+      if (v.unreadable) {
+        lines.push(netcdfVariableUnreadableCardHtml(v), "");
+        continue;
+      }
+      lines.push(netcdfVariableCardHtml(v), "");
+    }
+  }
+
+  const subs = g.subgroups ?? [];
+  for (const sub of subs) {
+    netcdfAppendGroupMd(lines, sub, depth + 1);
+  }
+}
+
+function netcdfStructureToMarkdown(root) {
+  const lines = [];
+  netcdfAppendGroupMd(lines, root, 0);
+  let out = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  return out.trimEnd() + "\n";
 }
 
 function fileEffectiveDownloadHref(fileId, playbackUrl, folderDirectDownloadUrl) {
@@ -308,7 +563,93 @@ function isVideoDetail(d) {
   return VIDEO_EXT.has(ext);
 }
 
-/* --- 简易 SVG 图标 --- */
+const PREVIEW_TEXT_MAX_BYTES = 1048576;
+/** 本站 PDF：fetch 成 Blob 再给 iframe，绕过 Content-Disposition 触发的下载 */
+const PDF_PREVIEW_MAX_BYTES = 52428800;
+const PREVIEW_IMG_EXT = new Set(["png", "jpeg", "jpg", "jfif", "gif", "webp", "svg", "bmp"]);
+
+/** @typedef {"image"|"pdf"|"markdown"|"plain"|"csv"|"netcdf"|null} PreviewVisualKind */
+/** @param {object} d @returns {PreviewVisualKind} */
+function fileDetailPreviewVisualKind(d) {
+  if (isVideoDetail(d)) return null;
+  const mime = (d.mime_type ?? "").toLowerCase();
+  const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase();
+  if (mime.startsWith("image/") || PREVIEW_IMG_EXT.has(ext)) return "image";
+  if (mime === "application/pdf" || ext === "pdf") return "pdf";
+  if (mime.includes("markdown") || ext === "md" || ext === "markdown") return "markdown";
+  if (mime === "text/csv" || mime === "text/tab-separated-values" || ext === "csv" || ext === "tsv") return "csv";
+  if (ext === "nc") return "netcdf";
+  if (mime === "text/plain" || ext === "txt" || ext === "ncl") return "plain";
+  return null;
+}
+
+function isBackendPublicFileDownloadHref(href) {
+  const u = String(href ?? "").trim();
+  if (u.startsWith("/api/public/files/") && u.includes("/download")) return true;
+  try {
+    const parsed = new URL(u);
+    return parsed.pathname.includes("/api/public/files/") && parsed.pathname.includes("/download");
+  } catch {
+    return false;
+  }
+}
+
+function withBackendDownloadInlinePreviewParam(url) {
+  const u = String(url ?? "").trim();
+  if (!u || !isBackendPublicFileDownloadHref(u)) return u;
+  return u.includes("?") ? `${u}&inline=1` : `${u}?inline=1`;
+}
+
+function hrefForPreviewFetch(raw) {
+  const t = String(raw ?? "").trim();
+  let out = "";
+  if (/^https?:\/\//i.test(t)) {
+    out = t;
+  } else if (t.startsWith("/api/")) {
+    out = apiUrl(t.slice("/api".length));
+  } else if (t.startsWith("/")) {
+    out = apiUrl(t);
+  } else {
+    out = apiUrl(`/${t}`);
+  }
+  return withBackendDownloadInlinePreviewParam(out);
+}
+
+let filePreviewAbort = null;
+let filePdfBlobAbort = null;
+
+function abortFilePreviewFetch() {
+  if (filePreviewAbort) {
+    try {
+      filePreviewAbort.abort();
+    } catch {
+      /* ignore */
+    }
+    filePreviewAbort = null;
+  }
+}
+
+function revokeFilePdfBlobUrl() {
+  if (state.filePdfBlobUrl) {
+    try {
+      URL.revokeObjectURL(state.filePdfBlobUrl);
+    } catch {
+      /* ignore */
+    }
+    state.filePdfBlobUrl = "";
+  }
+}
+
+function abortFilePdfBlobFetch() {
+  if (filePdfBlobAbort) {
+    try {
+      filePdfBlobAbort.abort();
+    } catch {
+      /* ignore */
+    }
+    filePdfBlobAbort = null;
+  }
+}
 const Ico = {
   home: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   chevronLeft: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>',
@@ -381,6 +722,17 @@ const state = {
   videoFileMetaVisible: false,
   linkCopyHint: "",
   settingsOpen: false,
+  filePreviewTextLoading: false,
+  filePreviewTextError: "",
+  filePreviewFetchedText: "",
+  /** @type {null | Record<string, unknown>} */
+  filePreviewNetcdfStructure: null,
+  filePreviewTruncated: false,
+  filePreviewImageFailed: false,
+  /** PDF：本站下载时 blob: URL */
+  filePdfBlobUrl: "",
+  filePdfPreviewLoading: false,
+  filePdfPreviewError: "",
 };
 
 function loadPrefs() {
@@ -662,6 +1014,9 @@ function clearSearchState() {
 async function loadFileDetail() {
   const id = state.route.fileId;
   if (!id) return;
+  abortFilePreviewFetch();
+  abortFilePdfBlobFetch();
+  revokeFilePdfBlobUrl();
   state.fileLoading = true;
   state.fileError = "";
   state.fileDetail = null;
@@ -669,18 +1024,168 @@ async function loadFileDetail() {
   state.folderVideoPeersLoading = false;
   state.videoPlaybackStep = 0;
   state.videoFileMetaVisible = false;
+  state.filePreviewTextLoading = false;
+  state.filePreviewTextError = "";
+  state.filePreviewFetchedText = "";
+  state.filePreviewNetcdfStructure = null;
+  state.filePreviewTruncated = false;
+  state.filePreviewImageFailed = false;
+  state.filePdfPreviewLoading = false;
+  state.filePdfPreviewError = "";
   try {
     const d = await apiRequest(`/public/files/${encodeURIComponent(id)}`);
     state.fileDetail = d;
     if (d && isVideoDetail(d)) {
       const fid = (d.folder_id ?? "").trim();
       if (fid) await loadFolderVideoPeers(fid, d.id);
+    } else if (d) {
+      const pv = fileDetailPreviewVisualKind(d);
+      if (pv === "pdf" && isBackendPublicFileDownloadHref(absoluteMediaDownloadURL(d, d.id))) {
+        state.filePdfPreviewLoading = true;
+        state.filePdfPreviewError = "";
+        void loadFilePdfBlobPreview(d);
+      }
+      if (pv && ["markdown", "plain", "csv", "netcdf"].includes(pv)) {
+        state.filePreviewTextLoading = true;
+        state.filePreviewTextError = "";
+        state.filePreviewFetchedText = "";
+        state.filePreviewNetcdfStructure = null;
+        state.filePreviewTruncated = false;
+      }
+      void loadFileInlinePreview(d);
     }
   } catch (err) {
     if (err instanceof HttpError && err.status === 404) state.fileError = "文件不存在或未公开。";
     else state.fileError = "加载文件详情失败。";
   } finally {
     state.fileLoading = false;
+    render();
+  }
+}
+
+async function loadFileInlinePreview(d) {
+  const kind = fileDetailPreviewVisualKind(d);
+  if (kind === "netcdf") {
+    abortFilePreviewFetch();
+    const ac = new AbortController();
+    filePreviewAbort = ac;
+    state.filePreviewTextError = "";
+    state.filePreviewFetchedText = "";
+    state.filePreviewNetcdfStructure = null;
+    state.filePreviewTruncated = false;
+    try {
+      const response = await fetch(apiUrl(`/public/files/${encodeURIComponent(d.id)}/netcdf-dump`), {
+        credentials: "omit",
+        signal: ac.signal,
+      });
+      if (!response.ok) {
+        state.filePreviewTextError =
+          response.status === 403 ? "不允许访问该文件。" : "加载 NetCDF 摘要失败。";
+        return;
+      }
+      const data = await response.json();
+      state.filePreviewFetchedText = String(data.text ?? "");
+      state.filePreviewTruncated = Boolean(data.truncated);
+      const st = data.structure;
+      state.filePreviewNetcdfStructure =
+        st && typeof st === "object" && typeof st.path === "string" ? st : null;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      state.filePreviewTextError = "加载 NetCDF 摘要失败。";
+    } finally {
+      state.filePreviewTextLoading = false;
+      render();
+    }
+    return;
+  }
+  if (!kind || !["markdown", "plain", "csv"].includes(kind)) {
+    return;
+  }
+  const fetchUrl = hrefForPreviewFetch(mediaSourceURL(d, d.id));
+  if (!fetchUrl) {
+    state.filePreviewTextError = "无法解析预览地址。";
+    state.filePreviewTextLoading = false;
+    render();
+    return;
+  }
+  abortFilePreviewFetch();
+  const ac = new AbortController();
+  filePreviewAbort = ac;
+
+  try {
+    const response = await fetch(fetchUrl, { credentials: "omit", signal: ac.signal });
+    if (!response.ok) {
+      state.filePreviewTextError = response.status === 403 ? "不允许访问该文件。" : "加载预览失败。";
+      return;
+    }
+    const cl = response.headers.get("content-length");
+    if (cl != null) {
+      const n = Number(cl);
+      if (Number.isFinite(n) && n > PREVIEW_TEXT_MAX_BYTES) {
+        state.filePreviewTextError = `文件超过预览上限（约 ${Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024)} KB），请下载后查看。`;
+        return;
+      }
+    }
+    const buf = await response.arrayBuffer();
+    state.filePreviewTruncated = buf.byteLength > PREVIEW_TEXT_MAX_BYTES;
+    const slice = state.filePreviewTruncated ? buf.slice(0, PREVIEW_TEXT_MAX_BYTES) : buf;
+    state.filePreviewFetchedText = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") return;
+    state.filePreviewTextError =
+      "预览加载失败。若文件为外链存储或未允许跨域，请使用下载或通过直链在新标签打开。";
+  } finally {
+    state.filePreviewTextLoading = false;
+    render();
+  }
+}
+
+async function loadFilePdfBlobPreview(d) {
+  if (fileDetailPreviewVisualKind(d) !== "pdf") return;
+  if (!isBackendPublicFileDownloadHref(absoluteMediaDownloadURL(d, d.id))) return;
+
+  const fetchUrl = hrefForPreviewFetch(mediaSourceURL(d, d.id));
+  if (!fetchUrl) {
+    state.filePdfPreviewError = "无法解析预览地址。";
+    state.filePdfPreviewLoading = false;
+    render();
+    return;
+  }
+
+  abortFilePdfBlobFetch();
+  const ac = new AbortController();
+  filePdfBlobAbort = ac;
+
+  try {
+    const response = await fetch(fetchUrl, { credentials: "omit", signal: ac.signal });
+    if (!response.ok) {
+      state.filePdfPreviewError = response.status === 403 ? "不允许访问该文件。" : "加载 PDF 失败。";
+      return;
+    }
+    const cl = response.headers.get("content-length");
+    if (cl != null) {
+      const n = Number(cl);
+      if (Number.isFinite(n) && n > PDF_PREVIEW_MAX_BYTES) {
+        state.filePdfPreviewError = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+        return;
+      }
+    }
+    const buf = await response.arrayBuffer();
+    if (buf.byteLength > PDF_PREVIEW_MAX_BYTES) {
+      state.filePdfPreviewError = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+      return;
+    }
+    revokeFilePdfBlobUrl();
+    state.filePdfBlobUrl = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") return;
+    state.filePdfPreviewError =
+      "无法加载 PDF 预览（网络或浏览器限制）。请尝试在新标签页打开或使用下载。";
+  } finally {
+    state.filePdfPreviewLoading = false;
+    render();
   }
 }
 
@@ -727,6 +1232,16 @@ function buildVideoPlaybackUrlQueue(fileId, d) {
 function mediaSourceURL(detail, fileId) {
   if (!detail) return apiUrl(`/public/files/${encodeURIComponent(fileId)}/download`);
   return fileEffectiveDownloadHref(fileId, detail.playback_url, detail.folder_direct_download_url);
+}
+
+function absoluteMediaDownloadURL(detail, fileId) {
+  const r = String(mediaSourceURL(detail, fileId) ?? "").trim();
+  if (/^https?:\/\//i.test(r)) return r;
+  try {
+    return new URL(r, window.location.origin).href;
+  } catch {
+    return r;
+  }
 }
 
 function parseTimestampQuery(raw) {
@@ -891,10 +1406,10 @@ async function copyText(label, text) {
     setTimeout(() => applyFileDetailCopyHint(""), 2800);
     return;
   }
-  try {
-    await navigator.clipboard.writeText(text);
+  const ok = await copyPlainTextToClipboard(text);
+  if (ok) {
     applyFileDetailCopyHint(`已复制${label}`);
-  } catch {
+  } else {
     applyFileDetailCopyHint("复制失败，请手动长按或右键复制地址栏。");
   }
   setTimeout(() => applyFileDetailCopyHint(""), 2800);
@@ -918,7 +1433,7 @@ function syncRouteFromHash() {
 function renderNavbar() {
   return `
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur">
-    <div class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8">
+    <div class="mx-auto grid h-16 w-full max-w-[1360px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 sm:px-4 md:px-6 md:gap-4 lg:px-8 xl:max-w-[2150px]">
       <div class="min-w-0 flex items-center justify-start">
         <a href="#/" class="inline-flex min-w-0 items-center gap-2 sm:gap-2.5" data-nav="home">
           <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">OS</span>
@@ -941,7 +1456,7 @@ function renderSettingsPanel() {
   const topClass = state.route.view === "file" ? "top-0" : "top-16";
   return `
   <div id="settings-panel" class="${state.settingsOpen ? "" : "hidden"} fixed inset-x-0 ${topClass} z-[55] border-b border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-8">
-    <div class="mx-auto flex max-w-[1360px] flex-col gap-2 sm:flex-row sm:items-end sm:gap-4">
+    <div class="mx-auto flex max-w-[1360px] flex-col gap-2 sm:flex-row sm:items-end sm:gap-4 xl:max-w-[2150px]">
       <label class="min-w-0 flex-1 space-y-1">
         <span class="text-xs font-medium text-slate-600">API 基址（含 <code class="rounded bg-slate-100 px-1">/api</code>，与主站同源时可填 <code class="rounded bg-slate-100 px-1">/api</code>）</span>
         <input type="text" class="field h-10" data-input="api-base" value="${apiVal}" placeholder="/api 或 https://后端域名/api" autocomplete="off" />
@@ -1092,7 +1607,7 @@ function renderHome() {
   else if (rows.length === 0) {
     mainList = `<div class="px-4 py-8 text-sm text-slate-500 sm:px-6">${state.searchKeyword ? "没有找到匹配结果。" : "当前目录为空。"}</div>`;
   } else if (state.viewMode === "cards") {
-    mainList = `<div class="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-2 sm:px-5 md:gap-5 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4 2xl:grid-cols-4">${rows.map((row) => renderCard(row)).join("")}</div>`;
+    mainList = `<div class="public-home-card-grid gap-4 px-4 py-3 sm:px-5 md:gap-5">${rows.map((row) => renderCard(row)).join("")}</div>`;
   } else {
     mainList = `<div class="px-4 py-5 sm:px-6"><table class="data-table table-fixed"><thead><tr><th class="text-left">名称</th><th class="w-[120px] text-right">大小</th><th class="hidden w-[220px] text-right xl:table-cell">修改时间</th></tr></thead><tbody>${rows.map((row) => renderTableRow(row)).join("")}</tbody></table></div>`;
   }
@@ -1272,6 +1787,7 @@ function renderFileDetail() {
   const coverHref = fileCoverImageHrefFromFields(d.cover_url, d.description ?? "");
   const absDl = mediaSourceURL(d, d.id);
   const absDlFull = absDl.startsWith("http") ? absDl : new URL(absDl, window.location.origin).href;
+  const absDlEmbed = withBackendDownloadInlinePreviewParam(absDlFull);
   const detailUrl = absoluteDetailPageURL(d.id);
   const q = buildVideoPlaybackUrlQueue(d.id, d);
   const activeSrc = q[Math.min(state.videoPlaybackStep, q.length - 1)] ?? "";
@@ -1287,18 +1803,18 @@ function renderFileDetail() {
   const videoBlock =
     isVideo && activeSrc
       ? `
-  <div class="flex flex-col gap-4 lg:flex-row lg:items-stretch">
-    <div class="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+    <div id="detail-video-stage" class="min-w-0 flex-1 self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner ring-1 ring-black/5">
       <video id="detail-video" class="max-h-[min(70vh,720px)] w-full object-contain" controls playsinline preload="metadata" src="${escapeHtml(activeSrc)}"></video>
     </div>
     ${
       (d.folder_id ?? "").trim()
-        ? `<aside class="flex w-full shrink-0 flex-col rounded-2xl border border-slate-200 bg-white lg:w-72 xl:w-80">
-      <div class="border-b border-slate-100 px-4 py-3">
+        ? `<aside id="detail-video-peers-aside" class="flex w-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:w-72 lg:self-start xl:w-80" style="max-height:min(70vh,720px)">
+      <div class="shrink-0 border-b border-slate-100 px-4 py-3">
         <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Playlist</p>
         <p class="mt-1 text-sm font-medium text-slate-900">同文件夹视频</p>
       </div>
-      <div class="min-h-[120px] max-h-[min(70vh,720px)] overflow-y-auto px-2 py-2">
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         ${state.folderVideoPeersLoading ? `<p class="px-2 py-6 text-center text-sm text-slate-500">加载列表…</p>` : state.folderVideoPeers.length ? `<ul class="space-y-1">${state.folderVideoPeers.map((p) => `<li><a href="#/files/${encodeURIComponent(p.id)}" class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">${Ico.fileVideo}<span class="min-w-0 break-words leading-snug">${escapeHtml(p.name)}</span></a></li>`).join("")}</ul>` : `<p class="px-2 py-6 text-center text-sm text-slate-500">当前文件夹没有其他视频</p>`}
       </div>
     </aside>`
@@ -1307,6 +1823,81 @@ function renderFileDetail() {
   </div>`
       : "";
 
+  const pvKind = fileDetailPreviewVisualKind(d);
+
+  /** @type {string} */
+  let previewBlock = "";
+  if (!isVideo && absDlEmbed && pvKind === "image") {
+    if (!state.filePreviewImageFailed) {
+      previewBlock = `<div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"><img id="file-detail-preview-img" src="${escapeHtml(absDlEmbed)}" alt="" class="max-h-[min(70vh,720px)] w-full object-contain" loading="lazy" decoding="async" /></div>`;
+    } else {
+      previewBlock =
+        '<p class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">无法在页面内预览该图片，请使用复制直链在新标签打开或下载查看。</p>';
+    }
+  } else if (!isVideo && absDlFull && pvKind === "pdf") {
+    let pdfInner = "";
+    if (isBackendPublicFileDownloadHref(absDlFull)) {
+      if (state.filePdfPreviewLoading) {
+        pdfInner = `<div class="relative flex min-h-[min(70vh,720px)] w-full items-center justify-center bg-white"><p class="text-sm text-slate-600">正在加载 PDF…</p></div>`;
+      } else if (state.filePdfPreviewError) {
+        pdfInner = `<div class="relative flex min-h-[min(70vh,720px)] w-full flex-col items-center justify-center gap-4 bg-white px-4 py-12"><p class="text-center text-sm text-rose-700">${escapeHtml(state.filePdfPreviewError)}</p><a href="${escapeHtml(absDlFull)}" target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-blue-600 underline hover:text-blue-800">在新标签页打开 PDF</a></div>`;
+      } else if (state.filePdfBlobUrl) {
+        pdfInner = `<iframe title="PDF 预览" class="block min-h-[min(70vh,720px)] w-full border-0 bg-white" src="${escapeHtml(state.filePdfBlobUrl)}"></iframe>`;
+      } else {
+        pdfInner = `<div class="relative flex min-h-[min(70vh,720px)] w-full items-center justify-center bg-white"><p class="text-sm text-slate-500">正在准备预览…</p></div>`;
+      }
+    } else {
+      pdfInner = `<iframe title="PDF 预览" class="block min-h-[min(70vh,720px)] w-full border-0 bg-white" src="${escapeHtml(absDlFull)}"></iframe>`;
+    }
+    previewBlock = `<div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5">${pdfInner}</div>`;
+  } else if (!isVideo && (pvKind === "markdown" || pvKind === "plain" || pvKind === "csv" || pvKind === "netcdf")) {
+    let inner = "";
+    if (state.filePreviewTextLoading) {
+      inner =
+        pvKind === "netcdf"
+          ? '<p class="text-sm text-slate-500">正在加载 NetCDF 结构摘要…</p>'
+          : '<p class="text-sm text-slate-500">正在加载预览内容…</p>';
+    } else if (state.filePreviewTextError) {
+      inner = `<p class="text-sm text-rose-700">${escapeHtml(state.filePreviewTextError)}</p>`;
+    } else {
+      const truncWarn = state.filePreviewTruncated
+        ? `<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">${
+            pvKind === "netcdf"
+              ? "摘要因长度上限已截断；完整结构请下载后使用 ncdump、Python 等工具查看。"
+              : `文件较大，已截断至约 ${Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024)} KB；完整内容请下载查看。`
+          }</p>`
+        : "";
+      if (pvKind === "markdown") {
+        const trimmed = state.filePreviewFetchedText.trim();
+        inner = `${truncWarn}${
+          trimmed
+            ? `<div class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"><div class="markdown-content">${renderSimpleMarkdown(state.filePreviewFetchedText)}</div></div>`
+            : '<p class="text-sm text-slate-400">（空白文件）</p>'
+        }`;
+      } else if (pvKind === "netcdf" && state.filePreviewNetcdfStructure) {
+        inner = `${truncWarn}<div class="max-h-[min(70vh,720px)] overflow-auto rounded-xl bg-white px-4 py-3 ring-1 ring-slate-950/[0.04]"><div class="markdown-content">${renderSimpleMarkdown(netcdfStructureToMarkdown(state.filePreviewNetcdfStructure))}</div></div>`;
+      } else {
+        const extPre = (d.extension ?? "").replace(/^\./, "").toLowerCase();
+        const preCls =
+          pvKind === "csv" || extPre === "ncl" || pvKind === "netcdf"
+            ? "font-mono text-xs leading-relaxed"
+            : "font-sans text-sm leading-relaxed";
+        inner = `${truncWarn}<pre class="max-h-[min(70vh,720px)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-white px-4 py-3 text-slate-800 ring-1 ring-slate-950/[0.04] ${preCls}">${
+          state.filePreviewFetchedText.length
+            ? escapeHtml(state.filePreviewFetchedText)
+            : '<span class="text-slate-400">（空白文件）</span>'
+        }</pre>`;
+      }
+    }
+    const previewCopyable =
+      (pvKind === "netcdf" && state.filePreviewNetcdfStructure) || state.filePreviewFetchedText.length > 0;
+    const previewHeaderCopy =
+      !state.filePreviewTextLoading && !state.filePreviewTextError
+        ? `<button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"${previewCopyable ? "" : " disabled"} data-action="copy-file-preview-text" aria-label="复制预览区文本">复制</button>`
+        : "";
+    previewBlock = `<div class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"><div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2"><p class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</p>${previewHeaderCopy}</div><div>${inner}</div></div>`;
+  }
+
   const hint = `<p id="file-detail-copy-hint" role="status" class="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 ${state.linkCopyHint ? "" : "hidden"}">${state.linkCopyHint ? escapeHtml(state.linkCopyHint) : ""}</p>`;
 
   const metaVisible = !isVideo || state.videoFileMetaVisible;
@@ -1314,21 +1905,21 @@ function renderFileDetail() {
 
   return `
   <section class="app-container py-2 sm:py-8 lg:py-10">
-    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-6xl" : "max-w-4xl"}">
+    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-7xl" : "max-w-6xl"}">
       <div class="panel p-6">
         ${hint}
         <section>
           <div class="space-y-4">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div class="space-y-2">
+            <div class="flex flex-col gap-4">
+              <div class="min-w-0 w-full space-y-2">
                 <div class="flex items-center gap-2">
                   <button type="button" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300" data-action="detail-back" aria-label="返回">${Ico.chevronLeft}</button>
                   <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">File Info</p>
                 </div>
-                <h3 class="break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">${escapeHtml(d.name)}</h3>
+                <h3 class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl">${escapeHtml(d.name)}</h3>
               </div>
-              <div class="min-w-0 max-w-full">
-                <div class="flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto py-2 sm:gap-3 lg:justify-end">
+              <div class="w-full min-w-0">
+                <div class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3">
                   ${isVideo ? `<button id="file-detail-toggle-meta-btn" type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-action="toggle-video-meta" aria-label="文件信息" aria-controls="file-detail-meta-panel" aria-expanded="${state.videoFileMetaVisible ? "true" : "false"}">${Ico.fileText}</button>` : ""}
                   ${dlAllowed ? `<button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-copy="${escapeHtml(absDlFull)}" data-copy-label="下载直链" title="复制下载直链" aria-label="复制下载直链">${Ico.link2}</button>` : ""}
                   <button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600" data-copy="${escapeHtml(detailUrl)}" data-copy-label="详情页链接" title="复制详情页链接" aria-label="复制详情页链接">${Ico.share}</button>
@@ -1342,8 +1933,9 @@ function renderFileDetail() {
               ${metaSecondary}
             </div>
             ${videoBlock}
+            ${previewBlock}
             ${
-              !isVideo && coverHref
+              !isVideo && coverHref && pvKind !== "image"
                 ? `<div class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"><img src="${escapeHtml(coverHref)}" alt="" class="max-h-72 w-full object-cover" loading="lazy" /></div>`
                 : ""
             }
@@ -1478,6 +2070,7 @@ function renderWarning() {
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
+  teardownDetailVideoStageObserver();
   const fileFab =
     state.route.view === "file"
       ? `<button type="button" class="fixed bottom-6 right-6 z-[70] rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-lg hover:bg-slate-50" data-action="toggle-settings">API</button>`
@@ -1506,7 +2099,24 @@ function render() {
         );
       }
       vid.addEventListener("error", onVideoError);
+      vid.addEventListener("loadedmetadata", () => {
+        syncDetailVideoPeersAsideMaxHeight();
+      });
+      setupDetailVideoStageObserver();
     }
+  }
+  const previewImg = document.getElementById("file-detail-preview-img");
+  if (
+    previewImg instanceof HTMLImageElement &&
+    state.route.view === "file" &&
+    state.fileDetail &&
+    !isVideoDetail(state.fileDetail) &&
+    fileDetailPreviewVisualKind(state.fileDetail) === "image"
+  ) {
+    previewImg.onerror = () => {
+      state.filePreviewImageFailed = true;
+      render();
+    };
   }
 }
 
@@ -1646,6 +2256,20 @@ function appClickHandler(e) {
         const label = copyBtn.getAttribute("data-copy-label") || "链接";
         e.preventDefault();
         void copyText(label, url);
+        return;
+      }
+
+      if (t.closest('[data-action="copy-file-preview-text"]')) {
+        e.preventDefault();
+        const btn = t.closest('[data-action="copy-file-preview-text"]');
+        if (btn instanceof HTMLButtonElement && btn.disabled) return;
+        let txt = state.filePreviewFetchedText ?? "";
+        if (state.filePreviewNetcdfStructure) {
+          txt = netcdfStructureToMarkdown(state.filePreviewNetcdfStructure);
+        }
+        if (!txt) return;
+        const label = state.filePreviewTruncated ? "预览内容（已截断）" : "预览内容";
+        void copyText(label, txt);
         return;
       }
 
@@ -1923,6 +2547,7 @@ function consumeApiFromHashQuery() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initMarkdownCodeCopyDelegation();
   loadPrefs();
   consumeApiFromQueryOnce();
   consumeApiFromHashQuery();

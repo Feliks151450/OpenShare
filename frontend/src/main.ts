@@ -2,6 +2,7 @@ import { createPinia } from "pinia";
 import { createApp } from "vue";
 
 import App from "./App.vue";
+import { initMarkdownCodeCopyDelegation } from "./lib/markdownCodeCopy";
 import router from "./router";
 import "./style.css";
 
@@ -21,6 +22,7 @@ function forceLightMode() {
 }
 
 forceLightMode();
+initMarkdownCodeCopyDelegation();
 
 const app = createApp(App);
 

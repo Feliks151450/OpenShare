@@ -93,16 +93,44 @@ func DownloadPolicyString(p *bool) string {
 	return "deny"
 }
 
-// inlinePlaybackAllowedWhenDownloadForbidden 策略禁止下载时仍允许通过本站 URL 内嵌播放的常见音/视频。
+// inlinePlaybackAllowedWhenDownloadForbidden 策略禁止下载时仍允许通过本站 URL 内嵌播放音/视频，以及浏览器内预览的常见图文/CSV/PDF。
 func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool {
 	mt := strings.ToLower(strings.TrimSpace(mimeType))
 	if strings.HasPrefix(mt, "video/") || strings.HasPrefix(mt, "audio/") {
 		return true
 	}
+	if strings.HasPrefix(mt, "image/") {
+		return true
+	}
+	switch mt {
+	case "application/pdf", "text/plain", "text/markdown", "text/csv", "text/tab-separated-values":
+		return true
+	default:
+		if strings.Contains(mt, "markdown") {
+			return true
+		}
+	}
 	ext := strings.ToLower(filepath.Ext(fileName))
 	switch ext {
 	case ".mp4", ".webm", ".mov", ".m4v", ".ogv", ".mkv", ".avi",
-		".mp3", ".wav", ".aac", ".m4a", ".oga", ".ogg", ".opus", ".flac":
+		".mp3", ".wav", ".aac", ".m4a", ".oga", ".ogg", ".opus", ".flac",
+		".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp",
+		".pdf", ".txt", ".md", ".markdown", ".csv", ".tsv", ".nc":
+		return true
+	default:
+		return false
+	}
+}
+
+// InlineEmbedDispositionAllowed 是否允许在带 ?inline=1 时使用 Content-Disposition: inline（PDF、图片等内嵌预览）。
+func InlineEmbedDispositionAllowed(mimeType, fileName string) bool {
+	mt := strings.ToLower(strings.TrimSpace(mimeType))
+	if mt == "application/pdf" || strings.HasPrefix(mt, "image/") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(fileName))
+	switch ext {
+	case ".pdf", ".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp":
 		return true
 	default:
 		return false

@@ -101,10 +101,30 @@ function encodeHrefLikeMarked(href: string): string | null {
   }
 }
 
+function markdownFencedCodeHtml(token: Tokens.Code): string {
+  const langToken = (token.lang ?? "").trim().match(/^\S+/)?.[0] ?? "";
+  const langClass = langToken ? ` class="language-${escapeHtml(langToken)}"` : "";
+  const langLabel = langToken ? escapeHtml(langToken) : "";
+  const text = token.text.replace(/\n$/, "") + "\n";
+  const inner = token.escaped ? text : escapeHtml(text);
+  return (
+    `<div class="markdown-code-wrap">` +
+    `<div class="markdown-code-toolbar">` +
+    `<span class="markdown-code-lang">${langLabel}</span>` +
+    `<button type="button" class="markdown-code-copy" aria-label="复制代码块">复制</button>` +
+    `</div>` +
+    `<pre><code${langClass}>${inner}</code></pre>` +
+    `</div>`
+  );
+}
+
 marked.use({
   gfm: true,
   breaks: false,
   renderer: {
+    code(this: Renderer, token: Tokens.Code): string {
+      return markdownFencedCodeHtml(token);
+    },
     image(this: Renderer, token: Tokens.Image): string {
       let altPlain = token.text ?? "";
       if (token.tokens?.length) {
@@ -150,8 +170,8 @@ export function renderSimpleMarkdown(source: string): string {
   try {
     const html = marked.parse(normalized, { async: false }) as string;
     return DOMPurify.sanitize(html, {
-      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start"],
-      ADD_TAGS: ["input"],
+      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open"],
+      ADD_TAGS: ["input", "details", "summary", "section", "header"],
     });
   } catch {
     return escapeHtml(normalized);

@@ -19,6 +19,7 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.POST("/resources/batch-download", handlers.publicDownload.DownloadResourceBatch)
 	public.GET("/files/hot", handlers.publicCatalog.ListHotFiles)
 	public.GET("/files/latest", handlers.publicCatalog.ListLatestFiles)
+	public.GET("/files/:fileID/netcdf-dump", handlers.publicDownload.GetNetCDFDump)
 	public.GET("/files/:fileID", handlers.publicDownload.GetFileDetail)
 	public.GET("/files/:fileID/download", handlers.publicDownload.DownloadFile)
 	public.GET("/folders", handlers.publicCatalog.ListPublicFolders)
@@ -115,7 +116,7 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	)
 	adminProtected.POST(
 		"/imports/local/:folderID/rescan",
-		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.imports.RescanManagedDirectory,
 	)
 	adminProtected.GET("/folders/tree", handlers.imports.GetFolderTree)

@@ -1,0 +1,100 @@
+/** 公开首页目录 API 响应形状（与 Home.vue 一致） */
+export interface PublicFolderItem {
+  id: string;
+  name: string;
+  description?: string;
+  remark?: string;
+  download_allowed?: boolean;
+  updated_at: string;
+  file_count: number;
+  download_count: number;
+  total_size: number;
+}
+
+export interface PublicFileItem {
+  id: string;
+  name: string;
+  description: string;
+  remark?: string;
+  extension: string;
+  cover_url?: string;
+  folder_direct_download_url?: string;
+  playback_url?: string;
+  download_allowed?: boolean;
+  uploaded_at: string;
+  download_count: number;
+  size: number;
+}
+
+export interface FolderDetailResponse {
+  id: string;
+  name: string;
+  description: string;
+  remark?: string;
+  parent_id: string | null;
+  file_count: number;
+  download_count: number;
+  total_size: number;
+  updated_at: string;
+  direct_link_prefix?: string;
+  download_allowed?: boolean;
+  download_policy?: "inherit" | "allow" | "deny";
+  breadcrumbs: Array<{
+    id: string;
+    name: string;
+  }>;
+}
+
+export type DirectoryViewCacheEntry = {
+  folders: PublicFolderItem[];
+  files: PublicFileItem[];
+  detail: FolderDetailResponse | null;
+};
+
+/** 纯 JSON 数据深拷贝，避免 structuredClone 对 Proxy/怪值抛错导致整次加载失败 */
+function deepCloneDirectoryEntry(entry: DirectoryViewCacheEntry): DirectoryViewCacheEntry {
+  return JSON.parse(JSON.stringify(entry)) as DirectoryViewCacheEntry;
+}
+
+/** 根目录视图的缓存不应带详情；子目录缓存的 detail.id 须与当前文件夹 id 一致 */
+export function isDirectoryViewCacheEntryUsable(folderID: string, entry: DirectoryViewCacheEntry): boolean {
+  const key = folderID.trim();
+  if (!key) {
+    return entry.detail === null;
+  }
+  return Boolean(entry.detail && entry.detail.id === key);
+}
+
+/** 模块级单例：离开 Home 再进入（如文件详情往返）仍可复用 */
+const directoryViewCache = new Map<string, DirectoryViewCacheEntry>();
+let directoryViewLoadToken = 0;
+
+export function takeDirectoryViewLoadToken(): number {
+  directoryViewLoadToken += 1;
+  return directoryViewLoadToken;
+}
+
+export function peekDirectoryViewLoadToken(): number {
+  return directoryViewLoadToken;
+}
+
+export function directoryViewCacheKey(folderID: string): string {
+  return folderID.trim() || "__root__";
+}
+
+export function writeDirectoryViewCache(folderID: string, entry: DirectoryViewCacheEntry) {
+  directoryViewCache.set(directoryViewCacheKey(folderID), deepCloneDirectoryEntry(entry));
+}
+
+export function readDirectoryViewCache(folderID: string): DirectoryViewCacheEntry | undefined {
+  const raw = directoryViewCache.get(directoryViewCacheKey(folderID));
+  return raw ? deepCloneDirectoryEntry(raw) : undefined;
+}
+
+export function invalidateDirectoryViewCacheAll() {
+  directoryViewCache.clear();
+}
+
+export function invalidateDirectoryViewCacheFolder(folderID: string) {
+  directoryViewCache.delete(directoryViewCacheKey(folderID));
+}

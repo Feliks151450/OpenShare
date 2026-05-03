@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,38 @@ func TestPublicDownloadServesManagedFile(t *testing.T) {
 
 	assertEventuallyDownloadCount(t, db, file.ID, 1)
 	assertEventuallyRecentFileHotDownloads(t, db, file.ID, 1)
+}
+
+func TestPublicDownloadPDFWithInlineQueryUsesInlineDispositionAndSkipsCount(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "PDF资料")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "doc.pdf", []byte("%PDF-1.4 inline"))
+	file.MimeType = "application/pdf"
+	if err := db.Save(file).Error; err != nil {
+		t.Fatalf("save pdf file failed: %v", err)
+	}
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/public/files/"+file.ID+"/download?inline=1", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	cd := recorder.Header().Get("Content-Disposition")
+	if cd == "" || !strings.Contains(strings.ToLower(cd), "inline") {
+		t.Fatalf("expected inline content-disposition, got %q", cd)
+	}
+
+	var stored model.File
+	if err := db.Where("id = ?", file.ID).Take(&stored).Error; err != nil {
+		t.Fatalf("reload file failed: %v", err)
+	}
+	if stored.DownloadCount != 0 {
+		t.Fatalf("expected preview request not to increment download_count, got %d", stored.DownloadCount)
+	}
 }
 
 func TestPublicDownloadReturnsGoneWhenRepositoryFileMissing(t *testing.T) {
@@ -201,6 +234,22 @@ func TestPublicFolderDownloadStreamsZip(t *testing.T) {
 
 	assertEventuallyDownloadCount(t, db, rootFile.ID, 1)
 	assertEventuallyDownloadCount(t, db, nestedFile.ID, 1)
+}
+
+func TestPublicNetCDFDumpRejectsNonNcExtension(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "气象资料")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "notes.txt", []byte("hello"))
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/public/files/"+file.ID+"/netcdf-dump", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func createRepositoryFileForDownload(t *testing.T, cfg config.Config, db *gorm.DB, folder *model.Folder, originalName string, content []byte) *model.File {
