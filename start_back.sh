@@ -34,12 +34,13 @@ cd "$ROOT_DIR/frontend"
 npm install > "$FRONTEND_LOG" 2>&1
 
 echo "==> 启动前端开发服务器（后台永久运行）"
-# 改动1：使用 nohup 启动，重定向输出到日志，末尾加 & 放入后台
-nohup npm run dev -- --host 0.0.0.0 >> "$FRONTEND_LOG" 2>&1 &
+nohup npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
 
+
 echo "==> 启动后端服务（后台永久运行）"
-nohup go run ./cmd/server >> "$BACKEND_LOG" 2>&1 &
+cd "$ROOT_DIR/backend"
+nohup go run ./cmd/server > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 
 # 改动2：将 PID 写入文件，方便后续手动停止
@@ -74,7 +75,3 @@ done
 echo "服务已在后台运行，退出终端不会中断"
 echo "如需停止服务，请执行："
 echo "  kill \$(cat $LOCAL_DATA_DIR/frontend.pid) \$(cat $LOCAL_DATA_DIR/backend.pid) 2>/dev/null"
-
-# 改动4：移除原来的 trap 和 wait，脚本直接结束，子进程（nohup）不受影响
-# trap 'kill $FRONTEND_PID $BACKEND_PID 2>/dev/null' EXIT
-# wait
