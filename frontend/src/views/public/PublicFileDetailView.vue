@@ -548,6 +548,7 @@ const showFileDescriptionAbovePreview = computed(() => {
 const previewFetchedText = ref("");
 /** NetCDF API 返回的 `structure`，用于 Markdown 结构化预览 */
 const previewNetcdfStructure = ref<NetCDFDumpGroup | null>(null);
+const previewFallbackUsed = ref(false);
 const previewTextLoading = ref(false);
 const previewTextError = ref("");
 const previewTextTruncated = ref(false);
@@ -720,6 +721,7 @@ watch(
     fetchedTextPreviewCollapsed.value = false;
     previewFetchedText.value = "";
     previewNetcdfStructure.value = null;
+    previewFallbackUsed.value = false;
     previewTextError.value = "";
     previewTextTruncated.value = false;
     previewTextLoading.value = false;
@@ -745,15 +747,30 @@ watch(
         if (e instanceof DOMException && e.name === "AbortError") {
           return;
         }
-        if (e instanceof HttpError) {
-          previewTextError.value =
-            e.status === 403
-              ? "不允许访问该文件。"
-              : e.status === 400
-                ? readApiError(e, "无法读取 NetCDF 摘要（可能不是有效的 .nc 文件）。")
-                : "加载 NetCDF 摘要失败。";
-        } else {
-          previewTextError.value = "加载 NetCDF 摘要失败。";
+        // 主接口失败，尝试 ncdump 回退
+        try {
+          const fallbackRes = await httpClient.get<{
+            text: string;
+            truncated?: boolean;
+          }>(`/public/files/${encodeURIComponent(id)}/netcdf-dump-fallback`, { signal: ac.signal });
+          previewFetchedText.value = fallbackRes.text ?? "";
+          previewTextTruncated.value = Boolean(fallbackRes.truncated);
+          previewNetcdfStructure.value = null;
+          previewFallbackUsed.value = true;
+        } catch (fallbackErr: unknown) {
+          if (fallbackErr instanceof DOMException && fallbackErr.name === "AbortError") {
+            return;
+          }
+          if (e instanceof HttpError) {
+            previewTextError.value =
+              e.status === 403
+                ? "不允许访问该文件。"
+                : e.status === 400
+                  ? readApiError(e, "无法读取 NetCDF 摘要（可能不是有效的 .nc 文件）。")
+                  : "加载 NetCDF 摘要失败。";
+          } else {
+            previewTextError.value = "加载 NetCDF 摘要失败。";
+          }
         }
       } finally {
         previewTextLoading.value = false;
@@ -1995,6 +2012,12 @@ function performDownloadFile() {
                   </p>
                   <p v-else-if="previewTextError" class="px-4 py-3 text-sm text-rose-700">{{ previewTextError }}</p>
                   <template v-else>
+                    <p
+                      v-if="previewFallbackUsed"
+                      class="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900"
+                    >
+                      该文件可能不完整，已通过 ncdump 回退方案读取头部信息；完整结构请下载后查看。
+                    </p>
                     <p
                       v-if="previewTextTruncated"
                       class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"

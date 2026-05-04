@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Check, UserRound } from "lucide-vue-next";
+import { Check, PanelLeftClose, PanelLeftOpen, UserRound } from "lucide-vue-next";
 import { useRouter } from "vue-router";
+
+import { useSidebar } from "../../composables/useSidebar";
 
 import { HttpError, httpClient } from "../../lib/http/client";
 import { useSessionStore } from "../../stores/session";
@@ -9,6 +11,7 @@ import { useSessionStore } from "../../stores/session";
 export interface NavbarItem {
   label: string;
   to: string;
+  action?: () => void;
 }
 
 interface AdminMeResponse {
@@ -43,6 +46,7 @@ const props = withDefaults(
 
 const router = useRouter();
 const sessionStore = useSessionStore();
+const { expanded: sidebarExpanded, toggle: toggleSidebar } = useSidebar();
 const panelRef = ref<HTMLElement | null>(null);
 const panelOpen = ref(false);
 const username = ref("");
@@ -161,20 +165,38 @@ function onPointerDown(event: PointerEvent) {
     <div
       class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-3 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]"
     >
+      <button
+        type="button"
+        class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 xl:inline-flex dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        :title="sidebarExpanded ? '收起侧栏' : '展开侧栏'"
+        @click="toggleSidebar"
+      >
+        <PanelLeftClose v-if="sidebarExpanded" class="h-4 w-4" />
+        <PanelLeftOpen v-else class="h-4 w-4" />
+      </button>
       <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
-        <RouterLink
-          v-for="item in items"
-          :key="item.to"
-          :to="item.to"
-          class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4"
-          :class="
-            isActive(item.to)
-              ? 'bg-slate-200/70 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
-              : 'text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100'
-          "
-        >
-          {{ item.label }}
-        </RouterLink>
+        <template v-for="item in items" :key="item.to">
+          <button
+            v-if="item.action"
+            type="button"
+            class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4 text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+            @click="item.action"
+          >
+            {{ item.label }}
+          </button>
+          <RouterLink
+            v-else
+            :to="item.to"
+            class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4"
+            :class="
+              isActive(item.to)
+                ? 'bg-slate-200/70 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
+                : 'text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100'
+            "
+          >
+            {{ item.label }}
+          </RouterLink>
+        </template>
       </nav>
 
       <div ref="panelRef" class="relative flex shrink-0 items-center justify-end gap-2 leading-none">

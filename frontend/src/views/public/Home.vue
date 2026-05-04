@@ -22,12 +22,14 @@ import {
   List,
   NotebookText,
   PanelRightOpen,
+  Plus,
   Upload,
 } from "lucide-vue-next";
 
-import InfoPanelCard, { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vue";
+import { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vue";
 import PublicFileDetailView from "./PublicFileDetailView.vue";
 import SearchSection from "../../components/resources/SearchSection.vue";
+import { useNavActions } from "../../composables/useNavActions";
 import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
@@ -124,11 +126,43 @@ const route = useRoute();
 const router = useRouter();
 
 const announcements = ref<AnnouncementItem[]>([]);
-const announcementDetail = ref<AnnouncementItem | null>(null);
+const selectedAnnouncementId = ref<string | null>(null);
+const selectedAnnouncement = computed(() => {
+  if (!selectedAnnouncementId.value) return null;
+  return announcements.value.find((a) => a.id === selectedAnnouncementId.value) ?? null;
+});
 const announcementListOpen = ref(false);
 const hotDownloadItems = ref<HotDownloadItem[]>([]);
 const latestItems = ref<LatestItem[]>([]);
 const sidebarDetailModal = ref<SidebarDetailModalState | null>(null);
+const { activePanel, closePanel: closeNavPanel } = useNavActions();
+watch(activePanel, (panel) => {
+  if (panel === "announcements") {
+    openAnnouncementList();
+  } else if (panel === "hotDownloads") {
+    openHotDownloadsModal();
+  } else if (panel === "latestItems") {
+    openLatestItemsModal();
+  }
+});
+
+function openPanelFromQuery(panel: string) {
+  if (panel === "announcements") {
+    openAnnouncementList();
+  } else if (panel === "hotDownloads") {
+    openHotDownloadsModal();
+  } else if (panel === "latestItems") {
+    openLatestItemsModal();
+  }
+}
+
+function clearPanelQuery() {
+  if (route.query.panel) {
+    const query = { ...route.query };
+    delete query.panel;
+    router.replace({ query }).catch(() => {});
+  }
+}
 /** 卡片「右侧预览」抽屉：嵌入 PublicFileDetailView */
 const fileDetailPanelFileId = ref<string | null>(null);
 /** Markdown 站内链接前往目录前确认 */
@@ -224,19 +258,6 @@ function folderIdFromRouteQuery(raw: unknown): string {
 const currentFolderID = computed(() => folderIdFromRouteQuery(route.query.folder));
 const canUploadToCurrentFolder = computed(() => currentFolderID.value.length > 0);
 const rootViewLocked = computed(() => route.query.root === "1");
-const hotDownloads = computed(() => hotDownloadItems.value.slice(0, 5).map((item) => ({
-  id: item.id,
-  label: item.name,
-})));
-const latestTitles = computed(() => latestItems.value.slice(0, 5).map((item) => ({
-  id: item.id,
-  label: item.name,
-})));
-const recentAnnouncements = computed(() => announcements.value.slice(0, 5).map((item) => ({
-  id: item.id,
-  label: item.title,
-  badge: item.is_pinned ? "置顶" : undefined,
-})));
 
 type DirectoryRow = {
   id: string;
@@ -694,8 +715,7 @@ async function performBatchDownload() {
 
 function syncBodyScrollLock() {
   const shouldLock = Boolean(
-    announcementDetail.value
-      || announcementListOpen.value
+    announcementListOpen.value
       || sidebarDetailModal.value
       || uploadModalOpen.value
       || uploadSuccessModalOpen.value
@@ -797,6 +817,12 @@ onMounted(async () => {
     loadAdminPermission(),
     loadLargeDownloadPolicy(),
   ]);
+
+  const panel = route.query.panel;
+  if (typeof panel === "string" && panel) {
+    await nextTick();
+    openPanelFromQuery(panel);
+  }
 });
 
 async function loadLargeDownloadPolicy() {
@@ -876,34 +902,23 @@ async function loadAnnouncements() {
   }
 }
 
-function openAnnouncementDetail(item: InfoPanelCardItem) {
-  const target = announcements.value.find((entry) => entry.id === item.id);
-  if (!target) {
-    return;
-  }
-  announcementListOpen.value = false;
-  announcementDetail.value = target;
-  syncBodyScrollLock();
-}
-
-function closeAnnouncementDetail() {
-  announcementDetail.value = null;
-  syncBodyScrollLock();
-}
-
-function returnToAnnouncementList() {
-  announcementDetail.value = null;
-  announcementListOpen.value = true;
-  syncBodyScrollLock();
+function selectAnnouncement(id: string) {
+  selectedAnnouncementId.value = id;
 }
 
 function openAnnouncementList() {
   announcementListOpen.value = true;
+  if (announcements.value.length > 0 && !selectedAnnouncementId.value) {
+    selectedAnnouncementId.value = announcements.value[0].id;
+  }
   syncBodyScrollLock();
 }
 
 function closeAnnouncementList() {
   announcementListOpen.value = false;
+  selectedAnnouncementId.value = null;
+  closeNavPanel();
+  clearPanelQuery();
   syncBodyScrollLock();
 }
 
@@ -931,7 +946,7 @@ function canEditAnnouncementOnHome(item: AnnouncementItem | null) {
 }
 
 function openAnnouncementInAdminEditor() {
-  const d = announcementDetail.value;
+  const d = selectedAnnouncement.value;
   if (!d || !canEditAnnouncementOnHome(d)) {
     return;
   }
@@ -945,6 +960,8 @@ function openSidebarDetailModal(modal: SidebarDetailModalState) {
 
 function closeSidebarDetailModal() {
   sidebarDetailModal.value = null;
+  closeNavPanel();
+  clearPanelQuery();
   syncBodyScrollLock();
 }
 
@@ -1209,6 +1226,16 @@ function openFile(fileID: string) {
     clearSearchState();
   }
   void router.push({ name: "public-file-detail", params: { fileID } });
+}
+
+function openInNewWindow(row: DirectoryRow) {
+  let resolved: ReturnType<typeof router.resolve>;
+  if (row.kind === "file") {
+    resolved = router.resolve({ name: "public-file-detail", params: { fileID: row.id } });
+  } else {
+    resolved = router.resolve({ name: "public-home", query: { folder: row.id } });
+  }
+  window.open(resolved.href, "_blank");
 }
 
 function openFileDetailInSidePanel(fileID: string) {
@@ -1918,18 +1945,7 @@ async function syncSessionReceiptCode() {
 
   <main class="app-container py-2 sm:py-8 lg:py-8">
     <div class="space-y-6">
-      <div class="block xl:hidden">
-        <InfoPanelCard
-          title="公告栏"
-          :items="recentAnnouncements"
-          clickable
-          action-label="详情"
-          empty-text="暂无公告"
-          @select="openAnnouncementDetail"
-          @action="openAnnouncementList"
-        />
-      </div>
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
+      <div class="grid gap-6">
       <section class="order-1 min-w-0">
         <div class="panel overflow-hidden">
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6 dark:border-slate-800">
@@ -2303,6 +2319,15 @@ async function syncSessionReceiptCode() {
                     </button>
                     <div class="flex items-center gap-2">
                       <button
+                        type="button"
+                        title="在新窗口中打开"
+                        class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        aria-label="在新窗口中打开"
+                        @click.stop="openInNewWindow(row)"
+                      >
+                        <Plus class="h-4 w-4" />
+                      </button>
+                      <button
                         v-if="row.kind === 'file'"
                         type="button"
                         title="右侧打开预览"
@@ -2397,6 +2422,15 @@ async function syncSessionReceiptCode() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      title="在新窗口中打开"
+                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      aria-label="在新窗口中打开"
+                      @click.stop="openInNewWindow(row)"
+                    >
+                      <Plus class="h-4 w-4" />
+                    </button>
                     <button
                       v-if="row.kind === 'file'"
                       type="button"
@@ -2504,38 +2538,6 @@ async function syncSessionReceiptCode() {
 
         </div>
       </section>
-
-      <aside class="order-2 min-w-0 space-y-4">
-        <div class="hidden xl:block">
-          <InfoPanelCard
-            title="公告栏"
-            :items="recentAnnouncements"
-            clickable
-            action-label="详情"
-            empty-text="暂无公告"
-            @select="openAnnouncementDetail"
-            @action="openAnnouncementList"
-          />
-        </div>
-        <InfoPanelCard
-          title="热门下载"
-          :items="hotDownloads"
-          clickable
-          action-label="详情"
-          empty-text="暂无下载数据"
-          @select="openSidebarDetailItem"
-          @action="openHotDownloadsModal"
-        />
-        <InfoPanelCard
-          title="资料上新"
-          :items="latestTitles"
-          clickable
-          action-label="详情"
-          empty-text="暂无最新资料"
-          @select="openSidebarDetailItem"
-          @action="openLatestItemsModal"
-        />
-      </aside>
       </div>
     </div>
   </main>
@@ -2751,100 +2753,88 @@ async function syncSessionReceiptCode() {
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="announcementListOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
-      <div class="modal-card panel w-full max-w-3xl p-6">
-        <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-          <div class="min-w-0">
+      <div class="modal-card panel flex h-[85vh] w-full max-w-6xl overflow-hidden">
+        <!-- 左侧公告列表 -->
+        <div class="flex w-64 shrink-0 flex-col border-r border-slate-200">
+          <div class="border-b border-slate-200 px-4 py-3">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p>
-            <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">全部公告</h3>
+            <h3 class="mt-1 text-lg font-semibold tracking-tight text-slate-900">全部公告</h3>
           </div>
-          <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
-        </div>
-        <div class="mt-5 max-h-[70vh] space-y-3 overflow-auto pr-1">
-          <button
-            v-for="item in announcements"
-            :key="item.id"
-            type="button"
-            class="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
-            @click="openAnnouncementDetail({ id: item.id, label: item.title })"
-          >
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
+          <div class="flex-1 overflow-y-auto">
+            <p v-if="announcements.length === 0" class="px-4 py-6 text-center text-sm text-slate-500">
+              暂无公告
+            </p>
+            <button
+              v-for="item in announcements"
+              :key="item.id"
+              type="button"
+              class="block w-full border-b border-slate-100 px-4 py-3 text-left transition"
+              :class="
+                selectedAnnouncementId === item.id
+                  ? 'bg-blue-50/60 border-l-[3px] border-l-blue-500'
+                  : 'border-l-[3px] border-l-transparent hover:bg-slate-50'
+              "
+              @click="selectAnnouncement(item.id)"
+            >
+              <div class="flex items-start gap-2">
                 <span
                   v-if="item.is_pinned"
-                  class="rounded-md bg-[#dcecff] px-2 py-0.5 text-xs font-semibold text-[#4f8ff7]"
+                  class="mt-0.5 shrink-0 rounded-sm bg-[#dcecff] px-1 py-0.5 text-[11px] font-semibold leading-none text-[#4f8ff7]"
                 >
                   置顶
                 </span>
-                <p class="text-base font-semibold text-slate-900">{{ item.title }}</p>
-              </div>
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                  <img v-if="item.creator?.avatar_url" :src="item.creator.avatar_url" alt="发布人头像" class="h-full w-full object-cover" />
-                  <span v-else>{{ announcementAuthorInitial(item) }}</span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-slate-900">{{ item.title }}</p>
+                  <p class="mt-1 truncate text-xs text-slate-500">{{ formatDateTime(item.published_at || item.updated_at) }}</p>
                 </div>
-                <span class="text-sm font-medium text-slate-700">{{ announcementAuthorName(item) }}</span>
-                <span
-                  v-if="announcementAuthorIsSuperAdmin(item)"
-                  class="rounded-full bg-[#fff1e4] px-2.5 py-1 text-xs font-semibold text-[#d07a2d]"
-                >
-                  超级管理员
-                </span>
               </div>
-              <p class="mt-2 line-clamp-2 text-sm text-slate-500">{{ item.content }}</p>
-            </div>
-            <span class="shrink-0 text-sm text-slate-400">
-              {{ formatDateTime(item.published_at || item.updated_at) }}
-            </span>
-          </button>
-          <p v-if="announcements.length === 0" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-            暂无公告
-          </p>
-        </div>
-      </div>
-    </div>
-    </Transition>
-  </Teleport>
-
-  <Teleport to="body">
-    <Transition name="modal-shell">
-    <div v-if="announcementDetail" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
-      <div class="modal-card panel w-full max-w-2xl p-6">
-        <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-          <div class="min-w-0">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement</p>
-            <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{{ announcementDetail.title }}</h3>
-            <div class="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-500">
-              <div class="flex items-center gap-2">
-                <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                  <img v-if="announcementDetail.creator?.avatar_url" :src="announcementDetail.creator.avatar_url" alt="发布人头像" class="h-full w-full object-cover" />
-                  <span v-else>{{ announcementAuthorInitial(announcementDetail) }}</span>
-                </div>
-                <span class="font-medium text-slate-700">{{ announcementAuthorName(announcementDetail) }}</span>
-              </div>
-              <span
-                v-if="announcementAuthorIsSuperAdmin(announcementDetail)"
-                class="rounded-full bg-[#fff1e4] px-2.5 py-1 text-xs font-semibold text-[#d07a2d]"
-              >
-                超级管理员
-              </span>
-              <span>{{ formatDateTime(announcementDetail.published_at || announcementDetail.updated_at) }}</span>
-            </div>
-          </div>
-          <div class="flex flex-wrap items-center justify-end gap-3">
-            <button type="button" class="btn-secondary" @click="returnToAnnouncementList">返回</button>
-            <button
-              v-if="canEditAnnouncementOnHome(announcementDetail)"
-              type="button"
-              class="btn-secondary"
-              @click="openAnnouncementInAdminEditor"
-            >
-              编辑
             </button>
-            <button type="button" class="btn-secondary" @click="closeAnnouncementDetail">关闭</button>
           </div>
         </div>
-        <div class="mt-5 rounded-3xl border border-slate-200 bg-white px-5 py-5">
-          <div class="markdown-content" v-html="renderSimpleMarkdown(announcementDetail.content)" />
+
+        <!-- 右侧公告详情 -->
+        <div class="flex min-w-0 flex-1 flex-col">
+          <template v-if="selectedAnnouncement">
+            <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div class="min-w-0">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement</p>
+                <h3 class="mt-1 text-xl font-semibold tracking-tight text-slate-900">{{ selectedAnnouncement.title }}</h3>
+                <div class="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <div class="flex items-center gap-2">
+                    <div class="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                      <img v-if="selectedAnnouncement.creator?.avatar_url" :src="selectedAnnouncement.creator.avatar_url" alt="发布人头像" class="h-full w-full object-cover" />
+                      <span v-else>{{ announcementAuthorInitial(selectedAnnouncement) }}</span>
+                    </div>
+                    <span class="font-medium text-slate-700">{{ announcementAuthorName(selectedAnnouncement) }}</span>
+                  </div>
+                  <span
+                    v-if="announcementAuthorIsSuperAdmin(selectedAnnouncement)"
+                    class="rounded-full bg-[#fff1e4] px-2.5 py-1 text-xs font-semibold text-[#d07a2d]"
+                  >
+                    超级管理员
+                  </span>
+                  <span>{{ formatDateTime(selectedAnnouncement.published_at || selectedAnnouncement.updated_at) }}</span>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  v-if="canEditAnnouncementOnHome(selectedAnnouncement)"
+                  type="button"
+                  class="btn-secondary"
+                  @click="openAnnouncementInAdminEditor"
+                >
+                  编辑
+                </button>
+                <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto px-6 py-5">
+              <div class="markdown-content" v-html="renderSimpleMarkdown(selectedAnnouncement.content)" />
+            </div>
+          </template>
+          <div v-else class="flex flex-1 items-center justify-center text-sm text-slate-400">
+            请选择一条公告
+          </div>
         </div>
       </div>
     </div>

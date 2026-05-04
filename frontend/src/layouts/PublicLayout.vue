@@ -1,13 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
 
+import GlobalSidebar from "../components/layout/GlobalSidebar.vue";
 import Navbar from "../components/layout/Navbar.vue";
 import { httpClient } from "../lib/http/client";
+import { useNavActions, type PanelName } from "../composables/useNavActions";
+import { useSidebar } from "../composables/useSidebar";
 
 const route = useRoute();
+const router = useRouter();
+const { openPanel } = useNavActions();
+const { expanded: sidebarExpanded } = useSidebar();
 
 const showPublicNavbar = computed(() => route.name !== "public-file-detail");
+
+const showSidebar = computed(() => showPublicNavbar.value);
+
+const mainMarginClass = computed(() => {
+  if (!showSidebar.value) return "";
+  return sidebarExpanded.value ? "xl:ml-56" : "xl:ml-11";
+});
 
 const viewKey = computed(() => {
   if (route.name === "public-file-detail") {
@@ -16,9 +29,32 @@ const viewKey = computed(() => {
   return String(route.name ?? route.path);
 });
 
+function triggerPanel(name: PanelName) {
+  if (route.name === "public-home") {
+    openPanel(name);
+  } else {
+    router.push({ path: "/", query: { panel: name } });
+  }
+}
+
 const links = [
   { to: "/", label: "首页" },
   { to: "/upload", label: "回执查询" },
+  {
+    to: "",
+    label: "公告栏",
+    action: () => triggerPanel("announcements"),
+  },
+  {
+    to: "",
+    label: "资料上新",
+    action: () => triggerPanel("latestItems"),
+  },
+  {
+    to: "",
+    label: "热门下载",
+    action: () => triggerPanel("hotDownloads"),
+  },
 ];
 
 onMounted(() => {
@@ -43,8 +79,9 @@ async function trackVisit() {
 <template>
   <div class="app-shell">
     <Navbar v-if="showPublicNavbar" :items="links" :current-path="route.path" />
+    <GlobalSidebar v-if="showSidebar" />
 
-    <main :class="showPublicNavbar ? 'pt-16' : 'pt-0'">
+    <main :class="[showPublicNavbar ? 'pt-16' : 'pt-0', mainMarginClass]">
       <RouterView :key="viewKey" />
     </main>
   </div>

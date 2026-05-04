@@ -148,6 +148,23 @@ func (h *PublicDownloadHandler) GetNetCDFDump(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"text": text, "structure": structure, "truncated": truncated})
 }
 
+// GetNetCDFDumpFallback 使用系统 ncdump 命令作为回退方案获取 NetCDF 头部信息。
+func (h *PublicDownloadHandler) GetNetCDFDumpFallback(ctx *gin.Context) {
+	text, truncated, err := h.service.PrepareNetCDFDumpFallback(ctx.Request.Context(), ctx.Param("fileID"))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDownloadFileNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		case errors.Is(err, service.ErrNetCDFNotApplicable):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "file is not a NetCDF (.nc) file"})
+		default:
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "failed to read NetCDF file with ncdump fallback"})
+		}
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"text": text, "truncated": truncated})
+}
+
 func (h *PublicDownloadHandler) GetFileDetail(ctx *gin.Context) {
 	detail, err := h.service.GetFileDetail(ctx.Request.Context(), ctx.Param("fileID"))
 	if err != nil {

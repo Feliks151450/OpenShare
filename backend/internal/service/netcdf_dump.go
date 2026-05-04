@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"unicode/utf8"
 
@@ -274,6 +276,53 @@ func formatNetCDFAttrValue(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// PrepareNetCDFDumpFallback 使用系统 ncdump -h 获取 NetCDF 文件头部信息，用于 go-native-netcdf 库无法打开文件时的回退方案。
+func (s *PublicDownloadService) PrepareNetCDFDumpFallback(ctx context.Context, fileID string) (text string, truncated bool, err error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return "", false, ErrDownloadFileNotFound
+	}
+	file, err := s.repository.FindManagedFileByID(ctx, fileID)
+	if err != nil {
+		return "", false, fmt.Errorf("find file for netcdf dump fallback: %w", err)
+	}
+	if file == nil {
+		return "", false, ErrDownloadFileNotFound
+	}
+
+	ext := strings.ToLower(strings.TrimPrefix(file.Extension, "."))
+	if ext != "nc" {
+		return "", false, ErrNetCDFNotApplicable
+	}
+
+	diskPath, err := s.resolveManagedFilePath(ctx, file)
+	if err != nil {
+		return "", false, err
+	}
+
+	ncdumpPath, lookErr := exec.LookPath("ncdump")
+	if lookErr != nil {
+		return "", false, fmt.Errorf("ncdump not found: %w", lookErr)
+	}
+
+	cmd := exec.Command(ncdumpPath, "-h", diskPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if runErr := cmd.Run(); runErr != nil {
+		return "", false, fmt.Errorf("ncdump -h failed: %w (stderr: %s)", runErr, strings.TrimSpace(stderr.String()))
+	}
+
+	raw := stdout.String()
+	if len(raw) > MaxNetCDFDumpBytes {
+		raw = raw[:MaxNetCDFDumpBytes] + "\n… 输出已超过长度上限，已截断 …\n"
+		truncated = true
+	}
+
+	return raw, truncated, nil
 }
 
 func tryWrite(sb *strings.Builder, trunc *bool, s string) {

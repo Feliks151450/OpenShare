@@ -20,6 +20,7 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.GET("/files/hot", handlers.publicCatalog.ListHotFiles)
 	public.GET("/files/latest", handlers.publicCatalog.ListLatestFiles)
 	public.GET("/files/:fileID/netcdf-dump", handlers.publicDownload.GetNetCDFDump)
+	public.GET("/files/:fileID/netcdf-dump-fallback", handlers.publicDownload.GetNetCDFDumpFallback)
 	public.GET("/files/:fileID", handlers.publicDownload.GetFileDetail)
 	public.GET("/files/:fileID/download", handlers.publicDownload.DownloadFile)
 	public.GET("/folders", handlers.publicCatalog.ListPublicFolders)
