@@ -9,7 +9,7 @@ import { useSidebar } from "../../composables/useSidebar";
 
 const route = useRoute();
 const router = useRouter();
-const { expanded, loadStoredState } = useSidebar();
+const { expanded, loadStoredState, close } = useSidebar();
 
 const folders = ref<PublicFolderItem[]>([]);
 const loading = ref(false);
@@ -36,10 +36,12 @@ async function loadRootFolders() {
 
 function goHome() {
   router.push({ name: "public-home", query: { root: "1" } });
+  close();
 }
 
 function goFolder(id: string) {
   router.push({ name: "public-home", query: { folder: id } });
+  close();
 }
 
 onMounted(() => {
@@ -55,9 +57,24 @@ watch(() => route.name, (name) => {
 </script>
 
 <template>
+  <!-- Backdrop — only on screens below xl when expanded -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <div
+        v-if="expanded"
+        class="fixed inset-0 z-[55] bg-slate-950/30 xl:hidden"
+        @click="close"
+      />
+    </Transition>
+  </Teleport>
+
   <aside
-    class="fixed bottom-0 left-0 top-16 z-50 hidden shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 xl:flex dark:border-slate-800 dark:bg-slate-950"
-    :class="expanded ? 'w-56' : 'w-11'"
+    class="fixed bottom-0 left-0 top-16 z-[56] flex shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 dark:border-slate-800 dark:bg-slate-950 xl:z-50"
+    :class="
+      expanded
+        ? 'w-56 xl:w-56'
+        : '-translate-x-full xl:translate-x-0 xl:w-11'
+    "
   >
     <!-- Home button -->
     <div class="border-b border-slate-100 px-2 py-1.5 dark:border-slate-800">
@@ -82,11 +99,10 @@ watch(() => route.name, (name) => {
       <p
         v-if="!loading && folders.length === 0"
         class="px-2 py-4 text-center text-xs text-slate-400"
-        :class="expanded ? '' : 'hidden'"
       >
         暂无目录
       </p>
-      <div v-if="loading && expanded" class="px-2 py-4 text-center text-xs text-slate-400">
+      <div v-if="loading" class="px-2 py-4 text-center text-xs text-slate-400">
         加载中…
       </div>
       <div class="space-y-0.5">
@@ -100,13 +116,24 @@ watch(() => route.name, (name) => {
               ? 'bg-slate-200/70 font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'
           "
-          :title="expanded ? folder.name : folder.name"
+          :title="folder.name"
           @click="goFolder(folder.id)"
         >
           <Folder class="h-4 w-4 shrink-0" />
-          <span v-if="expanded" class="truncate">{{ folder.name }}</span>
+          <span class="truncate">{{ folder.name }}</span>
         </button>
       </div>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

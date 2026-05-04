@@ -6,6 +6,7 @@
 .gomodcache/
 .out/
 .cache/
+.claude/
 Thumbs.db
 *.swp
 *.swo

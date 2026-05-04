@@ -29,5 +29,10 @@ export function useSidebar() {
     persistState();
   }
 
-  return { expanded, toggle, loadStoredState };
+  function close() {
+    expanded.value = false;
+    persistState();
+  }
+
+  return { expanded, toggle, close, loadStoredState };
 }

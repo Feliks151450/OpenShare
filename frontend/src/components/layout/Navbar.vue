@@ -167,12 +167,12 @@ function onPointerDown(event: PointerEvent) {
     >
       <button
         type="button"
-        class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 xl:inline-flex dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
         :title="sidebarExpanded ? '收起侧栏' : '展开侧栏'"
         @click="toggleSidebar"
       >
-        <PanelLeftClose v-if="sidebarExpanded" class="h-4 w-4" />
-        <PanelLeftOpen v-else class="h-4 w-4" />
+        <PanelLeftClose v-if="sidebarExpanded" class="h-5 w-5" />
+        <PanelLeftOpen v-else class="h-5 w-5" />
       </button>
       <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
         <template v-for="item in items" :key="item.to">

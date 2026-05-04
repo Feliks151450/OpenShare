@@ -10,6 +10,16 @@ const LS_API = "openshare_readonly_api_base";
 const LS_VIEW = "public-home-view-mode";
 const LS_SORT = "public-home-sort-mode";
 const LS_SORT_DIR = "public-home-sort-direction";
+const LS_SIDEBAR = "readonly-sidebar-open";
+
+/** API 候选地址列表，autoDetectApi 按顺序检测第一个可用的。 */
+const API_CANDIDATES = [
+  "http://10.92.104.49:5173/api",
+  "https://share.feliks.top/api",
+];
+
+/** 当 localStorage 无保存地址时，autoDetectApi 在当前页面生命周期内是否已执行过。 */
+let apiAutoDetectDone = false;
 
 /** 视频详情：右侧「同文件夹视频」栏 max-height 与播放器区域对齐（与 Vue PublicFileDetailView 一致） */
 let detailVideoStageResizeObserver = null;
@@ -134,20 +144,115 @@ function getApiBase() {
   if (window.apiBaseFallback) {
     return window.apiBaseFallback;
   }
-  return "/api";
+  return "";
+}
+
+function hasApiBase() {
+  return getApiBase() !== "";
 }
 
 function setApiBase(next) {
   const t = String(next ?? "").trim().replace(/\/+$/, "");
-  localStorage.setItem(LS_API, t || "/api");
+  if (t) {
+    localStorage.setItem(LS_API, t);
+  } else {
+    localStorage.removeItem(LS_API);
+  }
+}
+
+/**
+ * 检测单个候选 API 地址是否可用，通过请求 /public/folders（轻量接口）验证。
+ * @param {string} base
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>}
+ */
+async function probeApiBase(base, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+  try {
+    const response = await fetch(base.replace(/\/+$/, "") + "/public/folders", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return response.ok;
+  } catch {
+    clearTimeout(timer);
+    return false;
+  }
+}
+
+/**
+ * 自动检测 API 地址：
+ * 1. 如果已有保存地址（localStorage / hash / query），不覆盖。
+ * 2. 否则按 API_CANDIDATES 顺序检测第一个可用的地址。
+ * 3. 如果全部不可用，设置一个空标记，后续请求会使用第一个候选地址作为兜底。
+ * @returns {Promise<string>} 最终使用的 API 基址（可能为空）。
+ */
+async function autoDetectApi() {
+  if (hasApiBase()) {
+    apiAutoDetectDone = true;
+    return getApiBase();
+  }
+  if (apiAutoDetectDone) {
+    return getApiBase();
+  }
+  apiAutoDetectDone = true;
+
+  for (var i = 0; i < API_CANDIDATES.length; i++) {
+    var candidate = API_CANDIDATES[i];
+    var ok = await probeApiBase(candidate, 5000);
+    if (ok) {
+      setApiBase(candidate);
+      return candidate;
+    }
+  }
+
+  // 全部不可用时回退到第一个候选地址
+  return API_CANDIDATES[0];
+}
+
+/**
+ * 当前 API 地址失败时尝试切换到下一个候选地址。
+ * 扫描 API_CANDIDATES，找到当前保存地址之后的下一个可用地址。
+ * @returns {Promise<boolean>} 是否成功切换。
+ */
+async function retryNextApiBase() {
+  var current = getApiBase();
+  var startIndex = -1;
+  for (var i = 0; i < API_CANDIDATES.length; i++) {
+    if (API_CANDIDATES[i] === current) { startIndex = i; break; }
+  }
+  if (startIndex === -1) {
+    // 当前地址不在候选列表中（用户自定义），尝试候选列表
+    startIndex = -1;
+  }
+
+  for (var j = startIndex + 1; j < API_CANDIDATES.length; j++) {
+    var ok = await probeApiBase(API_CANDIDATES[j], 5000);
+    if (ok) {
+      setApiBase(API_CANDIDATES[j]);
+      return true;
+    }
+  }
+
+  // 也尝试当前地址之前的候选
+  for (var k = 0; k <= startIndex && k < API_CANDIDATES.length; k++) {
+    var ok2 = await probeApiBase(API_CANDIDATES[k], 5000);
+    if (ok2) {
+      setApiBase(API_CANDIDATES[k]);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function apiUrl(path) {
-  const base = getApiBase();
+  const base = getApiBase() || API_CANDIDATES[0] || "/api";
   const p = path.startsWith("/") ? path : `/${path}`;
-  if (/^https?:\/\//i.test(base)) {
-    return `${base}${p}`;
-  }
   return `${base}${p}`;
 }
 
@@ -167,6 +272,8 @@ async function parsePayload(response) {
   return response.text();
 }
 
+let apiRequestSwitching = false;
+
 async function apiRequest(path, options = {}) {
   const headers = new Headers({ Accept: "application/json" });
   if (options.headers) new Headers(options.headers).forEach((v, k) => headers.set(k, v));
@@ -175,12 +282,37 @@ async function apiRequest(path, options = {}) {
     headers.set("Content-Type", "application/json");
     body = JSON.stringify(body);
   }
-  const response = await fetch(apiUrl(path), {
-    ...options,
-    headers,
-    body,
-    credentials: "omit",
-  });
+  const doFetch = function () {
+    return fetch(apiUrl(path), {
+      ...options,
+      headers,
+      body,
+      credentials: "omit",
+    });
+  };
+  let response;
+  try {
+    response = await doFetch();
+  } catch (firstErr) {
+    // 仅对网络错误尝试切换 API 地址并重试一次
+    if (firstErr instanceof TypeError && !apiRequestSwitching) {
+      apiRequestSwitching = true;
+      try {
+        const switched = await retryNextApiBase();
+        if (switched) {
+          try {
+            response = await doFetch();
+          } catch {
+            apiRequestSwitching = false;
+            throw firstErr;
+          }
+        }
+      } finally {
+        apiRequestSwitching = false;
+      }
+    }
+    if (!response) throw firstErr;
+  }
   const payload = await parsePayload(response);
   if (!response.ok) {
     throw new HttpError(response.statusText || "Request failed", response.status, payload);
@@ -837,8 +969,9 @@ const state = {
   sortMenuOpen: false,
   viewMenuOpen: false,
   folderMarkdownExpanded: false,
-  modalAnnouncement: null,
   modalAnnouncementList: false,
+  /** 公告组合模态框：当前选中的公告 id */
+  announcementSelectedId: null,
   modalSidebar: null,
   transientWarning: "",
   downloadTimestamps: [],
@@ -870,6 +1003,10 @@ const state = {
   filePdfBlobUrl: "",
   filePdfPreviewLoading: false,
   filePdfPreviewError: "",
+  /** 全局侧边栏 */
+  sidebarExpanded: true,
+  sidebarFolders: [],
+  sidebarLoading: false,
 };
 
 function loadPrefs() {
@@ -879,6 +1016,65 @@ function loadPrefs() {
   if (sm === "name" || sm === "download" || sm === "format" || sm === "modified") state.sortMode = sm;
   const sd = localStorage.getItem(LS_SORT_DIR);
   if (sd === "asc" || sd === "desc") state.sortDirection = sd;
+  const sb = localStorage.getItem(LS_SIDEBAR);
+  if (sb === "false") state.sidebarExpanded = false;
+}
+
+function persistSidebar() {
+  try {
+    localStorage.setItem(LS_SIDEBAR, String(state.sidebarExpanded));
+  } catch { /* ignore */ }
+}
+
+function toggleSidebar() {
+  state.sidebarExpanded = !state.sidebarExpanded;
+  persistSidebar();
+  render();
+}
+
+function closeSidebarOverlay() {
+  state.sidebarExpanded = false;
+  persistSidebar();
+  render();
+}
+
+async function loadSidebarFolders() {
+  state.sidebarLoading = true;
+  try {
+    const response = await apiRequest("/public/folders");
+    state.sidebarFolders = response.items ?? [];
+  } catch {
+    state.sidebarFolders = [];
+  } finally {
+    state.sidebarLoading = false;
+  }
+}
+
+function openSidebarPanel(name) {
+  if (name === "announcements") {
+    state.modalAnnouncementList = true;
+    if (state.announcements.length > 0 && !state.announcementSelectedId) {
+      state.announcementSelectedId = state.announcements[0].id;
+    }
+  } else if (name === "hotDownloads") {
+    state.modalSidebar = {
+      eyebrow: "Hot Downloads",
+      title: "热门下载",
+      description: "展示近七天内下载量最高的前 20 份资料，点击可跳转文件详情页。",
+      items: state.hotDownloadItems.map(function (item) {
+        return { id: item.id, label: item.name, meta: (item.downloadCount || 0) + " 次下载" };
+      }),
+    };
+  } else if (name === "latestItems") {
+    state.modalSidebar = {
+      eyebrow: "Latest Files",
+      title: "资料上新",
+      description: "展示最新发布的前 20 份资料，点击标题可跳转文件详情页。",
+      items: state.latestItems.map(function (item) {
+        return { id: item.id, label: item.name };
+      }),
+    };
+  }
 }
 
 function savePref(key, value) {
@@ -1599,17 +1795,66 @@ function syncRouteFromHash() {
 }
 
 function renderNavbar() {
+  function navLinkActive(href) {
+    const r = state.route;
+    if (r.view === "home" && !r.folder && !r.root && href === "#/") return true;
+    return false;
+  }
   return `
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur">
     <div class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-3 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]">
+      <button type="button" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700" title="${state.sidebarExpanded ? "收起侧栏" : "展开侧栏"}" data-action="toggle-sidebar">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          ${state.sidebarExpanded
+            ? '<path d="M13 17l-5-5 5-5" /><path d="M20 19V5" />'
+            : '<path d="M11 17l5-5-5-5" /><path d="M4 19V5" />'}
+        </svg>
+      </button>
       <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
-        <a href="#/" class="shrink-0 rounded-lg bg-slate-200/70 px-2.5 py-2 text-sm font-medium text-slate-900 sm:px-4">首页</a>
+        <a href="#/" class="${navLinkActive("#/") ? "bg-slate-200/70 text-slate-900" : "text-slate-600 hover:bg-slate-200/60 hover:text-slate-900"} shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4">首页</a>
+        <button type="button" class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4 text-slate-600 hover:bg-slate-200/60 hover:text-slate-900" data-action="open-panel-announcements">公告栏</button>
+        <button type="button" class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4 text-slate-600 hover:bg-slate-200/60 hover:text-slate-900" data-action="open-panel-latest">资料上新</button>
+        <button type="button" class="shrink-0 rounded-lg px-2.5 py-2 text-sm font-medium transition sm:px-4 text-slate-600 hover:bg-slate-200/60 hover:text-slate-900" data-action="open-panel-hot">热门下载</button>
       </nav>
       <div class="flex shrink-0 items-center justify-end gap-2">
         <button type="button" class="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50" data-action="toggle-settings" title="API 基址">API</button>
       </div>
     </div>
   </header>`;
+}
+
+function renderGlobalSidebar() {
+  const w = state.sidebarExpanded ? "w-56" : "-translate-x-full xl:translate-x-0 xl:w-11";
+  const activeId = state.route.folder;
+  const isRoot = state.route.root === "1";
+  const folderItems = state.sidebarFolders.length
+    ? state.sidebarFolders.map(function (f) {
+        const act = activeId === f.id ? "bg-slate-200/70 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900";
+        return '<button type="button" class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ' + act + '" data-sidebar-folder="' + escapeHtml(f.id) + '" title="' + escapeHtml(f.name) + '">' +
+          '<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>' +
+          (state.sidebarExpanded ? '<span class="truncate">' + escapeHtml(f.name) + '</span>' : '') +
+          '</button>';
+      }).join("")
+    : (state.sidebarExpanded ? '<p class="px-2 py-4 text-center text-xs text-slate-400">暂无目录</p>' : "");
+  const rootAct = isRoot ? "bg-slate-200/70 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900";
+  return `
+  <aside class="fixed bottom-0 left-0 top-16 z-[56] flex shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 xl:z-50 ${w}">
+    <div class="border-b border-slate-100 px-2 py-1.5">
+      <button type="button" class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${rootAct}" title="${state.sidebarExpanded ? "" : "主页"}" data-sidebar-home>
+        <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        ${state.sidebarExpanded ? '<span class="truncate">主页</span>' : ""}
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-2 py-1.5">
+      ${state.sidebarLoading && state.sidebarExpanded ? '<div class="px-2 py-4 text-center text-xs text-slate-400">加载中…</div>' : ""}
+      <div class="space-y-0.5">${folderItems}</div>
+    </div>
+  </aside>`;
+}
+
+function renderSidebarBackdrop() {
+  if (!state.sidebarExpanded) return "";
+  return '<div class="fixed inset-0 z-[55] bg-slate-950/30 xl:hidden" data-action="close-sidebar-overlay"></div>';
 }
 
 function renderSettingsPanel() {
@@ -1628,34 +1873,6 @@ function renderSettingsPanel() {
       </div>
     </div>
   </div>`;
-}
-
-function renderInfoPanel(title, items, emptyText, actionAttr, panelKind) {
-  const kind = panelKind || "file";
-  const dataPick = kind === "announcement" ? "data-ann-pick" : "data-sidebar-item";
-  const rows = items.length
-    ? items
-        .map(
-          (it) => `
-      <button type="button" class="block w-full rounded-lg px-2 py-2 text-left text-sm leading-6 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900" ${dataPick}="${escapeHtml(it.id)}">
-        <span class="flex items-start gap-2">
-          ${it.badge ? `<span class="mt-0.5 inline-flex shrink-0 rounded-md bg-[#dcecff] px-2 py-0.5 text-xs font-semibold text-[#4f8ff7]">${escapeHtml(it.badge)}</span>` : ""}
-          <span class="line-clamp-2">${escapeHtml(it.label)}</span>
-        </span>
-      </button>`,
-        )
-        .join("")
-    : `<div class="rounded-lg bg-[#fafafa] px-3 py-3 text-sm text-slate-500">${escapeHtml(emptyText)}</div>`;
-  return `
-  <section class="panel p-4">
-    <header class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-      <h2 class="text-sm font-medium tracking-tight text-slate-900">${escapeHtml(title)}</h2>
-      <button type="button" class="shrink-0 text-xs font-medium text-slate-500 transition hover:text-slate-900" ${actionAttr}>详情</button>
-    </header>
-    <div class="mt-4">
-      <div class="space-y-2">${rows}</div>
-    </div>
-  </section>`;
 }
 
 function renderHome() {
@@ -1773,36 +1990,12 @@ function renderHome() {
     mainList = `<div class="px-4 py-5 sm:px-6"><table class="data-table table-fixed"><thead><tr><th class="text-left">名称</th><th class="w-[120px] text-right">大小</th><th class="hidden w-[220px] text-right xl:table-cell">修改时间</th></tr></thead><tbody>${rows.map((row) => renderTableRow(row)).join("")}</tbody></table></div>`;
   }
 
-  const ann = state.announcements.slice(0, 5).map((a) => ({
-    id: a.id,
-    label: a.title,
-    badge: a.is_pinned ? "置顶" : undefined,
-  }));
-  const hot = state.hotDownloadItems.slice(0, 5).map((h) => ({ id: h.id, label: h.name }));
-  const latest = state.latestItems.slice(0, 5).map((l) => ({ id: l.id, label: l.name }));
-
-  const announcementPanel = renderInfoPanel(
-    "公告栏",
-    ann,
-    "暂无公告",
-    'data-action="announcement-list"',
-    "announcement",
-  );
-
-  const aside = `
-  <aside class="order-2 min-w-0 space-y-4">
-    <div class="hidden xl:block">${announcementPanel}</div>
-    ${renderInfoPanel("热门下载", hot, "暂无下载数据", 'data-action="hot-modal"', "file")}
-    ${renderInfoPanel("资料上新", latest, "暂无最新资料", 'data-action="latest-modal"', "file")}
-  </aside>`;
-
   return `
-  <main class="pt-16">
+  <main>
     <div class="app-container py-2 sm:py-8 lg:py-2">
     <div class="space-y-6">
-      <div class="block xl:hidden">${announcementPanel}</div>
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
-      <section class="order-1 min-w-0">
+      <div class="grid gap-6">
+      <section class="min-w-0">
         <div class="panel overflow-hidden">
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6">
             <div class="min-w-0 max-w-full overflow-x-auto">${breadcrumbHtml}</div>
@@ -1815,7 +2008,6 @@ function renderHome() {
           ${mainList}
         </div>
       </section>
-      ${aside}
       </div>
     </div>
     </div>
@@ -2234,49 +2426,50 @@ function renderModals() {
     </div>`;
   }
   if (state.modalAnnouncementList) {
-    const items = state.announcements
-      .map(
-        (item) => `
-      <button type="button" class="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left hover:border-blue-200 hover:bg-blue-50/40" data-announcement-open="${escapeHtml(item.id)}">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            ${item.is_pinned ? `<span class="rounded-md bg-[#dcecff] px-2 py-0.5 text-xs font-semibold text-[#4f8ff7]">置顶</span>` : ""}
-            <p class="text-base font-semibold text-slate-900">${escapeHtml(item.title)}</p>
-          </div>
-          <p class="mt-2 line-clamp-2 text-sm text-slate-500">${escapeHtml(item.content)}</p>
-        </div>
-        <span class="shrink-0 text-sm text-slate-400">${escapeHtml(formatDateTime(item.published_at || item.updated_at))}</span>
-      </button>`,
-      )
-      .join("");
+    const selectedItem = state.announcementSelectedId
+      ? state.announcements.find(function (a) { return a.id === state.announcementSelectedId; }) || null
+      : null;
+    const sidebarItems = state.announcements.length
+      ? state.announcements.map(function (item) {
+          const act = state.announcementSelectedId === item.id ? "bg-blue-50/60 border-l-[3px] border-l-blue-500" : "border-l-[3px] border-l-transparent hover:bg-slate-50";
+          return '<button type="button" class="block w-full border-b border-slate-100 px-4 py-3 text-left transition ' + act + '" data-ann-select="' + escapeHtml(item.id) + '">' +
+            '<div class="flex items-start gap-2">' +
+            (item.is_pinned ? '<span class="mt-0.5 shrink-0 rounded-sm bg-[#dcecff] px-1 py-0.5 text-[11px] font-semibold leading-none text-[#4f8ff7]">置顶</span>' : '') +
+            '<div class="min-w-0"><p class="truncate text-sm font-medium text-slate-900">' + escapeHtml(item.title) + '</p>' +
+            '<p class="mt-1 truncate text-xs text-slate-500">' + escapeHtml(formatDateTime(item.published_at || item.updated_at)) + '</p></div>' +
+            '</div></button>';
+        }).join("")
+      : '<p class="px-4 py-6 text-center text-sm text-slate-500">暂无公告</p>';
+
+    const detailHtml = selectedItem
+      ? '<div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">' +
+          '<div class="min-w-0">' +
+            '<p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement</p>' +
+            '<h3 class="mt-1 text-xl font-semibold tracking-tight text-slate-900">' + escapeHtml(selectedItem.title) + '</h3>' +
+            '<div class="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-500">' +
+              '<span>' + escapeHtml(formatDateTime(selectedItem.published_at || selectedItem.updated_at)) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="flex flex-wrap items-center justify-end gap-2">' +
+            '<button type="button" class="btn-secondary" data-action="close-announcement-list">关闭</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="flex-1 overflow-y-auto px-6 py-5">' +
+          '<div class="markdown-content">' + renderSimpleMarkdown(selectedItem.content) + '</div>' +
+        '</div>'
+      : '<div class="flex flex-1 items-center justify-center text-sm text-slate-400">请选择一条公告</div>';
+
     html += `
     <div class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4" data-close-modal="1">
-      <div class="modal-card panel w-full max-w-3xl p-6" data-stop-modal="1">
-        <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-          <div><p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p><h3 class="mt-2 text-2xl font-semibold text-slate-900">全部公告</h3></div>
-          <button type="button" class="btn-secondary" data-action="close-announcement-list">关闭</button>
-        </div>
-        <div class="mt-5 max-h-[70vh] space-y-3 overflow-auto pr-1">${items || `<p class="text-center text-sm text-slate-500">暂无公告</p>`}</div>
-      </div>
-    </div>`;
-  }
-  if (state.modalAnnouncement) {
-    const item = state.modalAnnouncement;
-    html += `
-    <div class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4" data-close-modal="1">
-      <div class="modal-card panel w-full max-w-2xl p-6" data-stop-modal="1">
-        <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-          <div class="min-w-0">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement</p>
-            <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">${escapeHtml(item.title)}</h3>
-            <p class="mt-2 text-sm text-slate-500">${escapeHtml(formatDateTime(item.published_at || item.updated_at))}</p>
+      <div class="modal-card panel flex h-[85vh] w-full max-w-6xl overflow-hidden" data-stop-modal="1">
+        <div class="flex w-64 shrink-0 flex-col border-r border-slate-200">
+          <div class="border-b border-slate-200 px-4 py-3">
+            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p>
+            <h3 class="mt-1 text-lg font-semibold tracking-tight text-slate-900">全部公告</h3>
           </div>
-          <div class="flex gap-2">
-            <button type="button" class="btn-secondary" data-action="back-announcement-list">返回</button>
-            <button type="button" class="btn-secondary" data-action="close-announcement">关闭</button>
-          </div>
+          <div class="flex-1 overflow-y-auto">${sidebarItems}</div>
         </div>
-        <div class="mt-5 rounded-3xl border border-slate-200 bg-white px-5 py-5"><div class="markdown-content">${renderSimpleMarkdown(item.content)}</div></div>
+        <div class="flex min-w-0 flex-1 flex-col">${detailHtml}</div>
       </div>
     </div>`;
   }
@@ -2319,15 +2512,24 @@ function render() {
   const app = document.getElementById("app");
   if (!app) return;
   teardownDetailVideoStageObserver();
+  const isFileDetail = state.route.view === "file";
+  const mlClass = state.sidebarExpanded ? "xl:ml-56" : "xl:ml-11";
+  const mainContent = isFileDetail ? renderFileDetail() : renderHome();
   const fileFab =
-    state.route.view === "file"
+    isFileDetail
       ? `<button type="button" class="fixed bottom-6 right-6 z-[70] rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-lg hover:bg-slate-50" data-action="toggle-settings">API</button>`
       : "";
-  const main =
-    state.route.view === "file"
-      ? `${renderFileDetail()}${fileFab}`
-      : `<div class="app-shell">${renderNavbar()}${renderHome()}</div>`;
-  app.innerHTML = `${main}${renderSettingsPanel()}${renderModals()}${renderWarning()}`;
+  app.innerHTML =
+    `<div class="app-shell">` +
+    `${renderNavbar()}` +
+    `${renderSidebarBackdrop()}` +
+    `${renderGlobalSidebar()}` +
+    `<main class="pt-16 ${isFileDetail ? "" : mlClass}">${mainContent}</main>` +
+    `${fileFab}` +
+    `</div>` +
+    `${renderSettingsPanel()}` +
+    `${renderModals()}` +
+    `${renderWarning()}`;
   attachListeners();
   if (state.route.view === "file" && state.fileDetail && isVideoDetail(state.fileDetail)) {
     const vid = document.getElementById("detail-video");
@@ -2469,24 +2671,11 @@ function appClickHandler(e) {
     return;
   }
 
-      const openAnn = t.closest("[data-announcement-open]");
-      if (openAnn) {
-        const id = openAnn.getAttribute("data-announcement-open");
-        state.modalAnnouncement = state.announcements.find((a) => a.id === id) || null;
-        state.modalAnnouncementList = false;
+      const annSelect = t.closest("[data-ann-select]");
+      if (annSelect) {
+        const id = annSelect.getAttribute("data-ann-select");
+        state.announcementSelectedId = id;
         render();
-        return;
-      }
-
-      const annPick = t.closest("[data-ann-pick]");
-      if (annPick) {
-        const id = annPick.getAttribute("data-ann-pick");
-        const item = state.announcements.find((a) => a.id === id);
-        if (item) {
-          state.modalAnnouncement = item;
-          state.modalAnnouncementList = false;
-          render();
-        }
         return;
       }
 
@@ -2495,13 +2684,6 @@ function appClickHandler(e) {
         const id = sidebarOpen.getAttribute("data-sidebar-open");
         setHashRoute({ view: "file", fileId: id, folder: "", root: "", t: "" });
         state.modalSidebar = null;
-        return;
-      }
-
-      const sidebarItem = t.closest("[data-sidebar-item]");
-      if (sidebarItem) {
-        const id = sidebarItem.getAttribute("data-sidebar-item");
-        setHashRoute({ view: "file", fileId: id, folder: "", root: "", t: "" });
         return;
       }
 
@@ -2671,49 +2853,50 @@ function appClickHandler(e) {
         render();
         return;
       }
-      if (t.closest("[data-action=\"announcement-list\"]")) {
-        state.modalAnnouncementList = true;
+      if (t.closest("[data-action=\"open-panel-announcements\"]")) {
+        openSidebarPanel("announcements");
         render();
         return;
       }
-      if (t.closest("[data-action=\"hot-modal\"]")) {
-        state.modalSidebar = {
-          eyebrow: "Hot Downloads",
-          title: "热门下载",
-          description: "展示近七天内下载量最高的前 20 份资料。",
-          items: state.hotDownloadItems.map((item) => ({
-            id: item.id,
-            label: item.name,
-            meta: `${item.downloadCount} 次下载`,
-          })),
-        };
+      if (t.closest("[data-action=\"open-panel-hot\"]")) {
+        openSidebarPanel("hotDownloads");
         render();
         return;
       }
-      if (t.closest("[data-action=\"latest-modal\"]")) {
-        state.modalSidebar = {
-          eyebrow: "Latest Files",
-          title: "资料上新",
-          description: "展示最新发布的前 20 份资料。",
-          items: state.latestItems.map((item) => ({ id: item.id, label: item.name })),
-        };
+      if (t.closest("[data-action=\"open-panel-latest\"]")) {
+        openSidebarPanel("latestItems");
         render();
         return;
       }
       if (t.closest("[data-action=\"close-announcement-list\"]")) {
         state.modalAnnouncementList = false;
+        state.announcementSelectedId = null;
         render();
         return;
       }
-      if (t.closest("[data-action=\"close-announcement\"]")) {
-        state.modalAnnouncement = null;
-        render();
+      if (t.closest("[data-action=\"toggle-sidebar\"]")) {
+        toggleSidebar();
         return;
       }
-      if (t.closest("[data-action=\"back-announcement-list\"]")) {
-        state.modalAnnouncement = null;
-        state.modalAnnouncementList = true;
-        render();
+      if (t.closest("[data-action=\"close-sidebar-overlay\"]")) {
+        closeSidebarOverlay();
+        return;
+      }
+      const sidebarFolder = t.closest("[data-sidebar-folder]");
+      if (sidebarFolder) {
+        const id = sidebarFolder.getAttribute("data-sidebar-folder");
+        if (id) {
+          clearSearchState();
+          setHashRoute({ view: "home", folder: id, root: "", fileId: "", t: "" });
+          closeSidebarOverlay();
+        }
+        return;
+      }
+      const sidebarHome = t.closest("[data-sidebar-home]");
+      if (sidebarHome) {
+        clearSearchState();
+        setHashRoute({ view: "home", folder: "", root: "1", fileId: "", t: "" });
+        closeSidebarOverlay();
         return;
       }
       if (t.closest("[data-action=\"close-sidebar\"]")) {
@@ -2722,8 +2905,8 @@ function appClickHandler(e) {
         return;
       }
       if (t.closest("[data-close-modal]") && !t.closest("[data-stop-modal]")) {
-        state.modalAnnouncement = null;
         state.modalAnnouncementList = false;
+        state.announcementSelectedId = null;
         state.modalSidebar = null;
         render();
         return;
@@ -2770,8 +2953,8 @@ async function bootstrapRoute() {
   syncRouteFromHash();
   state.sortMenuOpen = false;
   state.viewMenuOpen = false;
-  state.modalAnnouncement = null;
   state.modalAnnouncementList = false;
+  state.announcementSelectedId = null;
   state.modalSidebar = null;
   state.folderMarkdownExpanded = false;
   state.videoPlaybackStep = 0;
@@ -2980,11 +3163,13 @@ window.OpenShare = {
   },
 };
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   initMarkdownCodeCopyDelegation();
   loadPrefs();
   consumeApiFromQueryOnce();
   consumeApiFromHashQuery();
+  await autoDetectApi();
+  loadSidebarFolders();
   void bootstrapRoute();
 });
 
