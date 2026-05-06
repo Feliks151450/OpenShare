@@ -23,6 +23,7 @@ func buildRouteRepositories(db *gorm.DB) *routeRepositories {
 		adminDashboard:     repository.NewAdminDashboardRepository(db),
 		announcement:       repository.NewAnnouncementRepository(db),
 		feedback:           repository.NewFeedbackRepository(db),
+		fileTag:            repository.NewFileTagRepository(db),
 		imports:            repository.NewImportRepository(db),
 		moderation:         repository.NewModerationRepository(db),
 		operationLog:       repository.NewOperationLogRepository(db),
@@ -48,8 +49,9 @@ func buildRouteServices(
 	receiptCodeService := service.NewReceiptCodeService(repos.receiptCode, cfg.Upload.ReceiptCodeLength)
 	systemSettingService := service.NewSystemSettingService(repos.systemSetting, cfg)
 	adminAuthService := service.NewAdminAuthService(db, repos.admin, sessionManager)
-	publicDownloadService := service.NewPublicDownloadService(repos.publicDownload, storageService)
-	searchService := service.NewSearchService(repos.search, publicDownloadService)
+	fileTagService := service.NewFileTagService(repos.fileTag, repos.resourceManagement)
+	publicDownloadService := service.NewPublicDownloadService(repos.publicDownload, storageService, fileTagService)
+	searchService := service.NewSearchService(repos.search, publicDownloadService, fileTagService)
 
 	return &routeServices{
 		adminAuth:          adminAuthService,
@@ -57,10 +59,11 @@ func buildRouteServices(
 		announcement:       service.NewAnnouncementService(repos.announcement, repos.admin),
 		adminManagement:    service.NewAdminManagementService(repos.admin),
 		feedback:           service.NewFeedbackService(repos.feedback, receiptCodeService),
+		fileTag:            fileTagService,
 		imports:            service.NewImportService(repos.imports, storageService),
 		moderation:         service.NewModerationService(repos.moderation, storageService),
 		operationLog:       service.NewOperationLogService(repos.operationLog),
-		publicCatalog:      service.NewPublicCatalogService(repos.publicCatalog, publicDownloadService),
+		publicCatalog:      service.NewPublicCatalogService(repos.publicCatalog, publicDownloadService, fileTagService),
 		publicDownload:     publicDownloadService,
 		publicReceipt:      receiptCodeService,
 		publicSubmission:   service.NewPublicSubmissionService(repos.publicSubmission),
@@ -79,6 +82,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		announcement:       handler.NewAnnouncementHandler(services.announcement),
 		adminManagement:    handler.NewAdminManagementHandler(services.adminManagement, services.adminAuth),
 		feedback:           handler.NewFeedbackHandler(services.feedback),
+		fileTag:            handler.NewFileTagHandler(services.fileTag),
 		imports:            handler.NewImportHandler(services.imports, services.adminAuth),
 		moderation:         handler.NewModerationHandler(services.moderation),
 		operationLog:       handler.NewOperationLogHandler(services.operationLog),

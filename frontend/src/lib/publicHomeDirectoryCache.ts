@@ -1,4 +1,6 @@
 /** 公开首页目录 API 响应形状（与 Home.vue 一致） */
+import type { PublicFileTag } from "./publicFileTags";
+
 export interface PublicFolderItem {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export interface PublicFileItem {
   uploaded_at: string;
   download_count: number;
   size: number;
+  tags?: PublicFileTag[];
 }
 
 export interface FolderDetailResponse {

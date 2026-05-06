@@ -12,6 +12,7 @@ type routeHandlers struct {
 	announcement       *handler.AnnouncementHandler
 	adminManagement    *handler.AdminManagementHandler
 	feedback           *handler.FeedbackHandler
+	fileTag            *handler.FileTagHandler
 	imports            *handler.ImportHandler
 	moderation         *handler.ModerationHandler
 	operationLog       *handler.OperationLogHandler
@@ -31,6 +32,7 @@ type routeRepositories struct {
 	adminDashboard     *repository.AdminDashboardRepository
 	announcement       *repository.AnnouncementRepository
 	feedback           *repository.FeedbackRepository
+	fileTag            *repository.FileTagRepository
 	imports            *repository.ImportRepository
 	moderation         *repository.ModerationRepository
 	operationLog       *repository.OperationLogRepository
@@ -51,6 +53,7 @@ type routeServices struct {
 	announcement       *service.AnnouncementService
 	adminManagement    *service.AdminManagementService
 	feedback           *service.FeedbackService
+	fileTag            *service.FileTagService
 	imports            *service.ImportService
 	moderation         *service.ModerationService
 	operationLog       *service.OperationLogService

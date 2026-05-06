@@ -23,6 +23,7 @@ import {
   NotebookText,
   PanelRightOpen,
   Plus,
+  Check,
   Upload,
 } from "lucide-vue-next";
 
@@ -59,6 +60,8 @@ import {
   type PublicFileItem,
   type PublicFolderItem,
 } from "../../lib/publicHomeDirectoryCache";
+import FileTagChips from "../../components/public/FileTagChips.vue";
+import type { PublicFileTag } from "../../lib/publicFileTags";
 
 interface AnnouncementItem {
   id: string;
@@ -115,6 +118,7 @@ interface SearchResultResponse {
     download_count?: number;
     uploaded_at?: string;
     updated_at?: string;
+    tags?: PublicFileTag[];
   }>;
   page: number;
   page_size: number;
@@ -173,6 +177,8 @@ let markdownCatalogNavigateHydrateGeneration = 0;
 const viewMode = ref<"cards" | "table">("cards");
 const sortMode = ref<"name" | "download" | "format" | "modified">("name");
 const sortDirection = ref<"asc" | "desc">("desc");
+/** 卡片视图：先按是否有封面分组，组内仍沿用当前排序方式 */
+const cardCoverFirst = ref(true);
 const sortMenuOpen = ref(false);
 const viewMenuOpen = ref(false);
 const toolbarDropdownsRef = ref<HTMLElement | null>(null);
@@ -325,6 +331,8 @@ type DirectoryRow = {
   downloadURL: string;
   /** 解析继承后是否允许下载（列表/搜索行内） */
   downloadAllowed: boolean;
+  /** 仅 kind === 'file' 时有意义；文件夹固定为空数组 */
+  tags: PublicFileTag[];
 };
 
 const rows = computed<DirectoryRow[]>(() => [
@@ -346,6 +354,7 @@ const rows = computed<DirectoryRow[]>(() => [
       sortTimeMs: parseSortTimeMs(folder.updated_at),
       downloadURL: `/api/public/folders/${encodeURIComponent(folder.id)}/download`,
       downloadAllowed: folder.download_allowed !== false,
+      tags: [],
     };
   }),
   ...(currentFolderID.value
@@ -367,6 +376,7 @@ const rows = computed<DirectoryRow[]>(() => [
           sortTimeMs: parseSortTimeMs(file.uploaded_at),
           downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
           downloadAllowed: file.download_allowed !== false,
+          tags: file.tags ?? [],
         };
       })
     : []),
@@ -377,6 +387,31 @@ const sortedRows = computed(() => {
   const next = [...displayedRows.value];
   next.sort((left, right) => compareRows(left, right, sortMode.value, sortDirection.value));
   return next;
+});
+
+type CardDisplayBlock = { key: string; rows: DirectoryRow[] };
+
+const cardDisplayBlocks = computed((): CardDisplayBlock[] => {
+  if (!cardCoverFirst.value) {
+    return [{ key: "all", rows: sortedRows.value }];
+  }
+  const mode = sortMode.value;
+  const direction = sortDirection.value;
+  const sortChunk = (list: DirectoryRow[]) => {
+    const next = [...list];
+    next.sort((left, right) => compareRows(left, right, mode, direction));
+    return next;
+  };
+  const withCover = sortChunk(displayedRows.value.filter((r) => !!r.coverUrl));
+  const withoutCover = sortChunk(displayedRows.value.filter((r) => !r.coverUrl));
+  const blocks: CardDisplayBlock[] = [];
+  if (withCover.length) {
+    blocks.push({ key: "with-cover", rows: withCover });
+  }
+  if (withoutCover.length) {
+    blocks.push({ key: "without-cover", rows: withoutCover });
+  }
+  return blocks.length ? blocks : [{ key: "all", rows: sortedRows.value }];
 });
 const selectedRows = computed(() => sortedRows.value.filter((row) => selectedResourceKeys.value.includes(selectionKey(row))));
 const hasSelectedRows = computed(() => selectedRows.value.length > 0);
@@ -887,6 +922,12 @@ onMounted(async () => {
   if (storedSortDirection === "asc" || storedSortDirection === "desc") {
     sortDirection.value = storedSortDirection;
   }
+  const storedCardCoverFirst = window.localStorage.getItem("public-home-card-cover-first");
+  if (storedCardCoverFirst === "0" || storedCardCoverFirst === "false") {
+    cardCoverFirst.value = false;
+  } else if (storedCardCoverFirst === "1" || storedCardCoverFirst === "true") {
+    cardCoverFirst.value = true;
+  }
   currentReceiptCode.value = await syncSessionReceiptCode();
   await Promise.all([
     loadAnnouncements(),
@@ -1371,6 +1412,7 @@ function downloadCurrentFolder() {
     sortTimeMs: parseSortTimeMs(currentFolderDetail.value.updated_at),
     downloadURL: `/api/public/folders/${encodeURIComponent(currentFolderDetail.value.id)}/download`,
     downloadAllowed: true,
+    tags: [],
   });
 }
 
@@ -1480,6 +1522,7 @@ async function runSearch(keyword: string) {
           ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
           : `/api/public/folders/${encodeURIComponent(item.id)}/download`,
         downloadAllowed: item.download_allowed !== false,
+        tags: item.entity_type === "file" ? (item.tags ?? []) : [],
       };
     });
   } catch (err: unknown) {
@@ -1682,6 +1725,11 @@ function setViewMode(mode: "cards" | "table") {
   viewMode.value = mode;
   viewMenuOpen.value = false;
   window.localStorage.setItem("public-home-view-mode", mode);
+}
+
+function toggleCardCoverFirst() {
+  cardCoverFirst.value = !cardCoverFirst.value;
+  window.localStorage.setItem("public-home-card-cover-first", cardCoverFirst.value ? "1" : "0");
 }
 
 watch(sortedRows, (rows) => {
@@ -2318,7 +2366,7 @@ async function syncSessionReceiptCode() {
                   {{ viewModeLabel(viewMode) }}
                   <ChevronRight class="h-4 w-4 rotate-90" />
                 </button>
-                <div v-if="viewMenuOpen" class="absolute left-0 top-full z-20 mt-2 min-w-[124px] rounded-2xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div v-if="viewMenuOpen" class="absolute left-0 top-full z-20 mt-2 min-w-[200px] rounded-2xl border border-slate-200 bg-white p-1 shadow-lg">
                   <button
                     type="button"
                     class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition"
@@ -2337,6 +2385,16 @@ async function syncSessionReceiptCode() {
                     <List class="h-4 w-4" />
                     表格
                   </button>
+                  <div class="mx-2 my-1 border-t border-slate-100"></div>
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition"
+                    :class="cardCoverFirst ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
+                    @click="toggleCardCoverFirst"
+                  >
+                    <span class="flex-1">封面卡片优先</span>
+                    <Check v-if="cardCoverFirst" class="h-4 w-4 shrink-0 text-slate-700" />
+                  </button>
                 </div>
               </div>
               </div>
@@ -2353,10 +2411,12 @@ async function syncSessionReceiptCode() {
           </div>
           <div
             v-else-if="viewMode === 'cards'"
-            class="public-home-card-grid gap-4 px-4 py-3 sm:px-5 md:gap-5"
+            class="space-y-8 px-4 py-3 sm:px-5"
           >
+            <div v-for="block in cardDisplayBlocks" :key="block.key">
+              <div class="public-home-card-grid gap-4 md:gap-5">
             <article
-              v-for="row in sortedRows"
+              v-for="row in block.rows"
               :key="`${row.kind}-${row.id}`"
               class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm"
               :class="row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5'"
@@ -2383,7 +2443,7 @@ async function syncSessionReceiptCode() {
                     />
                   </div>
                 </div>
-                <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
+                <div class="flex min-h-0 flex-1 flex-col px-2.5 pb-2.5 pt-3 sm:px-2.5">
                   <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{{ row.name }}</h3>
                   <p
                     v-if="row.kind === 'folder' && cardRemarkPreview(row.remark)"
@@ -2391,6 +2451,11 @@ async function syncSessionReceiptCode() {
                   >
                     {{ cardRemarkPreview(row.remark) }}
                   </p>
+                  <FileTagChips
+                    v-if="row.kind === 'file' && row.tags.length > 0"
+                    :tags="row.tags"
+                    class="mt-2"
+                  />
                   <div
                     class="mt-3 flex w-full min-w-0 text-xs"
                     :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"
@@ -2491,6 +2556,11 @@ async function syncSessionReceiptCode() {
                     >
                       {{ cardRemarkPreview(row.remark) }}
                     </p>
+                    <FileTagChips
+                      v-if="row.kind === 'file' && row.tags.length > 0"
+                      :tags="row.tags"
+                      class="mt-2"
+                    />
                   </div>
                 </div>
 
@@ -2555,6 +2625,8 @@ async function syncSessionReceiptCode() {
                 </div>
               </template>
             </article>
+              </div>
+            </div>
           </div>
           <div v-else class="px-4 py-5 sm:px-6">
             <table class="data-table table-fixed">
@@ -2628,6 +2700,12 @@ async function syncSessionReceiptCode() {
                         >
                           {{ cardRemarkPreview(row.remark) }}
                         </p>
+                        <FileTagChips
+                          v-if="row.tags.length > 0"
+                          :tags="row.tags"
+                          class="mt-1.5"
+                          size="sm"
+                        />
                       </div>
                     </div>
                   </td>

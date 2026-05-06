@@ -15,7 +15,7 @@ mkdir -p "$LOG_DIR"
 
 # 检测端口占用
 if ss -tlnp 2>/dev/null | grep -q ":${BACKEND_PORT} "; then
-  echo "错误: 后端端口 ${BACKEND_PORT} 已被占用，请先释放该端口"
+  echo "错误: 后端端口 ${BACKEND_PORT} 已被占用，请先释放该端口: sudo lsof -i :8080"
   exit 1
 fi
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
-import { LayoutDashboard, Inbox, Megaphone, ScrollText, Shield, UserRound } from "lucide-vue-next";
+import { LayoutDashboard, Inbox, Megaphone, ScrollText, Shield, UserRound, Database } from "lucide-vue-next";
 
 import AdminSidebar, { type AdminSidebarItem } from "../components/admin/AdminSidebar.vue";
 import { HttpError, httpClient } from "../lib/http/client";
@@ -37,6 +37,7 @@ const navItems = computed<AdminSidebarItem[]>(() => [
   { to: "/admin", label: "控制台", icon: LayoutDashboard },
   { to: "/admin/audit", label: "审核", icon: Inbox, hasAlert: pendingAuditCount.value > 0 },
   ...(sessionStore.hasPermission("announcements") ? [{ to: "/admin/announcements", label: "公告", icon: Megaphone }] : []),
+  ...(sessionStore.hasPermission("resource_moderation") ? [{ to: "/admin/file-tags", label: "文件标签", icon: Database }] : []),
   { to: "/admin/logs", label: "操作记录", icon: ScrollText },
   { to: "/admin/permissions", label: "权限管理", icon: Shield },
 ]);

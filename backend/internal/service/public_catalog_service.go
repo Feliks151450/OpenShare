@@ -25,6 +25,7 @@ const (
 type PublicCatalogService struct {
 	repository *repository.PublicCatalogRepository
 	download   *PublicDownloadService
+	fileTags   *FileTagService
 }
 
 type PublicFolderFileListInput struct {
@@ -58,6 +59,7 @@ type PublicFileItem struct {
 	UploadedAt              time.Time `json:"uploaded_at"`
 	DownloadCount           int64     `json:"download_count"`
 	Size                    int64     `json:"size"`
+	Tags                    []PublicFileTag `json:"tags"`
 }
 
 type PublicFolderItem struct {
@@ -97,8 +99,12 @@ type PublicFolderDetail struct {
 	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
 }
 
-func NewPublicCatalogService(repository *repository.PublicCatalogRepository, download *PublicDownloadService) *PublicCatalogService {
-	return &PublicCatalogService{repository: repository, download: download}
+func NewPublicCatalogService(
+	repository *repository.PublicCatalogRepository,
+	download *PublicDownloadService,
+	fileTags *FileTagService,
+) *PublicCatalogService {
+	return &PublicCatalogService{repository: repository, download: download, fileTags: fileTags}
 }
 
 func (s *PublicCatalogService) ListPublicFolderFiles(ctx context.Context, input PublicFolderFileListInput) (*PublicFolderFileListResult, error) {
@@ -367,6 +373,18 @@ func (s *PublicCatalogService) listManagedFileFeed(ctx context.Context, limit in
 }
 
 func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []model.File) ([]PublicFileItem, error) {
+	fileIDs := make([]string, 0, len(files))
+	for _, file := range files {
+		fileIDs = append(fileIDs, file.ID)
+	}
+	tagMap := map[string][]PublicFileTag{}
+	if s.fileTags != nil && len(fileIDs) > 0 {
+		m, err := s.fileTags.MapTagsByFileIDs(ctx, fileIDs)
+		if err != nil {
+			return nil, err
+		}
+		tagMap = m
+	}
 	items := make([]PublicFileItem, 0, len(files))
 	for _, file := range files {
 		fd := ""
@@ -382,6 +400,10 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 				return nil, err
 			}
 		}
+		tags := tagMap[file.ID]
+		if tags == nil {
+			tags = []PublicFileTag{}
+		}
 		items = append(items, PublicFileItem{
 			ID:                      file.ID,
 			Name:                    file.Name,
@@ -395,6 +417,7 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			UploadedAt:              file.CreatedAt,
 			DownloadCount:           file.DownloadCount,
 			Size:                    file.Size,
+			Tags:                    tags,
 		})
 	}
 	return items, nil

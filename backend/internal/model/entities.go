@@ -120,6 +120,22 @@ type File struct {
 	Folder *Folder `gorm:"foreignKey:FolderID"`
 }
 
+// FileTag 为全站共享的预设标签（名称唯一），每件资料可挂多个标签。
+type FileTag struct {
+	ID        EntityID `gorm:"column:id;type:text;primaryKey"`
+	Name      string   `gorm:"column:name;type:text;not null;uniqueIndex:ux_file_tags_name"`
+	Color     string   `gorm:"column:color;type:text;not null;default:'#64748b'"`
+	SortOrder int      `gorm:"column:sort_order;type:integer;not null;default:0;index:idx_file_tags_sort_order"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// FileTagAssignment 文件与预设标签的多对多关联。
+type FileTagAssignment struct {
+	FileID EntityID `gorm:"column:file_id;type:text;primaryKey;index:idx_file_tag_assignments_file_id"`
+	TagID  EntityID `gorm:"column:tag_id;type:text;primaryKey;index:idx_file_tag_assignments_tag_id"`
+}
+
 // Submission tracks an upload request from staging through moderation.
 type Submission struct {
 	ID           EntityID         `gorm:"column:id;type:text;primaryKey"`

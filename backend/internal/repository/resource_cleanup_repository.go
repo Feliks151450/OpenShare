@@ -10,6 +10,9 @@ import (
 
 func detachDeletedResourcesTx(tx *gorm.DB, fileIDs []string, folderIDs []string) error {
 	if len(fileIDs) > 0 {
+		if err := tx.Where("file_id IN ?", fileIDs).Delete(&model.FileTagAssignment{}).Error; err != nil {
+			return fmt.Errorf("delete file tag assignments: %w", err)
+		}
 		if err := tx.Model(&model.Submission{}).
 			Where("file_id IN ?", fileIDs).
 			Update("file_id", nil).Error; err != nil {

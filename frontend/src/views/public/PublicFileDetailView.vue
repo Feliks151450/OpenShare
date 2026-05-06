@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
   ChevronDown,
-  ChevronLeft,
   Clock,
   Database,
   Download,
@@ -19,7 +18,9 @@ import {
   Share2,
 } from "lucide-vue-next";
 
-import SurfaceCard from "../../components/ui/SurfaceCard.vue";
+import type { FileTagDefinition, PublicFileTag } from "../../lib/publicFileTags";
+import { fetchPublicFileTagDefinitions, readableTextColorForPreset } from "../../lib/publicFileTags";
+import FileTagChips from "../../components/public/FileTagChips.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
@@ -89,6 +90,7 @@ interface FileDetailResponse {
   size: number;
   uploaded_at: string;
   download_count: number;
+  tags?: PublicFileTag[];
 }
 
 const route = useRoute();
@@ -117,6 +119,12 @@ const editPlaybackFallbackUrl = ref("");
 const editCoverUrl = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
+const tagEditorOpen = ref(false);
+const tagCatalog = ref<FileTagDefinition[]>([]);
+const tagEditorSelected = ref<string[]>([]);
+const tagEditorLoading = ref(false);
+const tagEditorSaving = ref(false);
+const tagEditorError = ref("");
 const canManageResourceDescriptions = ref(false);
 const deleteDialogOpen = ref(false);
 const deletePassword = ref("");
@@ -1220,6 +1228,60 @@ function closeDescriptionEditor() {
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
 }
 
+async function openTagEditor() {
+  if (!detail.value) {
+    return;
+  }
+  tagEditorError.value = "";
+  tagEditorOpen.value = true;
+  tagEditorLoading.value = true;
+  tagEditorSelected.value = (detail.value.tags ?? []).map((t) => t.id);
+  try {
+    tagCatalog.value = await fetchPublicFileTagDefinitions();
+  } catch {
+    tagEditorError.value = "加载标签列表失败。";
+    tagCatalog.value = [];
+  } finally {
+    tagEditorLoading.value = false;
+  }
+}
+
+function closeTagEditor() {
+  tagEditorOpen.value = false;
+  tagEditorError.value = "";
+}
+
+function toggleTagSelection(tagId: string) {
+  const s = new Set(tagEditorSelected.value);
+  if (s.has(tagId)) {
+    s.delete(tagId);
+  } else {
+    s.add(tagId);
+  }
+  tagEditorSelected.value = [...s];
+}
+
+async function saveFileTags() {
+  if (!detail.value) {
+    return;
+  }
+  tagEditorSaving.value = true;
+  tagEditorError.value = "";
+  try {
+    await httpClient.request(`/admin/resources/files/${encodeURIComponent(detail.value.id)}/tags`, {
+      method: "PUT",
+      body: { tag_ids: tagEditorSelected.value },
+    });
+    message.value = "标签已更新。";
+    await loadDetail();
+    closeTagEditor();
+  } catch (err: unknown) {
+    tagEditorError.value = readApiError(err, "保存标签失败。");
+  } finally {
+    tagEditorSaving.value = false;
+  }
+}
+
 function openDeleteDialog() {
   deletePassword.value = "";
   deleteError.value = "";
@@ -1572,6 +1634,12 @@ function performDownloadFile() {
                   >
                     <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
                   </p>
+                  <FileTagChips
+                    v-if="(detail.tags?.length ?? 0) > 0"
+                    :tags="detail.tags ?? []"
+                    class="mt-3"
+                    size="md"
+                  />
                 </div>
                 <div class="w-full min-w-0">
                   <div
@@ -1603,6 +1671,14 @@ function performDownloadFile() {
                     @click="openDescriptionEditor"
                   >
                     编辑
+                  </button>
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary shrink-0 whitespace-nowrap"
+                    @click="openTagEditor"
+                  >
+                    标签
                   </button>
                   <button
                     v-if="canManageResourceDescriptions"
@@ -2399,6 +2475,67 @@ function performDownloadFile() {
           </div>
         </div>
       </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="modal-shell">
+        <div
+          v-if="tagEditorOpen"
+          class="fixed inset-0 z-[121] overflow-y-auto bg-slate-950/40 backdrop-blur-sm"
+        >
+          <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+            <div
+              class="modal-card panel relative my-auto flex w-full max-w-lg flex-col overflow-hidden p-6"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="tag-editor-title"
+            >
+              <h3 id="tag-editor-title" class="text-lg font-semibold text-slate-900">文件标签</h3>
+              <div class="mt-4 min-h-[8rem]">
+                <p v-if="tagEditorLoading" class="text-sm text-slate-500">加载中…</p>
+                <p v-else-if="tagCatalog.length === 0 && !tagEditorError" class="text-sm text-slate-500">
+                  暂无预设标签。请先在管理后台「文件标签」中添加。
+                </p>
+                <ul v-else class="max-h-[min(50vh,20rem)] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                  <li v-for="t in tagCatalog" :key="t.id">
+                    <label
+                      class="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-slate-300"
+                        :checked="tagEditorSelected.includes(t.id)"
+                        @change="toggleTagSelection(t.id)"
+                      />
+                      <span
+                        class="inline-flex max-w-full items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-black/10"
+                        :style="{
+                          backgroundColor: t.color,
+                          color: readableTextColorForPreset(t.color),
+                        }"
+                      >{{ t.name }}</span>
+                    </label>
+                  </li>
+                </ul>
+              </div>
+              <p v-if="tagEditorError" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {{ tagEditorError }}
+              </p>
+              <div class="mt-6 flex flex-wrap justify-end gap-3">
+                <button type="button" class="btn-secondary" @click="closeTagEditor">取消</button>
+                <button
+                  type="button"
+                  class="btn-primary"
+                  :disabled="tagEditorSaving || tagEditorLoading"
+                  @click="saveFileTags"
+                >
+                  {{ tagEditorSaving ? "保存中…" : "保存" }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </Transition>
     </Teleport>
 

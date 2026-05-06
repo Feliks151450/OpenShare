@@ -27,6 +27,7 @@ var (
 type PublicDownloadService struct {
 	repository *repository.PublicDownloadRepository
 	storage    *storage.Service
+	fileTags   *FileTagService
 }
 
 type DownloadableFile struct {
@@ -61,6 +62,7 @@ type PublicFileDetail struct {
 	Size           int64     `json:"size"`
 	UploadedAt     time.Time `json:"uploaded_at"`
 	DownloadCount  int64     `json:"download_count"`
+	Tags           []PublicFileTag `json:"tags"`
 }
 
 type BatchDownloadFile struct {
@@ -76,10 +78,15 @@ type FolderDownload struct {
 	Items      []BatchDownloadFile
 }
 
-func NewPublicDownloadService(repository *repository.PublicDownloadRepository, storageService *storage.Service) *PublicDownloadService {
+func NewPublicDownloadService(
+	repository *repository.PublicDownloadRepository,
+	storageService *storage.Service,
+	fileTags *FileTagService,
+) *PublicDownloadService {
 	return &PublicDownloadService{
 		repository: repository,
 		storage:    storageService,
+		fileTags:   fileTags,
 	}
 }
 
@@ -259,6 +266,13 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		return nil, fmt.Errorf("resolve download policy: %w", err)
 	}
 
+	tags := []PublicFileTag{}
+	if s.fileTags != nil {
+		if loaded, err := s.fileTags.ListTagsForFile(ctx, file.ID); err == nil {
+			tags = loaded
+		}
+	}
+
 	return &PublicFileDetail{
 		ID:                      file.ID,
 		Name:                    file.Name,
@@ -278,6 +292,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		Size:                    file.Size,
 		UploadedAt:              file.CreatedAt,
 		DownloadCount:           file.DownloadCount,
+		Tags:                    tags,
 	}, nil
 }
 

@@ -43,12 +43,14 @@ const (
 type SearchService struct {
 	searchRepo *repository.SearchRepository
 	download   *PublicDownloadService
+	fileTags   *FileTagService
 }
 
-func NewSearchService(searchRepo *repository.SearchRepository, download *PublicDownloadService) *SearchService {
+func NewSearchService(searchRepo *repository.SearchRepository, download *PublicDownloadService, fileTags *FileTagService) *SearchService {
 	return &SearchService{
 		searchRepo: searchRepo,
 		download:   download,
+		fileTags:   fileTags,
 	}
 }
 
@@ -74,19 +76,20 @@ type SearchResult struct {
 
 // SearchResultItem represents a single file or folder in the search results.
 type SearchResultItem struct {
-	EntityType    string     `json:"entity_type"` // "file" | "folder"
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Remark        string     `json:"remark,omitempty"`
-	Extension     string     `json:"extension,omitempty"`
-	CoverURL      string     `json:"cover_url,omitempty"`
-	PlaybackURL   string     `json:"playback_url,omitempty"`
+	EntityType    string        `json:"entity_type"` // "file" | "folder"
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	Remark        string        `json:"remark,omitempty"`
+	Extension     string        `json:"extension,omitempty"`
+	CoverURL      string        `json:"cover_url,omitempty"`
+	PlaybackURL   string        `json:"playback_url,omitempty"`
 	FolderDirectDownloadURL string `json:"folder_direct_download_url,omitempty"`
-	DownloadAllowed bool     `json:"download_allowed"`
-	Size          int64      `json:"size,omitempty"`
-	DownloadCount int64      `json:"download_count,omitempty"`
-	UploadedAt *time.Time `json:"uploaded_at,omitempty"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
+	DownloadAllowed bool        `json:"download_allowed"`
+	Size          int64         `json:"size,omitempty"`
+	DownloadCount int64         `json:"download_count,omitempty"`
+	UploadedAt *time.Time       `json:"uploaded_at,omitempty"`
+	UpdatedAt  *time.Time       `json:"updated_at,omitempty"`
+	Tags          []PublicFileTag `json:"tags,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +170,8 @@ func (s *SearchService) Search(ctx context.Context, input SearchInput) (*SearchR
 		}
 		items = append(items, row)
 	}
+
+	s.attachFileTagsToSearchItems(ctx, items)
 
 	return &SearchResult{
 		Items:    items,
@@ -416,6 +421,32 @@ func downloadCountBias(downloadCount int64) int {
 		return int(downloadCount)
 	default:
 		return 0
+	}
+}
+
+func (s *SearchService) attachFileTagsToSearchItems(ctx context.Context, items []SearchResultItem) {
+	if s.fileTags == nil || len(items) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.EntityType == "file" {
+			ids = append(ids, it.ID)
+		}
+	}
+	m, err := s.fileTags.MapTagsByFileIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		if items[i].EntityType != "file" {
+			continue
+		}
+		t := m[items[i].ID]
+		if t == nil {
+			t = []PublicFileTag{}
+		}
+		items[i].Tags = t
 	}
 }
 

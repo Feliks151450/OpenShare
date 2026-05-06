@@ -31,6 +31,7 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.GET("/download-policy", handlers.systemSetting.GetPublicDownloadPolicy)
 	public.GET("/receipt-code", handlers.publicReceipt.Ensure)
 	public.GET("/search", handlers.search.Search)
+	public.GET("/file-tags", handlers.fileTag.ListPublicDefinitions)
 	public.POST("/feedback", handlers.feedback.Create)
 	public.GET("/feedback/:receiptCode", handlers.feedback.LookupByReceiptCode)
 	public.POST("/submissions", handlers.publicUpload.CreateSubmission)
@@ -142,6 +143,31 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		"/resources/folders/:folderID/catalog-visibility",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		patchCatalogVisibility,
+	)
+	adminProtected.PUT(
+		"/resources/files/:fileID/tags",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.fileTag.AdminReplaceFileTags,
+	)
+	adminProtected.GET(
+		"/file-tags",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.fileTag.ListPublicDefinitions,
+	)
+	adminProtected.POST(
+		"/file-tags",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.fileTag.AdminCreateTag,
+	)
+	adminProtected.PATCH(
+		"/file-tags/:tagID",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.fileTag.AdminUpdateTag,
+	)
+	adminProtected.DELETE(
+		"/file-tags/:tagID",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.fileTag.AdminDeleteTag,
 	)
 	adminProtected.PUT(
 		"/resources/files/:fileID",
