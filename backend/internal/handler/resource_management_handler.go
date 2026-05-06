@@ -29,6 +29,7 @@ type updateManagedFolderDescriptionRequest struct {
 	Name             string  `json:"name"`
 	Description      string  `json:"description"`
 	Remark           string  `json:"remark"`
+	CoverURL         string  `json:"cover_url"`
 	DirectLinkPrefix string  `json:"direct_link_prefix"`
 	DownloadPolicy   *string `json:"download_policy"`
 }
@@ -114,6 +115,7 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 		Name:             req.Name,
 		Description:      req.Description,
 		Remark:           req.Remark,
+		CoverURL:         req.CoverURL,
 		DirectLinkPrefix: req.DirectLinkPrefix,
 		DownloadPolicy:   req.DownloadPolicy,
 		OperatorID:       identity.AdminID,

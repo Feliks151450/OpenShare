@@ -30,7 +30,7 @@ import {
   withBackendDownloadInlinePreviewParam,
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
-import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
+import { renderSimpleMarkdown } from "../../lib/markdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -1022,9 +1022,6 @@ async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
 
 const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
 /** 详情页顶部封面：优先 cover_url，否则简介内 ![cover](...) */
-const detailCoverImageHref = computed(() =>
-  detail.value ? fileCoverImageHrefFromFields(detail.value.cover_url, detail.value.description ?? "") : null,
-);
 const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 /** 资料目录面包屑（与返回文件夹同目标）；提至标题区展示，避免淹没在「文件信息」里 */
 const detailFolderPathLabel = computed(() => (detail.value?.path || "主页根目录").trim() || "主页根目录");
@@ -1702,18 +1699,6 @@ function performDownloadFile() {
                 class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
               >
                 <div
-                  v-if="detailCoverImageHref && previewVisualKind !== 'image'"
-                  class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
-                >
-                  <img
-                    :src="detailCoverImageHref"
-                    alt=""
-                    class="max-h-72 w-full object-cover"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                <div
                   v-if="descriptionHTML"
                   class="markdown-content"
                   v-html="descriptionHTML"
@@ -2121,18 +2106,6 @@ function performDownloadFile() {
               v-if="!showFileDescriptionAbovePreview"
               class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
-              <div
-                v-if="detailCoverImageHref && !isVideo && previewVisualKind !== 'image'"
-                class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"
-              >
-                <img
-                  :src="detailCoverImageHref"
-                  alt=""
-                  class="max-h-72 w-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </div>
               <div
                 v-if="descriptionHTML"
                 class="markdown-content"

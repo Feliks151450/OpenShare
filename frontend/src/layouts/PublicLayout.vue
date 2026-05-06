@@ -18,8 +18,8 @@ const showPublicNavbar = computed(() => route.name !== "public-file-detail");
 const showSidebar = computed(() => showPublicNavbar.value);
 
 const mainMarginClass = computed(() => {
-  if (!showSidebar.value) return "";
-  return sidebarExpanded.value ? "xl:ml-56" : "xl:ml-11";
+  if (!showSidebar.value || !sidebarExpanded.value) return "";
+  return "xl:ml-56";
 });
 
 const viewKey = computed(() => {

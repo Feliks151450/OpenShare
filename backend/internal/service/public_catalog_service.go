@@ -65,6 +65,7 @@ type PublicFolderItem struct {
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
 	Remark          string    `json:"remark"`
+	CoverURL        string    `json:"cover_url"`
 	DownloadAllowed bool      `json:"download_allowed"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	FileCount       int64     `json:"file_count"`
@@ -82,6 +83,7 @@ type PublicFolderDetail struct {
 	Name             string                       `json:"name"`
 	Description      string                       `json:"description"`
 	Remark           string                       `json:"remark"`
+	CoverURL         string                       `json:"cover_url"`
 	ParentID         *string                      `json:"parent_id"`
 	Breadcrumbs      []PublicFolderBreadcrumbItem `json:"breadcrumbs"`
 	FileCount        int64                        `json:"file_count"`
@@ -204,6 +206,7 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 			Name:            row.Name,
 			Description:     row.Description,
 			Remark:          row.Remark,
+			CoverURL:        strings.TrimSpace(row.CoverURL),
 			DownloadAllowed: allowed,
 			UpdatedAt:       row.UpdatedAt,
 			FileCount:       row.FileCount,
@@ -264,6 +267,7 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		Name:             current.Name,
 		Description:      current.Description,
 		Remark:           current.Remark,
+		CoverURL:         strings.TrimSpace(current.CoverURL),
 		ParentID:         current.ParentID,
 		Breadcrumbs:      breadcrumbs,
 		FileCount:        current.FileCount,

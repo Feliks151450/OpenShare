@@ -4,6 +4,7 @@ export interface PublicFolderItem {
   name: string;
   description?: string;
   remark?: string;
+  cover_url?: string;
   download_allowed?: boolean;
   updated_at: string;
   file_count: number;
@@ -31,6 +32,7 @@ export interface FolderDetailResponse {
   name: string;
   description: string;
   remark?: string;
+  cover_url?: string;
   parent_id: string | null;
   file_count: number;
   download_count: number;

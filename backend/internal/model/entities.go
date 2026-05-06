@@ -77,6 +77,8 @@ type Folder struct {
 	Description string    `gorm:"column:description;type:text;not null;default:''"`
 	// Remark 单行展示用文案（卡片等）；与 Markdown 简介 description 分离
 	Remark string `gorm:"column:remark;type:text;not null;default:''"`
+	// CoverURL 封面图片地址，优先于简介中 ![cover](...) 语法
+	CoverURL string `gorm:"column:cover_url;type:text;not null;default:''"`
 	// DirectLinkPrefix 为 http(s) 根地址时，其下文件直链为该前缀 + 相对路径（相对最内层已配置前缀的祖先文件夹）
 	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
 	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。

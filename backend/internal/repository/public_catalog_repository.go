@@ -37,6 +37,7 @@ type PublicFolderRow struct {
 	Name          string
 	Description   string
 	Remark        string
+	CoverURL      string
 	AllowDownload *bool
 	UpdatedAt     time.Time
 	FileCount     int64
@@ -126,7 +127,7 @@ func (r *PublicCatalogRepository) FolderExists(ctx context.Context, folderID str
 func (r *PublicCatalogRepository) ListPublicFolders(ctx context.Context, parentID *string) ([]PublicFolderRow, error) {
 	query := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, description, remark, allow_download, updated_at, file_count, download_count, total_size")
+		Select("id, parent_id, name, description, remark, cover_url, allow_download, updated_at, file_count, download_count, total_size")
 
 	if parentID == nil {
 		query = query.Where("parent_id IS NULL AND hide_public_catalog = ?", false)

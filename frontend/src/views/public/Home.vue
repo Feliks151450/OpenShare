@@ -35,7 +35,6 @@ import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import {
-  coverImageHrefFromDescription,
   fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
 } from "../../lib/markdown";
@@ -234,6 +233,7 @@ const folderDescriptionDraft = ref("");
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
+const folderCoverUrlDraft = ref("");
 const folderHidePublicCatalogDraft = ref(false);
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
@@ -291,7 +291,7 @@ const rows = computed<DirectoryRow[]>(() => [
       extension: "",
       description: desc,
       remark: (folder.remark ?? "").trim(),
-      coverUrl: coverImageHrefFromDescription(desc),
+      coverUrl: fileCoverImageHrefFromFields((folder as any).cover_url, desc),
       downloadCount: folder.download_count ?? 0,
       fileCount: folder.file_count ?? 0,
       sizeBytes: folder.total_size ?? 0,
@@ -351,6 +351,14 @@ const downloadConfirmMessage = computed(() => {
 });
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
 const currentFolderDescriptionHTML = computed(() => renderSimpleMarkdown(currentFolderDetail.value?.description ?? ""));
+
+const useWideDescriptionLayout = computed(() => {
+  if (!currentFolderDetail.value) return false;
+  const desc = currentFolderDetail.value.description ?? "";
+  if (desc.trim().length > 300) return true;
+  if (/!\[.*?\]\(.*?\)/.test(desc)) return true;
+  return false;
+});
 
 /** 文件夹简介区域：默认限高，可展开全文（仅影响首页目录卡片，不作用于文件详情页）。 */
 const folderMarkdownExpanded = ref(false);
@@ -436,6 +444,7 @@ const folderEditorMetaDirty = computed(() => {
     folderNameDraft.value.trim() !== d.name ||
     folderDescriptionDraft.value.trim() !== (d.description ?? "") ||
     folderRemarkDraft.value.trim() !== (d.remark ?? "").trim() ||
+    folderCoverUrlDraft.value.trim() !== (d.cover_url ?? "").trim() ||
     folderDirectPrefixDraft.value.trim() !== (d.direct_link_prefix ?? "").trim() ||
     folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit")
   );
@@ -1039,6 +1048,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderNameDraft.value = detail.name;
     folderDescriptionDraft.value = detail.description ?? "";
     folderRemarkDraft.value = (detail.remark ?? "").trim();
+    folderCoverUrlDraft.value = (detail.cover_url ?? "").trim();
     folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
     folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
     breadcrumbs.value = detail.breadcrumbs ?? [];
@@ -1047,6 +1057,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderNameDraft.value = "";
     folderDescriptionDraft.value = "";
     folderRemarkDraft.value = "";
+    folderCoverUrlDraft.value = "";
     folderDirectPrefixDraft.value = "";
     folderDownloadPolicyDraft.value = "inherit";
     breadcrumbs.value = [];
@@ -1130,6 +1141,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderNameDraft.value = detail.name;
       folderDescriptionDraft.value = detail.description ?? "";
       folderRemarkDraft.value = (detail.remark ?? "").trim();
+      folderCoverUrlDraft.value = (detail.cover_url ?? "").trim();
       folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
       folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
       breadcrumbs.value = detail.breadcrumbs ?? [];
@@ -1138,6 +1150,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
       folderRemarkDraft.value = "";
+      folderCoverUrlDraft.value = "";
       folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       breadcrumbs.value = [];
@@ -1158,6 +1171,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
       folderRemarkDraft.value = "";
+      folderCoverUrlDraft.value = "";
       folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       if (err instanceof HttpError && err.status === 404) {
@@ -1278,7 +1292,7 @@ function downloadCurrentFolder() {
     extension: "",
     description: (currentFolderDetail.value.description ?? "").trim(),
     remark: (currentFolderDetail.value.remark ?? "").trim(),
-    coverUrl: coverImageHrefFromDescription((currentFolderDetail.value.description ?? "").trim()),
+    coverUrl: fileCoverImageHrefFromFields(currentFolderDetail.value.cover_url, (currentFolderDetail.value.description ?? "").trim()),
     downloadCount: currentFolderDetail.value.download_count ?? 0,
     fileCount: currentFolderDetail.value.file_count ?? 0,
     sizeBytes: currentFolderDetail.value.total_size ?? 0,
@@ -1385,7 +1399,7 @@ async function runSearch(keyword: string) {
         coverUrl:
           item.entity_type === "file"
             ? fileCoverImageHrefFromFields(item.cover_url, "")
-            : null,
+            : fileCoverImageHrefFromFields(item.cover_url, ""),
         downloadCount: item.download_count ?? 0,
         fileCount: 0,
         sizeBytes: item.entity_type === "file" ? (item.size ?? 0) : 0,
@@ -1672,6 +1686,7 @@ function openFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
+  folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
@@ -1687,6 +1702,7 @@ function closeFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
+  folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
@@ -1710,6 +1726,7 @@ async function saveFolderDescription() {
           name: folderNameDraft.value.trim(),
           description: folderDescriptionDraft.value.trim(),
           remark: folderRemarkDraft.value.trim(),
+          cover_url: folderCoverUrlDraft.value.trim(),
           direct_link_prefix: folderDirectPrefixDraft.value.trim(),
           download_policy: folderDownloadPolicyDraft.value,
         },
@@ -1730,6 +1747,7 @@ async function saveFolderDescription() {
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
       remark: folderRemarkDraft.value.trim(),
+      cover_url: folderCoverUrlDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
       hide_public_catalog: isRoot ? folderHidePublicCatalogDraft.value : d.hide_public_catalog,
@@ -2038,36 +2056,48 @@ async function syncSessionReceiptCode() {
                 </div>
               </div>
 
-              <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5 dark:border-slate-800 dark:bg-slate-900/40">
-                <div v-if="currentFolderDescriptionHTML" class="space-y-3">
-                  <div class="relative">
-                    <div
-                      ref="folderMarkdownClampRef"
-                      class="markdown-content"
-                      :class="!folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
-                      v-html="currentFolderDescriptionHTML"
-                      @click.capture="handleMarkdownInternalLinkNavigate"
-                    />
-                    <div
-                      v-if="!folderMarkdownExpanded && folderMarkdownFooterVisible"
-                      class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent dark:from-slate-900"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div v-if="folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
-                    <button
-                      type="button"
-                      class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:ring-white/[0.06] dark:hover:border-slate-500 dark:hover:bg-slate-800/90"
-                      @click="folderMarkdownExpanded = !folderMarkdownExpanded"
-                    >
-                      {{ folderMarkdownExpanded ? "收起简介" : "展开全文" }}
-                    </button>
+            </section>
+          </div>
+
+          <div :class="useWideDescriptionLayout ? 'xl:flex xl:gap-0 xl:px-6 xl:max-h-[calc(100vh-13rem)]' : ''">
+            <template v-if="currentFolderDetail">
+              <div
+                :class="useWideDescriptionLayout
+                  ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-r xl:border-slate-200 xl:pr-6 xl:py-5'
+                  : 'border-b border-slate-200 px-4 py-5 sm:px-6'"
+              >
+                <div v-if="currentFolderDescriptionHTML" class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5 dark:border-slate-800 dark:bg-slate-900/40">
+                  <div class="space-y-3">
+                    <div class="relative">
+                      <div
+                        ref="folderMarkdownClampRef"
+                        class="markdown-content"
+                        :class="!useWideDescriptionLayout && !folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                        v-html="currentFolderDescriptionHTML"
+                        @click.capture="handleMarkdownInternalLinkNavigate"
+                      />
+                      <div
+                        v-if="!useWideDescriptionLayout && !folderMarkdownExpanded && folderMarkdownFooterVisible"
+                        class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent dark:from-slate-900"
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div v-if="!useWideDescriptionLayout && folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
+                      <button
+                        type="button"
+                        class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:ring-white/[0.06] dark:hover:border-slate-500 dark:hover:bg-slate-800/90"
+                        @click="folderMarkdownExpanded = !folderMarkdownExpanded"
+                      >
+                        {{ folderMarkdownExpanded ? "收起简介" : "展开全文" }}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <p v-else class="text-sm text-slate-400">该文件夹暂无简介orz</p>
               </div>
-            </section>
-          </div>
+            </template>
+
+            <div :class="useWideDescriptionLayout ? 'xl:min-w-0 xl:flex-1 xl:overflow-y-auto xl:py-5' : ''">
 
           <div>
             <SearchSection
@@ -2262,12 +2292,6 @@ async function syncSessionReceiptCode() {
                     class="absolute inset-0 h-full w-full object-cover"
                     loading="lazy"
                   />
-                  <div
-                    v-if="row.kind === 'file'"
-                    class="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/90 bg-white/95 shadow-sm backdrop-blur-sm ring-1 ring-slate-200/75"
-                  >
-                    <component :is="fileIconComponent(row.extension)" class="h-5 w-5 shrink-0 text-slate-700" />
-                  </div>
                   <div
                     v-if="cardMultiSelectMode"
                     class="absolute right-3 top-3 z-10 rounded-lg bg-white/90 p-0.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm"
@@ -2536,6 +2560,8 @@ async function syncSessionReceiptCode() {
             </table>
           </div>
 
+        </div>
+          </div>
         </div>
       </section>
       </div>
@@ -3158,6 +3184,20 @@ async function syncSessionReceiptCode() {
                 placeholder="展示在首页卡片副标题，不支持换行与 Markdown"
                 autocomplete="off"
               />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">封面图地址（可选）</span>
+              <input
+                v-model="folderCoverUrlDraft"
+                type="url"
+                class="field"
+                placeholder="https://cdn.example.com/cover.jpg（留空则使用简介中 ![cover](...)）"
+                autocomplete="off"
+              />
+              <p class="text-xs leading-5 text-slate-500">
+                填写后优先作为首页列表与详情顶部封面；需以 http(s) 开头。清空并保存则回退到简介内封面语法。
+              </p>
             </label>
 
             <div

@@ -8,7 +8,21 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_CONFIG_LOCAL="$ROOT_DIR/backend/configs/config.local.json"
 
+BACKEND_PORT=8080
+FRONTEND_PORT=5173
+
 mkdir -p "$LOG_DIR"
+
+# 检测端口占用
+if ss -tlnp 2>/dev/null | grep -q ":${BACKEND_PORT} "; then
+  echo "错误: 后端端口 ${BACKEND_PORT} 已被占用，请先释放该端口"
+  exit 1
+fi
+
+if ss -tlnp 2>/dev/null | grep -q ":${FRONTEND_PORT} "; then
+  echo "错误: 前端端口 ${FRONTEND_PORT} 已被占用，请先释放该端口"
+  exit 1
+fi
 
 if [ ! -f "$BACKEND_CONFIG_LOCAL" ]; then
   echo "==> 创建本地配置"

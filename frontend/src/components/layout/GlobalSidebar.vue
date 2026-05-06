@@ -72,8 +72,8 @@ watch(() => route.name, (name) => {
     class="fixed bottom-0 left-0 top-16 z-[56] flex shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 dark:border-slate-800 dark:bg-slate-950 xl:z-50"
     :class="
       expanded
-        ? 'w-56 xl:w-56'
-        : '-translate-x-full xl:translate-x-0 xl:w-11'
+        ? 'w-56'
+        : '-translate-x-full'
     "
   >
     <!-- Home button -->

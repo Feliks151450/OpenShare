@@ -487,6 +487,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			ID:              candidate.ID,
 			Name:            candidate.Name,
 			Remark:          strings.TrimSpace(candidate.Remark),
+			CoverURL:        strings.TrimSpace(candidate.CoverURL),
 			DownloadAllowed: dl,
 			UpdatedAt:       &updatedAt,
 		}, nil

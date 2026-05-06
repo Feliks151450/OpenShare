@@ -53,6 +53,10 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 
 	description := strings.TrimSpace(input.Description)
 	remark := normalizeManagedRemark(input.Remark)
+	coverURL, err := normalizeOptionalHTTPURL(input.CoverURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
 	prefix, err := normalizeOptionalHTTPURL(input.DirectLinkPrefix)
 	if err != nil {
 		return ErrInvalidResourceEdit
@@ -64,7 +68,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 	}
 
 	if current.SourcePath == nil || strings.TrimSpace(*current.SourcePath) == "" || current.Name == name {
-		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, prefix, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, coverURL, prefix, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrManagedFolderNotFound
 			}
@@ -105,7 +109,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		folderSourcePaths[folder.ID] = filepath.Join(newRootPath, relative)
 	}
 
-	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, remark, prefix, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, remark, coverURL, prefix, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFolderNotFound
 		}

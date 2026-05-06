@@ -57,6 +57,7 @@ type UpdateManagedFolderDescriptionInput struct {
 	Name             string
 	Description      string
 	Remark           string
+	CoverURL         string
 	DirectLinkPrefix string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string
