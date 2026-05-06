@@ -360,6 +360,21 @@ const useWideDescriptionLayout = computed(() => {
   return false;
 });
 
+const isWideScreen = ref(false);
+let wideScreenQuery: MediaQueryList | null = null;
+function updateWideScreen() {
+  isWideScreen.value = wideScreenQuery?.matches ?? false;
+}
+onMounted(() => {
+  wideScreenQuery = window.matchMedia("(min-width: 1280px)");
+  updateWideScreen();
+  wideScreenQuery.addEventListener("change", updateWideScreen);
+});
+onBeforeUnmount(() => {
+  wideScreenQuery?.removeEventListener("change", updateWideScreen);
+  wideScreenQuery = null;
+});
+
 /** 文件夹简介区域：默认限高，可展开全文（仅影响首页目录卡片，不作用于文件详情页）。 */
 const folderMarkdownExpanded = ref(false);
 const folderMarkdownClampRef = ref<HTMLElement | null>(null);
@@ -425,6 +440,14 @@ watch(
   () => currentFolderID.value,
   () => {
     folderMarkdownExpanded.value = false;
+  },
+);
+watch(
+  () => useWideDescriptionLayout.value && isWideScreen.value,
+  (active) => {
+    if (active) {
+      folderMarkdownExpanded.value = true;
+    }
   },
 );
 function folderDetailIsManagingRoot(d: FolderDetailResponse | null) {
@@ -2072,17 +2095,17 @@ async function syncSessionReceiptCode() {
                       <div
                         ref="folderMarkdownClampRef"
                         class="markdown-content"
-                        :class="!useWideDescriptionLayout && !folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                        :class="!folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
                         v-html="currentFolderDescriptionHTML"
                         @click.capture="handleMarkdownInternalLinkNavigate"
                       />
                       <div
-                        v-if="!useWideDescriptionLayout && !folderMarkdownExpanded && folderMarkdownFooterVisible"
+                        v-if="!folderMarkdownExpanded && folderMarkdownFooterVisible"
                         class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent dark:from-slate-900"
                         aria-hidden="true"
                       />
                     </div>
-                    <div v-if="!useWideDescriptionLayout && folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
+                    <div v-if="folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
                       <button
                         type="button"
                         class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:ring-white/[0.06] dark:hover:border-slate-500 dark:hover:bg-slate-800/90"
