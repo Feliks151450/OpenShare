@@ -646,7 +646,7 @@ func (s *Service) ScanDirectory(rootPath string) ([]ScannedEntry, error) {
 }
 
 func shouldIgnoreImportEntry(name string) bool {
-	return name == ".DS_Store"
+	return strings.HasPrefix(name, ".")
 }
 
 func (s *Service) claimStoredPath(tempPath, extension string) (string, string, error) {

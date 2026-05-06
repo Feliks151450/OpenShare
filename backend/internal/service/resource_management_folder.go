@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"openshare/backend/internal/model"
 	"openshare/backend/internal/storage"
 	"openshare/backend/pkg/identity"
 )
@@ -132,4 +133,92 @@ func isPathWithinRoot(path, root string) bool {
 		return false
 	}
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+type CreateFolderInput struct {
+	Name       string `json:"name"`
+	ParentID   string `json:"parent_id"`
+	OperatorID string
+	OperatorIP string
+}
+
+func (s *ResourceManagementService) CreateFolder(ctx context.Context, input CreateFolderInput) (*model.Folder, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, ErrInvalidResourceEdit
+	}
+	parentID := strings.TrimSpace(input.ParentID)
+
+	// Validate parent exists and resolve managed root
+	var parentIDPtr *string
+	var folderSourcePath *string
+	if parentID != "" {
+		parent, err := s.repo.FindFolderByID(ctx, parentID)
+		if err != nil {
+			return nil, fmt.Errorf("find parent folder: %w", err)
+		}
+		if parent == nil {
+			return nil, ErrManagedFolderNotFound
+		}
+		parentIDPtr = &parent.ID
+
+		// Resolve the managed root source path by walking up the tree
+		folderSourcePath = resolveNewFolderSourcePath(parent, name)
+		if folderSourcePath != nil {
+			diskPath := strings.TrimSpace(*folderSourcePath)
+			if err := s.storage.EnsureManagedDirectory(diskPath); err != nil {
+				return nil, fmt.Errorf("create directory on disk: %w", err)
+			}
+		}
+	}
+
+	// Check name conflict
+	conflict, err := s.repo.FolderNameExists(ctx, parentIDPtr, name, "")
+	if err != nil {
+		return nil, err
+	}
+	if conflict {
+		return nil, ErrManagedFolderConflict
+	}
+	fileConflict, err := s.repo.FileNameExists(ctx, parentIDPtr, name, "")
+	if err != nil {
+		return nil, err
+	}
+	if fileConflict {
+		return nil, ErrManagedFolderConflict
+	}
+
+	id, err := identity.NewID()
+	if err != nil {
+		return nil, fmt.Errorf("generate folder id: %w", err)
+	}
+
+	now := s.nowFunc()
+	folder := &model.Folder{
+		ID:         id,
+		ParentID:   parentIDPtr,
+		Name:       name,
+		SourcePath: folderSourcePath,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := s.repo.CreateFolder(ctx, folder, input.OperatorID, input.OperatorIP, now); err != nil {
+		return nil, fmt.Errorf("create folder: %w", err)
+	}
+	return folder, nil
+}
+
+// resolveNewFolderSourcePath builds the on-disk path for a new folder named childName
+// under the given parent. Returns nil if the parent is not part of a managed tree.
+func resolveNewFolderSourcePath(parent *model.Folder, childName string) *string {
+	if parent == nil {
+		return nil
+	}
+	if parent.SourcePath == nil || strings.TrimSpace(*parent.SourcePath) == "" {
+		return nil
+	}
+	rootPath := filepath.Clean(strings.TrimSpace(*parent.SourcePath))
+	result := filepath.Join(rootPath, childName)
+	return &result
 }

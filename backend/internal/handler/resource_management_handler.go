@@ -34,6 +34,11 @@ type updateManagedFolderDescriptionRequest struct {
 	DownloadPolicy   *string `json:"download_policy"`
 }
 
+type createManagedFolderRequest struct {
+	Name     string `json:"name"`
+	ParentID string `json:"parent_id"`
+}
+
 type deleteManagedResourceRequest struct {
 	Password    string `json:"password"`
 	MoveToTrash *bool  `json:"move_to_trash"`
@@ -249,4 +254,39 @@ func (h *ResourceManagementHandler) DeleteFolder(ctx *gin.Context) {
 		return
 	}
 	ctx.Status(http.StatusNoContent)
+}
+
+func (h *ResourceManagementHandler) CreateFolder(ctx *gin.Context) {
+	adminIdentity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req createManagedFolderRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	folder, err := h.service.CreateFolder(ctx.Request.Context(), service.CreateFolderInput{
+		Name:       req.Name,
+		ParentID:   req.ParentID,
+		OperatorID: adminIdentity.AdminID,
+		OperatorIP: ctx.ClientIP(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder name"})
+		case errors.Is(err, service.ErrManagedFolderConflict):
+			ctx.JSON(http.StatusConflict, gin.H{"error": "folder name already exists"})
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "parent folder not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create folder"})
+		}
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"id": folder.ID, "name": folder.Name})
 }

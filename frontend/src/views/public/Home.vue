@@ -235,6 +235,52 @@ const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
 const folderCoverUrlDraft = ref("");
 const folderHidePublicCatalogDraft = ref(false);
+
+const createFolderModalOpen = ref(false);
+const createFolderNameDraft = ref("");
+const createFolderSaving = ref(false);
+const createFolderError = ref("");
+
+function openCreateFolderModal() {
+  createFolderNameDraft.value = "";
+  createFolderError.value = "";
+  createFolderModalOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function closeCreateFolderModal() {
+  createFolderModalOpen.value = false;
+  createFolderSaving.value = false;
+  createFolderError.value = "";
+  syncBodyScrollLock();
+}
+
+async function submitCreateFolder() {
+  const name = createFolderNameDraft.value.trim();
+  if (!name) {
+    createFolderError.value = "请输入文件夹名称。";
+    return;
+  }
+  if (!currentFolderDetail.value) return;
+  createFolderSaving.value = true;
+  createFolderError.value = "";
+  try {
+    await httpClient.request("/admin/resources/folders", {
+      method: "POST",
+      body: {
+        name,
+        parent_id: currentFolderDetail.value.id,
+      },
+    });
+    closeCreateFolderModal();
+    invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
+    await loadDirectory({ force: true });
+  } catch (err: unknown) {
+    createFolderError.value = readApiError(err, "创建文件夹失败。");
+  } finally {
+    createFolderSaving.value = false;
+  }
+}
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
 const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
@@ -754,6 +800,7 @@ function syncBodyScrollLock() {
       || feedbackModalOpen.value
       || feedbackSuccessModalOpen.value
       || folderDescriptionEditorOpen.value
+      || createFolderModalOpen.value
       || deleteResourceTarget.value
       || downloadConfirm.value
       || Boolean(fileDetailPanelFileId.value)
@@ -2043,6 +2090,14 @@ async function syncSessionReceiptCode() {
                   <button
                     v-if="canManageResourceDescriptions"
                     type="button"
+                    class="btn-secondary"
+                    @click="openCreateFolderModal"
+                  >
+                    创建文件夹
+                  </button>
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
                     class="btn-secondary text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                     @click="openDeleteFolderDialog"
                   >
@@ -3296,6 +3351,44 @@ async function syncSessionReceiptCode() {
               {{ folderDescriptionError }}
             </p>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div v-if="createFolderModalOpen" class="fixed inset-0 z-[125] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+      <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+        <div class="modal-card panel relative my-auto flex w-full max-w-md flex-col overflow-hidden p-6">
+          <div class="shrink-0 border-b border-slate-200 pb-4">
+            <h3 class="text-lg font-semibold text-slate-900">创建文件夹</h3>
+            <p class="mt-1 text-sm text-slate-500">
+              在「{{ currentFolderDetail?.name ?? "" }}」中创建子文件夹。
+            </p>
+          </div>
+          <div class="py-5 space-y-4">
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">文件夹名称</span>
+              <input
+                v-model="createFolderNameDraft"
+                class="field"
+                placeholder="输入文件夹名"
+                autocomplete="off"
+                @keyup.enter="submitCreateFolder"
+              />
+            </label>
+            <p v-if="createFolderError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {{ createFolderError }}
+            </p>
+          </div>
+          <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+            <button type="button" class="btn-secondary" :disabled="createFolderSaving" @click="closeCreateFolderModal">取消</button>
+            <button type="button" class="btn-primary" :disabled="createFolderSaving" @click="submitCreateFolder">
+              {{ createFolderSaving ? "创建中…" : "创建" }}
+            </button>
           </div>
         </div>
       </div>

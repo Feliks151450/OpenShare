@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"openshare/backend/internal/model"
+	"openshare/backend/pkg/identity"
 )
 
 func appendAllowDownloadUpdate(updates map[string]any, apply bool, allowPtr *bool) {
@@ -181,5 +182,18 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 		}
 
 		return createOperationLogTx(tx, logID, operatorID, "folder_updated", "folder", folderID, name, operatorIP, now)
+	})
+}
+
+func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder *model.Folder, operatorID, operatorIP string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(folder).Error; err != nil {
+			return fmt.Errorf("create folder: %w", err)
+		}
+		logID, err := identity.NewID()
+		if err != nil {
+			return fmt.Errorf("generate log id: %w", err)
+		}
+		return createOperationLogTx(tx, logID, operatorID, "folder_created", "folder", folder.ID, folder.Name, operatorIP, now)
 	})
 }
