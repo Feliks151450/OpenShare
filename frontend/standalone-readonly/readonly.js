@@ -1111,7 +1111,7 @@ function buildRows() {
       name: folder.name,
       extension: "",
       description: desc,
-      coverUrl: coverImageHrefFromDescription(desc),
+      coverUrl: fileCoverImageHrefFromFields(folder.cover_url, desc),
       downloadCount: folder.download_count ?? 0,
       fileCount: folder.file_count ?? 0,
       sizeBytes: folder.total_size ?? 0,
@@ -1312,8 +1312,7 @@ async function runSearch(keyword) {
         extension: item.entity_type === "file" ? normalizeExtensionField(item.extension) || extractExtension(item.name) : "",
         description: "",
         remark: (item.remark ?? "").trim(),
-        coverUrl:
-          item.entity_type === "file" ? fileCoverImageHrefFromFields(item.cover_url, "") : null,
+        coverUrl: fileCoverImageHrefFromFields(item.cover_url, ""),
         downloadCount: item.download_count ?? 0,
         fileCount: 0,
         sizeBytes: item.entity_type === "file" ? (item.size ?? 0) : 0,
@@ -1824,7 +1823,7 @@ function renderNavbar() {
 }
 
 function renderGlobalSidebar() {
-  const w = state.sidebarExpanded ? "w-56" : "-translate-x-full xl:translate-x-0 xl:w-11";
+  const w = state.sidebarExpanded ? "w-56" : "-translate-x-full";
   const activeId = state.route.folder;
   const isRoot = state.route.root === "1";
   const folderItems = state.sidebarFolders.length
@@ -1897,7 +1896,11 @@ function renderHome() {
         .join("")}
     </div>`;
 
-  const folderInfoBlock =
+  const descText = fd ? (fd.description ?? "").trim() : "";
+  const wideLayout = fd && !state.searchKeyword && (descText.length > 300 || /!\[.*?\]\(.*?\)/.test(descText)) && window.matchMedia("(min-width: 1280px)").matches;
+  const descExpanded = wideLayout || state.folderMarkdownExpanded;
+
+  const folderHeaderBlock =
     fd && !state.searchKeyword
       ? `
     <div class="border-b border-slate-200 px-4 py-5 sm:px-6">
@@ -1913,32 +1916,38 @@ function renderHome() {
             <button type="button" class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm" data-action="dl-folder" aria-label="下载文件夹" ${fd.download_allowed === false ? "disabled" : ""}>${Ico.download}</button>
           </div>
         </div>
-        <div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
-          ${
-            (fd.remark ?? "").trim()
-              ? `<p class="mb-3 text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(fd.remark).trim())}</p>`
-              : ""
-          }
-          ${
-            descHtml
-              ? `<div class="space-y-3">
-            <div class="relative">
-              <div id="folder-md" class="markdown-content ${state.folderMarkdownExpanded ? "" : "max-h-[min(42vh,20rem)] overflow-hidden"}">${descHtml}</div>
-            </div>
-            <div class="flex justify-center sm:justify-start">
-              <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-folder-md">${state.folderMarkdownExpanded ? "收起简介" : "展开全文"}</button>
-            </div>
-          </div>`
-              : `<p class="text-sm text-slate-400">该文件夹暂无简介orz</p>`
-          }
-        </div>
       </section>
+    </div>`
+      : "";
+
+  const folderDescBlock =
+    fd && !state.searchKeyword
+      ? `
+    <div class="${wideLayout ? "rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5" : "rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"}">
+      ${
+        (fd.remark ?? "").trim()
+          ? `<p class="mb-3 text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(fd.remark).trim())}</p>`
+          : ""
+      }
+      ${
+        descHtml
+          ? `<div class="space-y-3">
+        <div class="relative">
+          <div id="folder-md" class="markdown-content ${descExpanded ? "" : "max-h-[min(42vh,20rem)] overflow-hidden"}">${descHtml}</div>
+          <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent ${descExpanded ? "hidden" : ""}" aria-hidden="true"></div>
+        </div>
+        <div class="flex justify-center sm:justify-start ${wideLayout ? "hidden" : ""}">
+          <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-folder-md">${state.folderMarkdownExpanded ? "收起简介" : "展开全文"}</button>
+        </div>
+      </div>`
+          : `<p class="text-sm text-slate-400">该文件夹暂无简介orz</p>`
+      }
     </div>`
       : "";
 
   const searchSection = `
   <section class="px-5 py-4 sm:px-6">
-    <form class="flex flex-col gap-3 xl:flex-row xl:items-center" data-form="search">
+    <form class="flex flex-col gap-3 sm:flex-row sm:items-center" data-form="search">
       <label class="relative block min-w-0 flex-1">
         ${Ico.search}
         <input type="text" name="q" value="${escapeHtml(state.searchInput)}" placeholder="在该目录下搜索文件/文件夹" class="h-11 w-full rounded-xl border border-slate-300 bg-white pl-14 pr-14 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
@@ -2000,12 +2009,19 @@ function renderHome() {
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6">
             <div class="min-w-0 max-w-full overflow-x-auto">${breadcrumbHtml}</div>
           </div>
-          ${folderInfoBlock}
+          ${folderHeaderBlock}
+          <div class="${wideLayout ? "xl:flex xl:gap-0 xl:px-6 xl:max-h-[calc(100vh-13rem)]" : ""}">
+            <div class="${wideLayout ? "xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-r xl:border-slate-200 xl:pr-6 xl:py-5" : "border-b border-slate-200 px-4 py-5 sm:px-6"}">
+              ${folderDescBlock}
+            </div>
+            <div class="${wideLayout ? "xl:min-w-0 xl:flex-1 xl:overflow-y-auto xl:py-5" : ""}">
           ${searchSection}
           ${state.searchError ? `<p class="mx-5 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6">${escapeHtml(state.searchError)}</p>` : ""}
           ${searchBanner}
           ${toolbar}
           ${mainList}
+            </div>
+          </div>
         </div>
       </section>
       </div>
@@ -2062,21 +2078,10 @@ function renderCard(row) {
         : "";
 
   if (cover) {
-    const typeBadgeSvg =
-      row.kind === "file"
-        ? fileIconSvg(row.extension)
-            .replace(/h-6 w-6/g, "h-5 w-5")
-            .replace(/h-7 w-7/g, "h-5 w-5")
-            .replace("text-slate-500", "text-slate-700")
-        : "";
-    const typeBadge =
-      row.kind === "file" && typeBadgeSvg
-        ? `<div class="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/90 bg-white/95 shadow-sm backdrop-blur-sm ring-1 ring-slate-200/75">${typeBadgeSvg}</div>`
-        : "";
     return `
     <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm ${cover ? "min-h-0" : "min-h-[168px] px-4 pt-3.5 sm:px-5"}" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
       <div class="relative aspect-[16/10] min-h-[132px] w-full max-h-[220px] shrink-0 overflow-hidden bg-slate-100 sm:min-h-[148px] sm:max-h-[240px]">
-        <img src="${escapeHtml(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />${typeBadge}
+        <img src="${escapeHtml(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
       </div>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
         <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">${escapeHtml(row.name)}</h3>
@@ -2193,7 +2198,6 @@ function renderFileDetail() {
   const peerKind = fileDetailPeerSidebarKind(d);
   const layoutWide = Boolean(folderId) && peerKind !== null;
   const descHtml = renderSimpleMarkdown(d.description ?? "");
-  const coverHref = fileCoverImageHrefFromFields(d.cover_url, d.description ?? "");
   const absDl = mediaSourceURL(d, d.id);
   const absDlFull = absDl.startsWith("http") ? absDl : new URL(absDl, window.location.origin).href;
   const absDlEmbed = withBackendDownloadInlinePreviewParam(absDlFull);
@@ -2334,6 +2338,11 @@ function renderFileDetail() {
     }
   }
 
+  const folderPathLabel = (d.path ?? "").trim() || "主页根目录";
+  const backToFolderBtn = folderId
+    ? '<button type="button" class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-blue-200/90 hover:from-blue-50/80 hover:to-slate-50 hover:shadow-sm" data-action="detail-back" title="在资料目录中打开该文件夹">' + Ico.folder.replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0 text-blue-600") + '<span class="min-w-0 flex-1 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere] sm:text-[1.0625rem]" title="' + escapeHtml(folderPathLabel) + '">' + escapeHtml(folderPathLabel) + '</span></button>'
+    : '<a href="#/" class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left no-underline shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-blue-200/90 hover:from-blue-50/80 hover:to-slate-50 hover:shadow-sm">' + Ico.folder.replace("h-6 w-6", "mt-0.5 h-5 w-5 shrink-0 text-blue-600") + '<span class="min-w-0 flex-1 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere] sm:text-[1.0625rem]">主页</span></a>';
+
   const hint = `<p id="file-detail-copy-hint" role="status" class="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 ${state.linkCopyHint ? "" : "hidden"}">${state.linkCopyHint ? escapeHtml(state.linkCopyHint) : ""}</p>`;
 
   const metaVisible = !isVideo || state.videoFileMetaVisible;
@@ -2342,14 +2351,10 @@ function renderFileDetail() {
   const remarkBelowTitleHtml = (d.remark ?? "").trim()
     ? `<p class="text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(d.remark).trim())}</p>`
     : "";
-  const coverHtmlIntro =
-    !isVideo && coverHref && pvKind !== "image"
-      ? `<div class="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 ring-1 ring-slate-950/[0.04]"><img src="${escapeHtml(coverHref)}" alt="" class="max-h-72 w-full object-cover" loading="lazy" /></div>`
-      : "";
   const descBodyHtmlIntro = descHtml
     ? `<div class="markdown-content">${descHtml}</div>`
     : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`;
-  const introInnerHtml = `${coverHtmlIntro}${descBodyHtmlIntro}`;
+  const introInnerHtml = `${descBodyHtmlIntro}`;
   const introCardTopHtml = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
   const introCardBottomHtml = `<div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
 
@@ -2365,6 +2370,7 @@ function renderFileDetail() {
           <div class="space-y-4">
             <div class="flex flex-col gap-4">
               <div class="min-w-0 w-full space-y-2">
+                ${backToFolderBtn}
                 <h3 class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl">${escapeHtml(d.name)}</h3>
                 ${remarkBelowTitleHtml}
               </div>
@@ -2513,7 +2519,7 @@ function render() {
   if (!app) return;
   teardownDetailVideoStageObserver();
   const isFileDetail = state.route.view === "file";
-  const mlClass = state.sidebarExpanded ? "xl:ml-56" : "xl:ml-11";
+  const mlClass = state.sidebarExpanded ? "xl:ml-56" : "";
   const mainContent = isFileDetail ? renderFileDetail() : renderHome();
   const fileFab =
     isFileDetail
@@ -2521,10 +2527,10 @@ function render() {
       : "";
   app.innerHTML =
     `<div class="app-shell">` +
-    `${renderNavbar()}` +
-    `${renderSidebarBackdrop()}` +
-    `${renderGlobalSidebar()}` +
-    `<main class="pt-16 ${isFileDetail ? "" : mlClass}">${mainContent}</main>` +
+    `${isFileDetail ? "" : renderNavbar()}` +
+    `${isFileDetail ? "" : renderSidebarBackdrop()}` +
+    `${isFileDetail ? "" : renderGlobalSidebar()}` +
+    `<main class="${isFileDetail ? "" : "pt-16 "}${isFileDetail ? "" : mlClass}">${mainContent}</main>` +
     `${fileFab}` +
     `</div>` +
     `${renderSettingsPanel()}` +
