@@ -2556,14 +2556,14 @@ async function syncSessionReceiptCode() {
                     >
                       {{ cardRemarkPreview(row.remark) }}
                     </p>
+
+                  </div>
+                </div>
                     <FileTagChips
                       v-if="row.kind === 'file' && row.tags.length > 0"
                       :tags="row.tags"
                       class="mt-2"
                     />
-                  </div>
-                </div>
-
                 <div
                   class="mt-3 flex w-full min-w-0 text-xs"
                   :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"

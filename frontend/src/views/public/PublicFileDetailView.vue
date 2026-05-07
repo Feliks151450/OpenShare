@@ -126,6 +126,11 @@ const tagEditorLoading = ref(false);
 const tagEditorSaving = ref(false);
 const tagEditorError = ref("");
 const canManageResourceDescriptions = ref(false);
+/** 文件简介区域：默认限高，可展开全文 */
+const fileDescriptionExpanded = ref(false);
+const fileDescriptionClampRef = ref<HTMLElement | null>(null);
+/** 需要显示「展开 / 收起」时包含：折叠且内容被裁切，或已展开（显示收起） */
+const fileDescriptionFooterVisible = ref(false);
 const deleteDialogOpen = ref(false);
 const deletePassword = ref("");
 const deleteMoveToTrash = ref(true);
@@ -833,6 +838,7 @@ onBeforeUnmount(() => {
   abortPdfBlobFetch();
   revokePdfBlobUrl();
   teardownVideoStageObserver();
+  fileDescriptionResizeObserver?.disconnect();
   markdownPeekFileId.value = null;
   markdownCatalogNavigateHydrateGeneration += 1;
   markdownCatalogNavigateConfirmResolve?.(false);
@@ -1029,6 +1035,31 @@ async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
 }
 
 const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
+
+function updateFileDescriptionClampUI() {
+  const el = fileDescriptionClampRef.value;
+  if (!el) {
+    fileDescriptionFooterVisible.value = false;
+    return;
+  }
+  if (!descriptionHTML.value) {
+    fileDescriptionFooterVisible.value = false;
+    return;
+  }
+  if (fileDescriptionExpanded.value) {
+    fileDescriptionFooterVisible.value = true;
+    return;
+  }
+  fileDescriptionFooterVisible.value = el.scrollHeight > el.clientHeight + 2;
+}
+
+const fileDescriptionResizeObserver =
+  typeof ResizeObserver !== "undefined"
+    ? new ResizeObserver(() => {
+        updateFileDescriptionClampUI();
+      })
+    : null;
+
 /** 详情页顶部封面：优先 cover_url，否则简介内 ![cover](...) */
 const feedbackSubmitDisabled = computed(() => feedbackSubmitting.value || !feedbackDescription.value.trim());
 /** 资料目录面包屑（与返回文件夹同目标）；提至标题区展示，避免淹没在「文件信息」里 */
@@ -1099,6 +1130,44 @@ async function loadLargeDownloadPolicy() {
     /* 默认 1 GiB */
   }
 }
+
+watch(
+  fileDescriptionClampRef,
+  (el, prev) => {
+    if (!fileDescriptionResizeObserver) {
+      return;
+    }
+    if (prev) {
+      fileDescriptionResizeObserver.unobserve(prev);
+    }
+    if (el) {
+      fileDescriptionResizeObserver.observe(el);
+    }
+  },
+  { flush: "post" },
+);
+
+watch(
+  () => [
+    fileID.value,
+    detail.value?.description,
+    descriptionHTML.value,
+    fileDescriptionExpanded.value,
+  ],
+  async () => {
+    await nextTick();
+    requestAnimationFrame(() => {
+      updateFileDescriptionClampUI();
+    });
+  },
+);
+
+watch(
+  () => fileID.value,
+  () => {
+    fileDescriptionExpanded.value = false;
+  },
+);
 
 watch(fileID, () => {
   markdownPeekFileId.value = null;
@@ -1632,7 +1701,7 @@ function performDownloadFile() {
                     v-if="(detail.remark ?? '').trim()"
                     class="text-sm leading-relaxed text-slate-700"
                   >
-                    <span class="font-medium text-slate-500">备注：</span>{{ (detail.remark ?? "").trim() }}
+                    {{ (detail.remark ?? "").trim() }}
                   </p>
                   <FileTagChips
                     v-if="(detail.tags?.length ?? 0) > 0"
@@ -1774,12 +1843,31 @@ function performDownloadFile() {
                 v-if="showFileDescriptionAbovePreview"
                 class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
               >
-                <div
-                  v-if="descriptionHTML"
-                  class="markdown-content"
-                  v-html="descriptionHTML"
-                  @click.capture="handleMarkdownInternalLinkNavigate"
-                />
+                <div v-if="descriptionHTML" class="space-y-3">
+                  <div class="relative">
+                    <div
+                      ref="fileDescriptionClampRef"
+                      class="markdown-content"
+                      :class="!fileDescriptionExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                      v-html="descriptionHTML"
+                      @click.capture="handleMarkdownInternalLinkNavigate"
+                    />
+                    <div
+                      v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible"
+                      class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div v-if="fileDescriptionFooterVisible" class="flex justify-center sm:justify-start">
+                    <button
+                      type="button"
+                      class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50"
+                      @click="fileDescriptionExpanded = !fileDescriptionExpanded"
+                    >
+                      {{ fileDescriptionExpanded ? "收起简介" : "展开全文" }}
+                    </button>
+                  </div>
+                </div>
                 <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
               </div>
 
@@ -2182,12 +2270,31 @@ function performDownloadFile() {
               v-if="!showFileDescriptionAbovePreview"
               class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
-              <div
-                v-if="descriptionHTML"
-                class="markdown-content"
-                v-html="descriptionHTML"
-                @click.capture="handleMarkdownInternalLinkNavigate"
-              />
+              <div v-if="descriptionHTML" class="space-y-3">
+                <div class="relative">
+                  <div
+                    ref="fileDescriptionClampRef"
+                    class="markdown-content"
+                    :class="!fileDescriptionExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                    v-html="descriptionHTML"
+                    @click.capture="handleMarkdownInternalLinkNavigate"
+                  />
+                  <div
+                    v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible"
+                    class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent"
+                    aria-hidden="true"
+                  />
+                </div>
+                <div v-if="fileDescriptionFooterVisible" class="flex justify-center sm:justify-start">
+                  <button
+                    type="button"
+                    class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50"
+                    @click="fileDescriptionExpanded = !fileDescriptionExpanded"
+                  >
+                    {{ fileDescriptionExpanded ? "收起简介" : "展开全文" }}
+                  </button>
+                </div>
+              </div>
               <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
             </div>
           </section>

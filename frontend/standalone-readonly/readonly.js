@@ -969,6 +969,7 @@ const state = {
   sortMenuOpen: false,
   viewMenuOpen: false,
   folderMarkdownExpanded: false,
+  fileMarkdownExpanded: false,
   modalAnnouncementList: false,
   /** 公告组合模态框：当前选中的公告 id */
   announcementSelectedId: null,
@@ -2352,7 +2353,15 @@ function renderFileDetail() {
     ? `<p class="text-sm leading-relaxed text-slate-700"><span class="font-medium text-slate-500">备注：</span>${escapeHtml(String(d.remark).trim())}</p>`
     : "";
   const descBodyHtmlIntro = descHtml
-    ? `<div class="markdown-content">${descHtml}</div>`
+    ? `<div class="space-y-3">
+        <div class="relative">
+          <div id="file-md" class="markdown-content ${state.fileMarkdownExpanded ? "" : "max-h-[min(42vh,20rem)] overflow-hidden"}">${descHtml}</div>
+          <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent ${state.fileMarkdownExpanded ? "hidden" : ""}" aria-hidden="true"></div>
+        </div>
+        <div class="flex justify-center sm:justify-start">
+          <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-file-md">${state.fileMarkdownExpanded ? "收起简介" : "展开全文"}</button>
+        </div>
+      </div>`
     : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`;
   const introInnerHtml = `${descBodyHtmlIntro}`;
   const introCardTopHtml = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
@@ -2785,6 +2794,11 @@ function appClickHandler(e) {
         render();
         return;
       }
+      if (t.closest("[data-action=\"toggle-file-md\"]")) {
+        state.fileMarkdownExpanded = !state.fileMarkdownExpanded;
+        render();
+        return;
+      }
       if (t.closest("[data-action=\"dl-folder\"]")) {
         downloadCurrentFolder();
         return;
@@ -2963,6 +2977,7 @@ async function bootstrapRoute() {
   state.announcementSelectedId = null;
   state.modalSidebar = null;
   state.folderMarkdownExpanded = false;
+  state.fileMarkdownExpanded = false;
   state.videoPlaybackStep = 0;
   state.downloadConfirm = null;
   if (state.route.view === "file") {
