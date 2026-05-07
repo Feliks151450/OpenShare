@@ -61,7 +61,7 @@ import {
   type PublicFolderItem,
 } from "../../lib/publicHomeDirectoryCache";
 import FileTagChips from "../../components/public/FileTagChips.vue";
-import type { PublicFileTag } from "../../lib/publicFileTags";
+import { type PublicFileTag, readableTextColorForPreset } from "../../lib/publicFileTags";
 
 interface AnnouncementItem {
   id: string;
@@ -179,6 +179,24 @@ const sortMode = ref<"name" | "download" | "format" | "modified">("name");
 const sortDirection = ref<"asc" | "desc">("desc");
 /** 卡片视图：先按是否有封面分组，组内仍沿用当前排序方式 */
 const cardCoverFirst = ref(true);
+/** 当前文件夹下的标签过滤：空 Set 为不过滤 */
+const selectedTagIds = ref<Set<string>>(new Set());
+/** 是否有活跃的标签过滤 */
+const hasActiveTagFilter = computed(() => selectedTagIds.value.size > 0);
+
+function toggleTagFilter(tagId: string) {
+  const next = new Set(selectedTagIds.value);
+  if (next.has(tagId)) {
+    next.delete(tagId);
+  } else {
+    next.add(tagId);
+  }
+  selectedTagIds.value = next;
+}
+
+function clearTagFilter() {
+  selectedTagIds.value = new Set();
+}
 const sortMenuOpen = ref(false);
 const viewMenuOpen = ref(false);
 const toolbarDropdownsRef = ref<HTMLElement | null>(null);
@@ -383,16 +401,36 @@ const rows = computed<DirectoryRow[]>(() => [
 ]);
 const displayedRows = computed<DirectoryRow[]>(() => (searchKeyword.value ? searchRows.value : rows.value));
 
+/** 当前文件夹下所有文件的唯一标签（去重，不考虑子文件夹） */
+const currentFolderFileTags = computed<PublicFileTag[]>(() => {
+  const tagMap = new Map<string, PublicFileTag>();
+  for (const row of rows.value) {
+    if (row.kind === "file") {
+      for (const tag of row.tags) {
+        if (!tagMap.has(tag.id)) {
+          tagMap.set(tag.id, tag);
+        }
+      }
+    }
+  }
+  return [...tagMap.values()];
+});
+
 const sortedRows = computed(() => {
   const next = [...displayedRows.value];
   next.sort((left, right) => compareRows(left, right, sortMode.value, sortDirection.value));
+  if (hasActiveTagFilter.value) {
+    return next.filter(
+      (row) => row.kind === "folder" || row.tags.some((t) => selectedTagIds.value.has(t.id)),
+    );
+  }
   return next;
 });
 
 type CardDisplayBlock = { key: string; rows: DirectoryRow[] };
 
 const cardDisplayBlocks = computed((): CardDisplayBlock[] => {
-  if (!cardCoverFirst.value) {
+  if (!cardCoverFirst.value || hasActiveTagFilter.value) {
     return [{ key: "all", rows: sortedRows.value }];
   }
   const mode = sortMode.value;
@@ -974,6 +1012,7 @@ onBeforeUnmount(() => {
 
 watch(currentFolderID, () => {
   fileDetailPanelFileId.value = null;
+  selectedTagIds.value = new Set();
   if (markdownCatalogNavigateConfirmRoute.value) {
     dismissMarkdownCatalogNavigateConfirm(false);
   }
@@ -2399,6 +2438,36 @@ async function syncSessionReceiptCode() {
               </div>
               </div>
             </div>
+          </div>
+
+          <div
+            v-if="!searchKeyword && currentFolderFileTags.length > 0"
+            class="mx-4 mt-3 flex flex-wrap items-center gap-2 sm:mx-6"
+          >
+            <button
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition"
+              :class="!hasActiveTagFilter ? 'bg-slate-800 text-white ring-slate-800' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-100'"
+              @click="clearTagFilter"
+            >
+              全部
+            </button>
+            <button
+              v-for="tag in currentFolderFileTags"
+              :key="tag.id"
+              type="button"
+              class="max-w-full shrink-0 truncate rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition hover:opacity-85"
+              :class="selectedTagIds.has(tag.id) ? 'ring-2 ring-offset-1' : ''"
+              :style="{
+                backgroundColor: tag.color,
+                color: readableTextColorForPreset(tag.color),
+                ringColor: tag.color,
+              }"
+              :title="tag.name"
+              @click="toggleTagFilter(tag.id)"
+            >
+              {{ tag.name }}
+            </button>
           </div>
 
           <p v-if="actionMessage" class="mx-4 mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-6">{{ actionMessage }}</p>

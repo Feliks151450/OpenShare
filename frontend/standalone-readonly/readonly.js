@@ -378,6 +378,28 @@ function fileCoverImageHrefFromFields(coverUrlField, description) {
   return coverImageHrefFromDescription(description);
 }
 
+/* --- 标签 --- */
+function readableTextColorForPreset(hex) {
+  const raw = String(hex ?? "").trim().replace(/^#/, "");
+  if (raw.length !== 3 && raw.length !== 6) return "#0f172a";
+  const expand = raw.length === 3 ? raw.split("").map(function (c) { return c + c; }).join("") : raw;
+  const n = parseInt(expand, 16);
+  if (!Number.isFinite(n)) return "#0f172a";
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? "#0f172a" : "#f8fafc";
+}
+
+function renderTagChips(tags) {
+  if (!tags || !tags.length) return "";
+  return '<div class="flex min-w-0 flex-wrap gap-1.5">' +
+    tags.map(function (t) {
+      return '<span class="max-w-full shrink-0 truncate rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-black/10" style="background-color:' + escapeHtml(t.color) + ';color:' + readableTextColorForPreset(t.color) + '" title="' + escapeHtml(t.name) + '">' + escapeHtml(t.name) + '</span>';
+    }).join("") +
+    '</div>';
+}
+
 function encodeHrefLikeMarked(href) {
   const h = String(href ?? "").trim();
   if (!h) return null;
@@ -970,6 +992,7 @@ const state = {
   viewMenuOpen: false,
   folderMarkdownExpanded: false,
   fileMarkdownExpanded: false,
+  selectedTagIds: /** @type {Set<string>} */ (new Set()),
   modalAnnouncementList: false,
   /** 公告组合模态框：当前选中的公告 id */
   announcementSelectedId: null,
@@ -1143,6 +1166,7 @@ function buildRows() {
           sortTimeMs: parseSortTimeMs(file.uploaded_at),
           downloadURL: fileEffectiveDownloadHref(file.id, file.playback_url, file.folder_direct_download_url),
           downloadAllowed: file.download_allowed !== false,
+          tags: file.tags ?? [],
         };
       })
     : [];
@@ -1181,9 +1205,31 @@ function compareRows(left, right, mode, direction) {
   return direction === "asc" ? result : -result;
 }
 
+/** 当前文件夹下所有文件的唯一标签（去重，不考虑子文件夹） */
+function currentFolderFileTags() {
+  var tagMap = new Map();
+  var allRows = buildRows();
+  for (var i = 0; i < allRows.length; i++) {
+    var row = allRows[i];
+    if (row.kind === "file" && row.tags) {
+      for (var j = 0; j < row.tags.length; j++) {
+        var t = row.tags[j];
+        if (!tagMap.has(t.id)) tagMap.set(t.id, t);
+      }
+    }
+  }
+  return Array.from(tagMap.values());
+}
+
 function sortedRows() {
-  const rows = [...displayedRows()];
-  rows.sort((a, b) => compareRows(a, b, state.sortMode, state.sortDirection));
+  var rows = displayedRows().slice();
+  rows.sort(function (a, b) { return compareRows(a, b, state.sortMode, state.sortDirection); });
+  if (state.selectedTagIds.size > 0) {
+    rows = rows.filter(function (row) {
+      if (row.kind === "folder") return true;
+      return row.tags && row.tags.some(function (t) { return state.selectedTagIds.has(t.id); });
+    });
+  }
   return rows;
 }
 
@@ -1325,6 +1371,7 @@ async function runSearch(keyword) {
             ? fileEffectiveDownloadHref(item.id, item.playback_url, item.folder_direct_download_url)
             : apiUrl(`/public/folders/${encodeURIComponent(item.id)}/download`),
         downloadAllowed: item.download_allowed !== false,
+        tags: item.entity_type === "file" ? (item.tags ?? []) : [],
       };
     });
   } catch (err) {
@@ -1989,6 +2036,21 @@ function renderHome() {
     </div>
   </div>`;
 
+  var tagFilterBar = "";
+  if (!state.searchKeyword) {
+    var folderTags = currentFolderFileTags();
+    if (folderTags.length > 0) {
+      tagFilterBar = '<div class="mx-4 mt-3 flex flex-wrap items-center gap-2 sm:mx-6">' +
+        '<button type="button" class="rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition ' + (state.selectedTagIds.size === 0 ? 'bg-slate-800 text-white ring-slate-800' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-100') + '" data-action="clear-tag-filter">全部</button>';
+      for (var ti = 0; ti < folderTags.length; ti++) {
+        var tg = folderTags[ti];
+        var isActive = state.selectedTagIds.has(tg.id);
+        tagFilterBar += '<button type="button" class="max-w-full shrink-0 truncate rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition hover:opacity-85 ' + (isActive ? 'ring-2 ring-offset-1' : '') + '" style="background-color:' + escapeHtml(tg.color) + ';color:' + readableTextColorForPreset(tg.color) + '" title="' + escapeHtml(tg.name) + '" data-action="toggle-tag-filter" data-tag-id="' + escapeHtml(tg.id) + '">' + escapeHtml(tg.name) + '</button>';
+      }
+      tagFilterBar += '</div>';
+    }
+  }
+
   let mainList = "";
   if (state.loading) mainList = `<div class="px-4 py-8 text-sm text-slate-500 sm:px-6">加载中…</div>`;
   else if (state.error) mainList = `<div class="px-4 py-8 text-sm text-rose-600 sm:px-6">${escapeHtml(state.error)}</div>`;
@@ -2020,6 +2082,7 @@ function renderHome() {
           ${state.searchError ? `<p class="mx-5 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6">${escapeHtml(state.searchError)}</p>` : ""}
           ${searchBanner}
           ${toolbar}
+          ${tagFilterBar}
           ${mainList}
             </div>
           </div>
@@ -2094,6 +2157,7 @@ function renderCard(row) {
               : `<span class="text-slate-500">${row.fileCount} 个文件</span><span class="text-slate-500">${escapeHtml(row.sizeText)}</span>`
           }
         </div>
+        ${row.kind === "file" ? renderTagChips(row.tags) : ""}
         <div class="mt-auto flex items-center justify-end border-t border-slate-100 pt-3">${dlBtn}</div>
       </div>
     </article>`;
@@ -2115,6 +2179,7 @@ function renderCard(row) {
             : `<span class="text-slate-500">${row.fileCount} 个文件</span><span class="text-slate-500">${escapeHtml(row.sizeText)}</span>`
         }
       </div>
+    ${row.kind === "file" ? renderTagChips(row.tags) : ""}
     <div class="mt-auto flex items-center justify-end border-t border-slate-100 py-2.5">${dlBtn}</div>
   </article>`;
 }
@@ -2131,10 +2196,11 @@ function renderTableRow(row) {
   const remarkLine = remarkPreview
     ? `<p class="mt-0.5 truncate text-xs leading-snug text-slate-500" title="${escapeHtml(remarkPreview)}">${escapeHtml(remarkPreview)}</p>`
     : "";
+  const tagChips = row.kind === "file" ? renderTagChips(row.tags) : "";
   return `
   <tr class="cursor-pointer transition hover:bg-slate-50" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
     <td>
-      <div class="flex min-w-0 items-start gap-3 text-left">${icon}<div class="min-w-0 flex-1"><span class="block truncate text-base font-medium leading-snug text-slate-900" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</span>${remarkLine}</div></div>
+      <div class="flex min-w-0 items-start gap-3 text-left">${icon}<div class="min-w-0 flex-1"><span class="block truncate text-base font-medium leading-snug text-slate-900" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</span>${remarkLine}${tagChips}</div></div>
     </td>
     <td class="w-[120px] whitespace-nowrap text-right tabular-nums">${escapeHtml(row.sizeText)}</td>
     <td class="hidden w-[220px] whitespace-nowrap text-right tabular-nums xl:table-cell">${escapeHtml(row.updatedAt)}</td>
@@ -2382,6 +2448,7 @@ function renderFileDetail() {
                 ${backToFolderBtn}
                 <h3 class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl">${escapeHtml(d.name)}</h3>
                 ${remarkBelowTitleHtml}
+                ${renderTagChips(d.tags ?? [])}
               </div>
               <div class="w-full min-w-0">
                 <div class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3">
@@ -2799,6 +2866,26 @@ function appClickHandler(e) {
         render();
         return;
       }
+      if (t.closest("[data-action=\"toggle-tag-filter\"]")) {
+        var toggleBtn = t.closest("[data-action=\"toggle-tag-filter\"]");
+        var tagId = toggleBtn.getAttribute("data-tag-id");
+        if (tagId) {
+          var next = new Set(state.selectedTagIds);
+          if (next.has(tagId)) {
+            next.delete(tagId);
+          } else {
+            next.add(tagId);
+          }
+          state.selectedTagIds = next;
+          render();
+        }
+        return;
+      }
+      if (t.closest("[data-action=\"clear-tag-filter\"]")) {
+        state.selectedTagIds = new Set();
+        render();
+        return;
+      }
       if (t.closest("[data-action=\"dl-folder\"]")) {
         downloadCurrentFolder();
         return;
@@ -2978,6 +3065,7 @@ async function bootstrapRoute() {
   state.modalSidebar = null;
   state.folderMarkdownExpanded = false;
   state.fileMarkdownExpanded = false;
+  state.selectedTagIds = new Set();
   state.videoPlaybackStep = 0;
   state.downloadConfirm = null;
   if (state.route.view === "file") {
