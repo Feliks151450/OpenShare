@@ -385,20 +385,36 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 		}
 		tagMap = m
 	}
+
+	// 批量预取文件夹祖先链，避免对同目录下的文件重复查询
+	var ancestorCache *folderAncestorCache
+	if s.download != nil && len(files) > 0 {
+		folderIDSet := make(map[string]struct{}, len(files))
+		for _, f := range files {
+			if f.FolderID != nil {
+				folderIDSet[strings.TrimSpace(*f.FolderID)] = struct{}{}
+			}
+		}
+		folderIDs := make([]string, 0, len(folderIDSet))
+		for fid := range folderIDSet {
+			if fid != "" {
+				folderIDs = append(folderIDs, fid)
+			}
+		}
+		var err error
+		ancestorCache, err = s.download.newFolderAncestorCache(ctx, folderIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	items := make([]PublicFileItem, 0, len(files))
 	for _, file := range files {
 		fd := ""
-		if s.download != nil {
-			fd = s.download.FolderDirectDownloadURLForFile(ctx, file)
-		}
 		allowed := true
-		if s.download != nil {
-			f := file
-			var err error
-			allowed, err = s.download.EffectiveDownloadAllowedForFile(ctx, &f)
-			if err != nil {
-				return nil, err
-			}
+		if ancestorCache != nil {
+			fd = ancestorCache.folderDirectDownloadURLForFile(file)
+			allowed = ancestorCache.effectiveDownloadAllowedForFile(&file)
 		}
 		tags := tagMap[file.ID]
 		if tags == nil {

@@ -168,6 +168,68 @@ func (s *PublicDownloadService) EffectiveDownloadAllowedForFile(ctx context.Cont
 	return true, nil
 }
 
+// folderAncestorCache 批量预取文件夹祖先链缓存，避免 N+1 查询。
+type folderAncestorCache struct {
+	chains map[string][]model.Folder
+}
+
+// newFolderAncestorCache 对给定文件夹 ID 集合每个仅查一次祖先链。
+func (s *PublicDownloadService) newFolderAncestorCache(ctx context.Context, folderIDs []string) (*folderAncestorCache, error) {
+	c := &folderAncestorCache{chains: make(map[string][]model.Folder, len(folderIDs))}
+	for _, fid := range folderIDs {
+		if fid == "" {
+			continue
+		}
+		chain, err := s.repository.ListFolderAncestorsFromLeaf(ctx, fid)
+		if err != nil {
+			return nil, err
+		}
+		c.chains[fid] = chain
+	}
+	return c, nil
+}
+
+func (c *folderAncestorCache) effectiveDownloadAllowedForFile(file *model.File) bool {
+	if file == nil {
+		return true
+	}
+	if file.AllowDownload != nil {
+		return *file.AllowDownload
+	}
+	fid := ""
+	if file.FolderID != nil {
+		fid = strings.TrimSpace(*file.FolderID)
+	}
+	if fid == "" {
+		return true
+	}
+	for _, f := range c.chains[fid] {
+		if f.AllowDownload != nil {
+			return *f.AllowDownload
+		}
+	}
+	return true
+}
+
+func (c *folderAncestorCache) folderDirectDownloadURLForFile(file model.File) string {
+	if file.FolderID == nil {
+		return ""
+	}
+	fid := strings.TrimSpace(*file.FolderID)
+	chain := c.chains[fid]
+	if len(chain) == 0 {
+		return ""
+	}
+	for i := 0; i < len(chain); i++ {
+		prefix := strings.TrimSpace(chain[i].DirectLinkPrefix)
+		if prefix == "" {
+			continue
+		}
+		return folderDirectFileURL(prefix, chain, i, file.Name)
+	}
+	return ""
+}
+
 // EffectiveDownloadAllowedForFolder 解析文件夹是否允许打包下载：本文件夹设置优先，否则向上查找祖先，均未设置则默认允许。
 func (s *PublicDownloadService) EffectiveDownloadAllowedForFolder(ctx context.Context, folder *model.Folder) (bool, error) {
 	if folder == nil {

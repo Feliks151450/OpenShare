@@ -972,9 +972,10 @@ onMounted(async () => {
     loadHotDownloads(),
     loadLatestTitles(),
     loadDirectory(),
-    loadAdminPermission(),
     loadLargeDownloadPolicy(),
   ]);
+  // 管理员权限延后加载：主内容先渲染，编辑/删除按钮稍后出现
+  loadAdminPermission();
 
   const panel = route.query.panel;
   if (typeof panel === "string" && panel) {

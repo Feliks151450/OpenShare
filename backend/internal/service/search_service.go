@@ -162,9 +162,29 @@ func (s *SearchService) Search(ctx context.Context, input SearchInput) (*SearchR
 		end = len(ranked)
 	}
 
+	// 批量预取文件夹祖先链，避免对搜索结果逐条重复查询
+	var ancestorCache *folderAncestorCache
+	if s.download != nil {
+		folderIDSet := make(map[string]struct{})
+		for _, c := range ranked[offset:end] {
+			if c.Candidate.EntityType == "file" && c.Candidate.FolderID != nil && strings.TrimSpace(*c.Candidate.FolderID) != "" {
+				folderIDSet[strings.TrimSpace(*c.Candidate.FolderID)] = struct{}{}
+			}
+		}
+		folderIDs := make([]string, 0, len(folderIDSet))
+		for fid := range folderIDSet {
+			folderIDs = append(folderIDs, fid)
+		}
+		var err error
+		ancestorCache, err = s.download.newFolderAncestorCache(ctx, folderIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	items := make([]SearchResultItem, 0, end-offset)
 	for _, candidate := range ranked[offset:end] {
-		row, err := s.candidateToResultItem(ctx, candidate.Candidate)
+		row, err := s.candidateToResultItem(ctx, candidate.Candidate, ancestorCache)
 		if err != nil {
 			return nil, err
 		}
@@ -454,32 +474,21 @@ func searchDisplayName(candidate repository.SearchCandidate) string {
 	return strings.ToLower(candidate.Name)
 }
 
-func (s *SearchService) candidateToResultItem(ctx context.Context, candidate repository.SearchCandidate) (SearchResultItem, error) {
+func (s *SearchService) candidateToResultItem(ctx context.Context, candidate repository.SearchCandidate, ancestorCache *folderAncestorCache) (SearchResultItem, error) {
 	switch candidate.EntityType {
 	case "file":
 		uploadedAt := candidate.CreatedAt
-		fd := ""
-		if s.download != nil && candidate.FolderID != nil {
-			fd = s.download.FolderDirectDownloadURLForFile(ctx, model.File{
-				ID:            candidate.ID,
-				Name:          candidate.Name,
-				FolderID:      candidate.FolderID,
-				AllowDownload: candidate.AllowDownload,
-			})
-		}
-		dl := true
-		if s.download != nil {
+		var fd string
+		var dl bool = true
+		if ancestorCache != nil {
 			f := model.File{
 				ID:            candidate.ID,
 				Name:          candidate.Name,
 				FolderID:      candidate.FolderID,
 				AllowDownload: candidate.AllowDownload,
 			}
-			var err error
-			dl, err = s.download.EffectiveDownloadAllowedForFile(ctx, &f)
-			if err != nil {
-				return SearchResultItem{}, err
-			}
+			fd = ancestorCache.folderDirectDownloadURLForFile(f)
+			dl = ancestorCache.effectiveDownloadAllowedForFile(&f)
 		}
 		updatedAt := candidate.UpdatedAt
 		return SearchResultItem{

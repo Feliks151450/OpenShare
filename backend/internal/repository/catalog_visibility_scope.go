@@ -4,39 +4,38 @@ import (
 	"gorm.io/gorm"
 )
 
-// FilesNotUnderHiddenPublicCatalogRoot 限定 files：排除其所属托管根设置了 hide_public_catalog 的文件；
-// folder_id 为空的文件仍保留（与首页根列表行为一致）。
+// hiddenDescendantCTE returns a CTE expression that computes all folder IDs
+// descending from roots where hide_public_catalog is true.
+const hiddenDescendantCTE = `
+WITH RECURSIVE hidden_descendant AS (
+	SELECT id FROM folders WHERE parent_id IS NULL AND COALESCE(hide_public_catalog, 0) != 0
+	UNION ALL
+	SELECT f.id FROM folders f INNER JOIN hidden_descendant h ON f.parent_id = h.id
+)
+`
+
+// FilesNotUnderHiddenPublicCatalogRoot 限定 files：排除其所属托管根设置了 hide_public_catalog 的文件。
+// 使用单次 CTE 计算所有隐藏根的后代，替代原来的逐行递归 CTE。
 func FilesNotUnderHiddenPublicCatalogRoot() func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		return db.Where(
-			`(files.folder_id IS NULL OR NOT EXISTS (
-WITH RECURSIVE ancestor AS (
-  SELECT id, parent_id, hide_public_catalog FROM folders WHERE id = files.folder_id
-  UNION ALL
-  SELECT f.id, f.parent_id, f.hide_public_catalog
-  FROM folders f
-  INNER JOIN ancestor a ON f.id = a.parent_id
-)
-SELECT 1 FROM ancestor WHERE parent_id IS NULL AND COALESCE(hide_public_catalog, 0) != 0
-))`,
+			`files.folder_id IS NULL OR files.folder_id NOT IN (` +
+				hiddenDescendantCTE +
+				`SELECT id FROM hidden_descendant` +
+				`)`,
 		)
 	}
 }
 
-// FoldersNotUnderHiddenPublicCatalogRoot 限定 folders：排除自身或任意上级托管根为 hide_public_catalog 的目录（含被隐藏的根）。
+// FoldersNotUnderHiddenPublicCatalogRoot 限定 folders：排除自身或任意上级托管根为 hide_public_catalog 的目录。
+// 使用单次 CTE 计算所有隐藏根的后代。
 func FoldersNotUnderHiddenPublicCatalogRoot() func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		return db.Where(
-			`NOT EXISTS (
-WITH RECURSIVE ancestor AS (
-  SELECT id, parent_id, hide_public_catalog FROM folders WHERE id = folders.id
-  UNION ALL
-  SELECT f.id, f.parent_id, f.hide_public_catalog
-  FROM folders f
-  INNER JOIN ancestor a ON f.id = a.parent_id
-)
-SELECT 1 FROM ancestor WHERE parent_id IS NULL AND COALESCE(hide_public_catalog, 0) != 0
-)`,
+			`folders.id NOT IN (` +
+				hiddenDescendantCTE +
+				`SELECT id FROM hidden_descendant` +
+				`)`,
 		)
 	}
 }

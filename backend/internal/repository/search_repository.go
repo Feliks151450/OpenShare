@@ -260,22 +260,19 @@ func (r *SearchRepository) GetFoldersByIDs(ctx context.Context, ids []string) ([
 
 // GetDescendantFolderIDs returns the given folderID plus all its descendants.
 func (r *SearchRepository) GetDescendantFolderIDs(ctx context.Context, folderID string) ([]string, error) {
-	result := []string{folderID}
-	queue := []string{folderID}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		var childIDs []string
-		if err := r.db.WithContext(ctx).
-			Model(&model.Folder{}).
-			Where("parent_id = ?", current).
-			Pluck("id", &childIDs).Error; err != nil {
-			return nil, fmt.Errorf("get child folders: %w", err)
-		}
-		result = append(result, childIDs...)
-		queue = append(queue, childIDs...)
+	var ids []string
+	err := r.db.WithContext(ctx).Raw(`
+		WITH RECURSIVE descendant AS (
+			SELECT id FROM folders WHERE id = ?
+			UNION ALL
+			SELECT f.id FROM folders f INNER JOIN descendant d ON f.parent_id = d.id
+		)
+		SELECT id FROM descendant
+	`, folderID).Pluck("id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("get descendant folders: %w", err)
 	}
-	return result, nil
+	return ids, nil
 }
 
 // escapeLike escapes LIKE special characters.

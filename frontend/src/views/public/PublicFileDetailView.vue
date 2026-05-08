@@ -891,7 +891,7 @@ const detailInnerMaxWidthClass = computed(() => {
   if (props.panelPresentation) {
     return "max-w-none";
   }
-  return layoutWide.value ? "max-w-none" : "max-w-6xl";
+  return layoutWide.value ? "max-w-none" : "max-w-8xl";
 });
 
 const showVideoPeerAsideExpanded = computed(
@@ -992,10 +992,19 @@ interface FolderFileListItem {
   id: string;
   name: string;
   extension: string;
+  remark?: string;
+  tags?: PublicFileTag[];
 }
 
-const folderVideoPeers = ref<Array<{ id: string; name: string }>>([]);
+const folderVideoPeers = ref<FolderFileListItem[]>([]);
 const folderVideoPeersLoading = ref(false);
+const currentPeerLiEl = ref<HTMLElement | null>(null);
+
+function scrollCurrentPeerIntoView() {
+  if (currentPeerLiEl.value) {
+    currentPeerLiEl.value.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
 
 /** 视频详情页默认折叠「所属文件夹、下载量」等元数据，由用户点击「文件信息」展开 */
 const videoFileMetaVisible = ref(false);
@@ -1023,14 +1032,13 @@ async function loadFolderSameExtensionPeers(folderID: string, currentFileId: str
       `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
     );
     const items = response.items ?? [];
-    folderVideoPeers.value = items
-      .filter((f) => f.id !== currentFileId)
-      .filter((f) => extensionOfListItem(f) === want)
-      .map((f) => ({ id: f.id, name: f.name }));
+    folderVideoPeers.value = items.filter((f) => extensionOfListItem(f) === want);
   } catch {
     folderVideoPeers.value = [];
   } finally {
     folderVideoPeersLoading.value = false;
+    await nextTick();
+    scrollCurrentPeerIntoView();
   }
 }
 
@@ -1047,14 +1055,13 @@ async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
       `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
     );
     const items = response.items ?? [];
-    folderVideoPeers.value = items
-      .filter((f) => f.id !== currentFileId)
-      .filter((f) => VIDEO_EXTENSIONS.has(extensionOfListItem(f)))
-      .map((f) => ({ id: f.id, name: f.name }));
+    folderVideoPeers.value = items.filter((f) => VIDEO_EXTENSIONS.has(extensionOfListItem(f)));
   } catch {
     folderVideoPeers.value = [];
   } finally {
     folderVideoPeersLoading.value = false;
+    await nextTick();
+    scrollCurrentPeerIntoView();
   }
 }
 
@@ -1139,7 +1146,10 @@ onMounted(() => {
   wideScreenQuery = window.matchMedia("(min-width: 1280px)");
   updateWideScreen();
   wideScreenQuery.addEventListener("change", updateWideScreen);
-  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode(), loadLargeDownloadPolicy()]);
+  void Promise.all([loadDetail(), syncSessionReceiptCode(), loadLargeDownloadPolicy()]).then(() => {
+    // 管理员权限延后加载：主内容先渲染，编辑/删除按钮稍后出现
+    loadAdminPermission();
+  });
 });
 
 const wideLayoutExtensions = ref("");
@@ -1211,7 +1221,7 @@ watch(fileID, () => {
     dismissMarkdownCatalogNavigateConfirm(false);
   }
   videoFileMetaVisible.value = false;
-  void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode()]);
+  void Promise.all([loadDetail(), syncSessionReceiptCode()]);
 });
 
 watch(markdownPeekFileId, (id, _prev, onCleanup) => {
@@ -1990,31 +2000,59 @@ function performDownloadFile() {
                       加载列表…
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
-                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id" :ref="(el: unknown) => { if (peer.id === fileID) currentPeerLiEl = (el as HTMLElement) ?? null; }">
                         <button
                           v-if="panelPresentation"
                           type="button"
-                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                           @click="onPeerListNavigate(peer.id)"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </button>
                         <RouterLink
                           v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
-                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </RouterLink>
                       </li>
                     </ul>
@@ -2120,31 +2158,59 @@ function performDownloadFile() {
                       加载列表…
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
-                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id" :ref="(el: unknown) => { if (peer.id === fileID) currentPeerLiEl = (el as HTMLElement) ?? null; }">
                         <button
                           v-if="panelPresentation"
                           type="button"
-                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                           @click="onPeerListNavigate(peer.id)"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </button>
                         <RouterLink
                           v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
-                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </RouterLink>
                       </li>
                     </ul>
@@ -2285,31 +2351,59 @@ function performDownloadFile() {
                       加载列表…
                     </p>
                     <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
-                      <li v-for="peer in folderVideoPeers" :key="peer.id">
+                      <li v-for="peer in folderVideoPeers" :key="peer.id" :ref="(el: unknown) => { if (peer.id === fileID) currentPeerLiEl = (el as HTMLElement) ?? null; }">
                         <button
                           v-if="panelPresentation"
                           type="button"
-                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                           @click="onPeerListNavigate(peer.id)"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </button>
                         <RouterLink
                           v-else
                           :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
-                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+                          class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                          :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
                         >
                           <component
                             :is="peerSidebarListIcon"
-                            class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                            class="mt-0.5 h-4 w-4 shrink-0"
+                            :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
                             aria-hidden="true"
                           />
-                          <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
+                            <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                            <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
+                              <span
+                                v-for="tag in (peer.tags ?? [])"
+                                :key="tag.id"
+                                class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-black/[0.08]"
+                                :style="{ backgroundColor: tag.color, color: readableTextColorForPreset(tag.color) }"
+                              >{{ tag.name }}</span>
+                            </div>
+                          </div>
                         </RouterLink>
                       </li>
                     </ul>

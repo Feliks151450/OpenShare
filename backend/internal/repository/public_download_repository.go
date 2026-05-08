@@ -47,26 +47,30 @@ func (r *PublicDownloadRepository) FindManagedFileByID(ctx context.Context, file
 }
 
 // ListFolderAncestorsFromLeaf returns folders from the leaf (file's folder) up to the root, [leaf, parent, ..., root].
+// Uses a single recursive CTE instead of per-node queries.
 func (r *PublicDownloadRepository) ListFolderAncestorsFromLeaf(ctx context.Context, leafFolderID string) ([]model.Folder, error) {
 	leafFolderID = strings.TrimSpace(leafFolderID)
 	if leafFolderID == "" {
 		return nil, nil
 	}
 	var chain []model.Folder
-	curID := leafFolderID
-	for curID != "" {
-		f, err := r.FindManagedFolderByID(ctx, curID)
-		if err != nil {
-			return nil, err
-		}
-		if f == nil {
-			return nil, fmt.Errorf("folder %s not found", curID)
-		}
-		chain = append(chain, *f)
-		if f.ParentID == nil || strings.TrimSpace(*f.ParentID) == "" {
-			break
-		}
-		curID = strings.TrimSpace(*f.ParentID)
+	err := r.db.WithContext(ctx).Raw(`
+		WITH RECURSIVE ancestor AS (
+			SELECT *, 0 AS depth FROM folders WHERE id = ?
+			UNION ALL
+			SELECT f.*, a.depth + 1
+			FROM folders f
+			INNER JOIN ancestor a ON f.id = a.parent_id
+		)
+		SELECT id, parent_id, name, description, remark, cover_url, direct_link_prefix, allow_download, hide_public_catalog, created_at, updated_at
+		FROM ancestor
+		ORDER BY depth ASC
+	`, leafFolderID).Scan(&chain).Error
+	if err != nil {
+		return nil, fmt.Errorf("list folder ancestors: %w", err)
+	}
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("folder %s not found", leafFolderID)
 	}
 	return chain, nil
 }

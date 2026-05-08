@@ -2448,7 +2448,7 @@ function renderFileDetail() {
 
   return `
   <section class="app-container py-2 sm:py-8 lg:py-2">
-    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-screen-2xl" : "max-w-6xl"}">
+    <div class="mx-auto w-full space-y-6 ${layoutWide ? "max-w-screen-2xl" : "max-w-8xl"}">
       <div class="panel p-6">
         ${hint}
         <section>
