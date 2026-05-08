@@ -255,9 +255,11 @@ function pinLabel(item: AnnouncementItem) {
 </script>
 
 <template>
+  <!-- 公告管理页：管理员可查看公告列表、新建/编辑/删除公告；新建编辑弹窗支持 Markdown 实时预览 -->
   <section class="space-y-8">
     <PageHeader eyebrow="Announcements" title="公告" />
 
+    <!-- 公告列表卡片 -->
     <SurfaceCard class="space-y-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -269,12 +271,14 @@ function pinLabel(item: AnnouncementItem) {
         </div>
       </div>
 
+      <!-- 操作反馈消息 -->
       <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
       <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
 
       <div v-if="!canManageAnnouncements" class="text-sm text-slate-500">当前账号没有公告权限。</div>
       <div v-else-if="loading && !loaded" class="text-sm text-slate-500">加载中…</div>
       <div v-else class="space-y-4">
+        <!-- 单条公告卡片：标题 + 状态/置顶标签 + 时间 + Markdown 内容预览（最多4行） + 编辑/删除按钮 -->
         <article v-for="item in items" :key="item.id" class="rounded-2xl border border-slate-200 p-5">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="min-w-0 flex-1">
@@ -295,8 +299,10 @@ function pinLabel(item: AnnouncementItem) {
                 <span>更新时间：{{ formatDate(item.updated_at) }}</span>
                 <span>{{ item.created_by_id === sessionStore.adminId ? "我发布的" : `发布者：${item.created_by_id}` }}</span>
               </div>
+              <!-- 公告正文 Markdown 渲染预览（截断至4行） -->
               <div class="markdown-content mt-4 line-clamp-4 text-sm text-slate-600" v-html="renderSimpleMarkdown(item.content)" />
             </div>
+            <!-- 操作按钮：仅创建者或超管可编辑/删除 -->
             <div class="flex shrink-0 flex-wrap gap-2">
               <button v-if="canEdit(item)" class="btn-secondary" @click="openEditEditor(item)">编辑</button>
               <button
@@ -315,6 +321,7 @@ function pinLabel(item: AnnouncementItem) {
     </SurfaceCard>
   </section>
 
+  <!-- 新建/编辑公告弹窗：左右分栏布局，左侧编辑区（标题 + 发布设置 + 正文），右侧 Markdown 实时预览 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="editorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/30 px-4 py-6">
@@ -330,12 +337,14 @@ function pinLabel(item: AnnouncementItem) {
           </div>
 
           <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <!-- 左侧：编辑区 -->
             <div class="space-y-4">
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">公告标题</span>
                 <input v-model="form.title" class="field" placeholder="输入公告标题" />
               </label>
 
+              <!-- 发布设置：公开/草稿切换 + 置顶切换（仅超管可置顶） -->
               <div class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">发布设置</span>
                 <div class="grid gap-3 sm:grid-cols-2">
@@ -387,6 +396,7 @@ function pinLabel(item: AnnouncementItem) {
               </label>
             </div>
 
+            <!-- 右侧：Markdown 实时预览区 -->
             <div class="space-y-3">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Preview</p>
@@ -411,6 +421,7 @@ function pinLabel(item: AnnouncementItem) {
     </Transition>
   </Teleport>
 
+  <!-- 删除公告确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="deleteTarget" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">

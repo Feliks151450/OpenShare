@@ -179,6 +179,7 @@ function statusBadgeClass(status: string) {
 </script>
 
 <template>
+  <!-- 回执查询页：访客通过回执码查询自己提交的上传记录和反馈记录的处理状态 -->
   <div class="app-container py-3 sm:py-10">
     <div class="mx-auto w-full max-w-4xl">
       <SurfaceCard>
@@ -187,10 +188,12 @@ function statusBadgeClass(status: string) {
           title="回执查询"
         />
 
+        <!-- 当前会话回执码展示 -->
         <div class="mt-6 rounded-xl border border-slate-200 bg-[#fafafa] px-4 py-3 text-sm leading-7 text-slate-600">
           本会话回执码为：<span class="font-semibold text-slate-900">{{ receiptCode || "暂未同步" }}</span>。请妥善保存该回执码，若清除浏览器缓存或更换浏览器/设备，该回执码将会改变。
         </div>
 
+        <!-- 回执码查询输入区 -->
         <div class="mt-6 flex flex-col gap-3 sm:flex-row">
           <input
             v-model="receiptCode"
@@ -209,11 +212,13 @@ function statusBadgeClass(status: string) {
           </button>
         </div>
 
+        <!-- 错误/加载提示 -->
         <p v-if="lookupError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {{ lookupError }}
         </p>
         <p v-else-if="lookupLoading" class="mt-4 text-sm text-slate-500">正在查询…</p>
 
+        <!-- 查询结果列表：混合展示上传记录和反馈记录，按时间倒序 -->
         <div v-if="receiptRecords.length" class="mt-6 space-y-3">
           <article
             v-for="item in receiptRecords"
@@ -222,6 +227,7 @@ function statusBadgeClass(status: string) {
           >
             <div class="space-y-4">
               <div>
+                <!-- 状态徽章（待审核/已通过/已驳回 等） -->
                 <span
                   class="rounded-md px-2.5 py-1 text-xs font-medium"
                   :class="statusBadgeClass(item.status)"
@@ -232,6 +238,7 @@ function statusBadgeClass(status: string) {
                   当前类型：<span class="font-medium text-slate-900">{{ item.kind === "submission" ? "上传记录" : "反馈记录" }}</span>
                 </p>
               </div>
+              <!-- 记录详情 -->
               <div class="space-y-3 text-sm text-slate-500">
                 <p class="text-xl font-semibold tracking-tight text-slate-900">{{ item.title }}</p>
                 <p><span class="font-medium text-slate-900">提交时间：</span>{{ formatDate(item.createdAt) }}</p>
@@ -247,6 +254,7 @@ function statusBadgeClass(status: string) {
           </article>
         </div>
 
+        <!-- 无记录时的空状态 -->
         <div v-if="!receiptRecords.length" class="mt-6">
           <EmptyState title="输入回执码后查看记录" />
         </div>

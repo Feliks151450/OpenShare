@@ -127,17 +127,21 @@ async function removeRow(id: string) {
 </script>
 
 <template>
+  <!-- 文件标签管理页：管理员可创建、编辑、删除全站统一的预设标签，标签用于在资料详情页为文件分类 -->
   <div class="space-y-6">
     <PageHeader title="文件标签" description="全站统一的预设标签与颜色；访客详情页仅可选择此处配置的标签。" />
 
+    <!-- 权限不足时的提示 -->
     <div v-if="!canAccess()" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
       当前账号没有资料管理权限，无法编辑标签。
     </div>
 
     <template v-else>
+      <!-- 操作结果反馈消息 -->
       <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ message }}</p>
       <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
 
+      <!-- 新建标签表单卡片 -->
       <SurfaceCard class="space-y-4 p-5">
         <h2 class="text-sm font-semibold text-slate-900">新建标签</h2>
         <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -160,6 +164,7 @@ async function removeRow(id: string) {
         <p class="text-xs text-slate-500">颜色须为 #RGB 或 #RRGGBB。排序数字越小越靠前。</p>
       </SurfaceCard>
 
+      <!-- 已有标签列表表格：每行可内联编辑名称/颜色/排序，并提供保存与删除操作 -->
       <SurfaceCard class="overflow-hidden">
         <div v-if="loading" class="p-8 text-center text-sm text-slate-500">加载中…</div>
         <div v-else-if="items.length === 0" class="p-8 text-center text-sm text-slate-500">暂无标签，请在上方添加。</div>
@@ -175,6 +180,7 @@ async function removeRow(id: string) {
           </thead>
           <tbody>
             <tr v-for="row in items" :key="row.id">
+              <!-- 标签预览：以当前编辑中的名称和颜色实时渲染标签外观 -->
               <td>
                 <span
                   class="inline-flex rounded-xl px-3 py-3 text-s font-medium ring-1 ring-black/10"
@@ -207,6 +213,7 @@ async function removeRow(id: string) {
                   class="field w-full py-1.5 text-sm text-left tabular-nums pl-3 pr-1"
                 />
               </td>
+              <!-- 行操作：保存修改 / 删除标签 -->
               <td class="text-left">
                 <button
                   type="button"

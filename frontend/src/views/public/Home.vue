@@ -2107,6 +2107,7 @@ async function syncSessionReceiptCode() {
 </script>
 
 <template>
+  <!-- 瞬时警告浮层（操作失败等错误提示，自动淡出消失） -->
   <Teleport to="body">
     <div v-if="transientWarning" class="fixed inset-0 z-[130] flex items-center justify-center px-4">
       <div
@@ -2117,12 +2118,13 @@ async function syncSessionReceiptCode() {
       </div>
     </div>
   </Teleport>
-
-  <main class="app-container py-2 sm:py-8 lg:py-8">
+  <!-- 主页/目录浏览页：面包屑导航 + 文件夹信息描述 + 文件卡片/表格/列表视图 + 搜索 + 公告 + 管理员功能入口 -->
+  <main class="app-container py-0 px-0 sm:py-4 sm:px-4 lg:py-8 lg:px-8">
     <div class="space-y-6">
       <div class="grid gap-6">
       <section class="order-1 min-w-0">
-        <div class="panel overflow-hidden">
+        <div class="panel overflow-hidden rounded-none sm:rounded-2xl lg:rounded-2xl">
+          <!-- 面包屑导航栏：主页 > 父文件夹 > 当前文件夹 -->
           <div class="border-b border-slate-200 px-4 py-3 sm:px-6 dark:border-slate-800">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div class="min-w-0 max-w-full overflow-x-auto">
@@ -2147,11 +2149,12 @@ async function syncSessionReceiptCode() {
             </div>
           </div>
 
+          <!-- 当前文件夹详情头部：名称、统计信息、操作按钮（编辑/创建文件夹/删除/重新扫描/反馈/下载） -->
           <div v-if="currentFolderDetail" class="border-b border-slate-200 px-4 py-5 sm:px-6 dark:border-slate-800">
             <section>
               <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1 space-y-3">
-                  <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-blue-600 sm:text-xl dark:text-slate-100">
+                  <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-blue-600 sm:text-2xl dark:text-slate-100">
                     {{ currentFolderDetail.name }}
                   </p>
                   <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
@@ -2224,20 +2227,20 @@ async function syncSessionReceiptCode() {
             </section>
           </div>
 
-          <div :class="useWideDescriptionLayout ? 'xl:flex xl:gap-0 xl:px-6 xl:max-h-[calc(100vh-13rem)]' : ''">
+          <div :class="useWideDescriptionLayout ? 'xl:flex xl:gap-0 xl:pr-6 xl:max-h-[calc(100vh-13rem)]' : ''">
             <template v-if="currentFolderDetail">
               <div
                 :class="useWideDescriptionLayout
-                  ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-r xl:border-slate-200 xl:pr-6 xl:py-5'
+                  ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-none xl:border-slate-200 xl:pr-0 xl:py-0'
                   : 'border-b border-slate-200 px-4 py-5 sm:px-6'"
               >
-                <div v-if="currentFolderDescriptionHTML" class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5 dark:border-slate-800 dark:bg-slate-900/40">
+                <div v-if="currentFolderDescriptionHTML" class="rounded-3xl border border-slate-200 bg-white px-4 py-4 rounded-none sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:rounded-none xl:mx-0 xl:mt-0 dark:border-slate-800 dark:bg-slate-900/40">
                   <div class="space-y-3">
                     <div class="relative">
                       <div
                         ref="folderMarkdownClampRef"
                         class="markdown-content"
-                        :class="!folderMarkdownExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                        :class="!folderMarkdownExpanded ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
                         v-html="currentFolderDescriptionHTML"
                         @click.capture="handleMarkdownInternalLinkNavigate"
                       />
@@ -2262,8 +2265,9 @@ async function syncSessionReceiptCode() {
               </div>
             </template>
 
-            <div :class="useWideDescriptionLayout ? 'xl:min-w-0 xl:flex-1 xl:overflow-y-auto xl:py-5' : ''">
+            <div :class="useWideDescriptionLayout ? 'xl:min-w-0 xl:flex-1 xl:overflow-y-auto xl:py-3' : ''">
 
+          <!-- 搜索栏 + 标签过滤器 + 视图切换 + 操作按钮区 -->
           <div>
             <SearchSection
               v-model="searchInput"
@@ -2483,6 +2487,7 @@ async function syncSessionReceiptCode() {
             class="space-y-8 px-4 py-3 sm:px-5"
           >
             <div v-for="block in cardDisplayBlocks" :key="block.key">
+              <!-- 卡片视图：大图封面卡片布局，有封面的排前面 -->
               <div class="public-home-card-grid gap-4 md:gap-5">
             <article
               v-for="row in block.rows"
@@ -2698,6 +2703,7 @@ async function syncSessionReceiptCode() {
             </div>
           </div>
           <div v-else class="px-4 py-5 sm:px-6">
+            <!-- 表格视图：紧凑行展示文件/文件夹信息 -->
             <table class="data-table table-fixed">
               <thead>
                 <tr>
@@ -2793,6 +2799,7 @@ async function syncSessionReceiptCode() {
     </div>
   </main>
 
+  <!-- 侧滑面板：文件详情（在当前页右侧滑入展示，不跳转） -->
   <Teleport to="body">
     <Transition name="file-detail-drawer-shell">
       <div
@@ -2825,6 +2832,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 弹窗：Markdown 内链跳转确认（从简介中的站内链接跳转前询问） -->
   <Teleport to="body">
     <Transition name="modal-shell">
       <div
@@ -2928,6 +2936,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 底部批量操作栏：多选文件/文件夹后显示，支持批量下载 -->
   <Teleport to="body">
     <Transition
       enter-active-class="transition duration-300 ease-out"
@@ -2962,6 +2971,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 弹窗：文件夹/文件快速详情侧边栏（管理员预览） -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="sidebarDetailModal" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -3001,6 +3011,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 弹窗：公告中心（左侧列表 + 右侧详情，支持 Markdown 渲染） -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="announcementListOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -3092,6 +3103,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 弹窗：管理员删除文件夹确认 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="deleteResourceTarget" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -3142,6 +3154,7 @@ async function syncSessionReceiptCode() {
     </Transition>
   </Teleport>
 
+  <!-- 弹窗：下载确认 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div
@@ -3165,6 +3178,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：上传提交成功提示 -->
     <div v-if="uploadSuccessModalOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-screen items-center justify-center px-4 py-6">
         <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
@@ -3183,6 +3197,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：访客上传资料（文件选择 + 路径填写 + 说明） -->
     <div v-if="uploadModalOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-screen items-start justify-center px-4 py-6">
         <div class="modal-card panel w-full max-w-2xl overflow-hidden">
@@ -3293,6 +3308,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：反馈提交成功提示 -->
     <div v-if="feedbackSuccessModalOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-screen items-center justify-center px-4 py-6">
         <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
@@ -3311,6 +3327,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：访客反馈中心（问题描述 + 联系方式 + 回执码） -->
     <div v-if="feedbackModalOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-screen items-center justify-center px-4 py-6">
         <div class="modal-card panel w-full max-w-2xl overflow-hidden p-6">
@@ -3365,6 +3382,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：管理员编辑当前文件夹简介（Markdown + 实时预览） -->
     <div v-if="folderDescriptionEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
         <div
@@ -3507,6 +3525,7 @@ async function syncSessionReceiptCode() {
 
   <Teleport to="body">
     <Transition name="modal-shell">
+    <!-- 弹窗：管理员在当前目录下创建新文件夹 -->
     <div v-if="createFolderModalOpen" class="fixed inset-0 z-[125] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
       <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
         <div class="modal-card panel relative my-auto flex w-full max-w-md flex-col overflow-hidden p-6">

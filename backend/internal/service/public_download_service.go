@@ -285,7 +285,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		MimeType:                file.MimeType,
 		PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
 		PlaybackFallbackURL:     strings.TrimSpace(file.PlaybackFallbackURL),
-		CoverURL:                strings.TrimSpace(file.CoverURL),
+		CoverURL:                effectiveFileCoverURL(file.CoverURL, file.Extension, file.ID),
 		FolderDirectDownloadURL: s.FolderDirectDownloadURLForFile(ctx, *file),
 		DownloadAllowed:         dlAllowed,
 		DownloadPolicy:          DownloadPolicyString(file.AllowDownload),

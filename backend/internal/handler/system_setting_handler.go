@@ -35,6 +35,7 @@ func (h *SystemSettingHandler) GetPublicDownloadPolicy(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"large_download_confirm_bytes": policy.Download.LargeDownloadConfirmBytes,
+		"wide_layout_extensions":       policy.Download.WideLayoutExtensions,
 	})
 }
 

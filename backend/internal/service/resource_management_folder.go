@@ -54,7 +54,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 
 	description := strings.TrimSpace(input.Description)
 	remark := normalizeManagedRemark(input.Remark)
-	coverURL, err := normalizeOptionalHTTPURL(input.CoverURL)
+	coverURL, err := normalizeOptionalCoverURL(input.CoverURL)
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}

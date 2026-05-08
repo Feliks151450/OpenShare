@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"gorm.io/gorm"
@@ -45,7 +46,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 	if playbackFallbackURL != "" && playbackURL == "" {
 		return ErrInvalidResourceEdit
 	}
-	coverURL, err := normalizeOptionalHTTPURL(input.CoverURL)
+	coverURL, err := normalizeOptionalCoverURL(input.CoverURL)
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}
@@ -137,6 +138,34 @@ func normalizeOptionalHTTPURL(raw string) (string, error) {
 		return "", fmt.Errorf("url must include host")
 	}
 	return u.String(), nil
+}
+
+var internalFileCoverPathPattern = regexp.MustCompile(`^/files/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func normalizeOptionalCoverURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	if internalFileCoverPathPattern.MatchString(s) {
+		return s, nil
+	}
+	return normalizeOptionalHTTPURL(s)
+}
+
+var imageExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".jfif": true,
+	".gif": true, ".webp": true, ".svg": true, ".bmp": true,
+}
+
+func effectiveFileCoverURL(storedCoverURL, extension, fileID string) string {
+	if c := strings.TrimSpace(storedCoverURL); c != "" {
+		return c
+	}
+	if !imageExtensions[strings.ToLower(strings.TrimSpace(extension))] {
+		return ""
+	}
+	return "/files/" + fileID
 }
 
 const maxManagedRemarkRunes = 500

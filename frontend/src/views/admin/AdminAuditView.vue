@@ -207,6 +207,7 @@ function notifyPendingAuditChanged() {
 </script>
 
 <template>
+  <!-- 审核管理页：包含上传审核和用户反馈两大模块，管理员可审核访客上传的资料（通过/驳回）和处理用户反馈 -->
   <section class="space-y-8">
     <PageHeader
       eyebrow="Audit"
@@ -214,6 +215,7 @@ function notifyPendingAuditChanged() {
     />
 
     <section class="space-y-6">
+      <!-- 上传审核模块：展示待审核的资料列表，每条可快速通过或驳回（驳回需填写原因） -->
       <SurfaceCard class="space-y-5">
         <div class="flex items-start justify-between gap-4">
           <div>
@@ -222,6 +224,7 @@ function notifyPendingAuditChanged() {
           <button v-if="sessionStore.hasPermission('submission_moderation')" class="btn-secondary" @click="loadSubmissions">刷新</button>
         </div>
 
+        <!-- 操作反馈消息 -->
         <p v-if="submissionActionMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ submissionActionMessage }}</p>
         <p v-if="submissionActionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ submissionActionError }}</p>
         <p v-if="submissionsError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ submissionsError }}</p>
@@ -229,6 +232,7 @@ function notifyPendingAuditChanged() {
         <div v-if="!sessionStore.hasPermission('submission_moderation')" class="text-sm text-slate-500">当前账号没有上传审核权限。</div>
         <div v-else-if="!submissionsLoaded && submissionsLoading" class="text-sm text-slate-500">加载中…</div>
         <div v-else class="space-y-4">
+          <!-- 单条待审核项：展示文件名、类型、大小、回执码、描述，以及通过/驳回按钮 -->
           <div v-for="item in submissions" :key="item.submission_id" class="rounded-xl border border-slate-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="space-y-2">
@@ -251,6 +255,7 @@ function notifyPendingAuditChanged() {
         </div>
       </SurfaceCard>
 
+      <!-- 用户反馈模块：展示访客提交的反馈列表，可标记已处理或驳回 -->
       <SurfaceCard class="space-y-5">
         <div class="flex items-start justify-between gap-4">
           <div>
@@ -266,6 +271,7 @@ function notifyPendingAuditChanged() {
         <div v-if="!sessionStore.hasPermission('resource_moderation')" class="text-sm text-slate-500">当前账号没有资料管理权限。</div>
         <div v-else-if="!feedbackLoaded && feedbackLoading" class="text-sm text-slate-500">加载中…</div>
         <div v-else class="space-y-4">
+          <!-- 单条反馈项：展示目标类型、名称、时间、回执码、IP、描述，以及已处理/驳回操作 -->
           <div v-for="item in feedbackItems" :key="item.id" class="rounded-xl border border-slate-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="min-w-0 flex-1">
@@ -293,6 +299,7 @@ function notifyPendingAuditChanged() {
     </section>
   </section>
 
+  <!-- 驳回上传弹窗：Teleport 到 body，填写驳回原因后提交 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="submissionRejectTarget" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -302,6 +309,7 @@ function notifyPendingAuditChanged() {
           <p class="mt-2 text-sm leading-6 text-slate-500">填写驳回原因后，用户可在回执查询页看到驳回说明。</p>
         </div>
         <div class="mt-5 space-y-4">
+          <!-- 被驳回的资料摘要 -->
           <div class="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <p class="font-medium text-slate-900">{{ submissionRejectTarget.name }}</p>
             <p class="mt-1">{{ submissionRejectTarget.name }} · {{ formatSize(submissionRejectTarget.size) }}</p>
@@ -325,6 +333,7 @@ function notifyPendingAuditChanged() {
     </Transition>
   </Teleport>
 
+  <!-- 反馈处理弹窗：Teleport 到 body，支持"已处理"和"驳回"两种模式 -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="feedbackReviewTarget" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -336,6 +345,7 @@ function notifyPendingAuditChanged() {
           </p>
         </div>
         <div class="mt-5 space-y-4">
+          <!-- 被处理的反馈摘要 -->
           <div class="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <p class="font-medium text-slate-900">{{ feedbackReviewTarget.target_name }}</p>
             <p v-if="feedbackReviewTarget.target_path" class="mt-1 break-all">{{ feedbackReviewTarget.target_path }}</p>

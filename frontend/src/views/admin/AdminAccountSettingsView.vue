@@ -151,21 +151,26 @@ function readFileAsDataURL(file: File) {
 </script>
 
 <template>
+  <!-- 管理员账号设置页：修改个人资料（头像、显示名）和密码 -->
   <section class="space-y-8">
     <PageHeader
       eyebrow="Account"
       title="账号设置"
     />
 
+    <!-- 双栏布局：左侧基本资料，右侧修改密码 -->
     <section class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+      <!-- 基本资料卡片：头像预览/上传/移除 + 标示ID（只读）+ 显示名编辑 -->
       <SurfaceCard>
         <div>
           <h2 class="text-lg font-semibold text-slate-900">基本资料</h2>
         </div>
 
+        <!-- 头像区域：圆形预览 + 上传/移除按钮 -->
         <div class="mt-6 flex items-center gap-4">
           <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-3xl font-semibold text-slate-700">
             <img v-if="profileForm.avatarUrl" :src="profileForm.avatarUrl" alt="头像预览" class="h-full w-full object-cover" />
+            <!-- 无头像时显示用户名首字母 -->
             <span v-else>{{ sessionStore.displayName.slice(0, 1).toUpperCase() || "A" }}</span>
           </div>
           <div class="flex flex-col gap-3">
@@ -183,6 +188,7 @@ function readFileAsDataURL(file: File) {
           </div>
         </div>
 
+        <!-- 表单字段：标示ID（只读）、对外展示名 -->
         <div class="mt-6 grid gap-4">
           <div class="space-y-2">
             <label class="text-sm font-medium text-slate-700">标示ID</label>
@@ -201,6 +207,7 @@ function readFileAsDataURL(file: File) {
         </div>
       </SurfaceCard>
 
+      <!-- 修改密码卡片 -->
       <SurfaceCard>
         <div>
           <h2 class="text-lg font-semibold text-slate-900">修改密码</h2>
@@ -221,12 +228,14 @@ function readFileAsDataURL(file: File) {
           </button>
         </form>
 
+        <!-- 密码校验提示 -->
         <p v-if="passwordDirty && !passwordValid" class="mt-4 text-sm text-slate-500">
           新密码至少 8 位，且两次输入保持一致。
         </p>
       </SurfaceCard>
     </section>
 
+    <!-- 操作结果反馈 -->
     <p v-if="success" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ success }}</p>
     <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
   </section>

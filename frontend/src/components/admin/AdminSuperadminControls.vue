@@ -11,6 +11,7 @@ interface SystemPolicy {
   };
   download: {
     large_download_confirm_bytes: number;
+    wide_layout_extensions?: string;
   };
 }
 
@@ -62,6 +63,7 @@ const form = reactive<SystemPolicy>({
   },
   download: {
     large_download_confirm_bytes: 1024 * 1024 * 1024,
+    wide_layout_extensions: "",
   },
 });
 
@@ -120,6 +122,7 @@ function serializeUploadState() {
 function serializeDownloadState() {
   return JSON.stringify({
     large_download_confirm_bytes: toBytes(downloadConfirmSizeValue.value, downloadConfirmSizeUnit.value),
+    wide_layout_extensions: (form.download.wide_layout_extensions ?? "").trim(),
   });
 }
 
@@ -590,6 +593,14 @@ function isManagedRootClientChild(path: string, root: string) {
               <option value="B">B</option>
             </select>
           </div>
+        </div>
+        <div class="border-t border-slate-200 pt-5">
+          <h4 class="text-sm font-semibold text-slate-800">文件详情宽屏布局</h4>
+          <p class="mt-1 text-sm text-slate-500">当文件后缀匹配以下列表（逗号分隔，如 <code class="text-slate-700">.md,.txt,.nc</code>），且简介内容较长或包含图片时，在宽屏幕上启用左右分栏布局。留空则对所有文件禁用。</p>
+        </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">启用后缀列表</label>
+          <input v-model="form.download.wide_layout_extensions" class="field" placeholder="例如：.md,.txt,.nc" />
         </div>
         <button type="submit" class="btn-primary" :disabled="uploadSaving || !systemPolicyDirty">
           {{ uploadSaving ? "更新中…" : "确认更新" }}

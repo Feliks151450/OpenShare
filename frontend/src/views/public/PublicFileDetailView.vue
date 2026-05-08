@@ -558,6 +558,28 @@ const showFileDescriptionAbovePreview = computed(() => {
   return k === "markdown" || k === "pdf" || k === "plain" || k === "netcdf";
 });
 
+/** 文件详情宽屏左右布局：当文件后缀在后台配置的扩展名列表中，且简介内容较长或含图片时，在 XL 屏幕上启用左右分栏 */
+const useWideDescriptionLayout = computed(() => {
+  if (!detail.value) return false;
+  const allowed = wideLayoutExtensions.value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.length === 0) return false;
+  const ext = (detail.value.extension ?? "").trim().toLowerCase();
+  if (!ext || !allowed.includes(ext)) return false;
+  const desc = detail.value.description ?? "";
+  if (desc.trim().length > 300) return true;
+  if (/!\[.*?\]\(.*?\)/.test(desc)) return true;
+  return false;
+});
+
+const isWideScreen = ref(false);
+let wideScreenQuery: MediaQueryList | null = null;
+function updateWideScreen() {
+  isWideScreen.value = wideScreenQuery?.matches ?? false;
+}
+
 const previewFetchedText = ref("");
 /** NetCDF API 返回的 `structure`，用于 Markdown 结构化预览 */
 const previewNetcdfStructure = ref<NetCDFDumpGroup | null>(null);
@@ -848,6 +870,8 @@ onBeforeUnmount(() => {
   if (!props.panelPresentation && typeof document !== "undefined") {
     document.body.style.overflow = "";
   }
+  wideScreenQuery?.removeEventListener("change", updateWideScreen);
+  wideScreenQuery = null;
 });
 
 const folderIdForPeers = computed(() => detail.value?.folder_id?.trim() ?? "");
@@ -867,7 +891,7 @@ const detailInnerMaxWidthClass = computed(() => {
   if (props.panelPresentation) {
     return "max-w-none";
   }
-  return layoutWide.value ? "max-w-screen-2xl" : "max-w-6xl";
+  return layoutWide.value ? "max-w-none" : "max-w-6xl";
 });
 
 const showVideoPeerAsideExpanded = computed(
@@ -1075,10 +1099,6 @@ const secondaryDetailRows = computed(() => {
     { label: "文件大小", value: formatSize(detail.value.size) },
     { label: "更新时间", value: formatDate(detail.value.uploaded_at) },
   ];
-  const rm = (detail.value.remark ?? "").trim();
-  if (rm) {
-    rows.splice(1, 0, { label: "备注", value: rm });
-  }
   return rows;
 });
 const editorDirty = computed(() => {
@@ -1116,16 +1136,22 @@ const fileDownloadConfirmBody = computed(() => {
 });
 
 onMounted(() => {
+  wideScreenQuery = window.matchMedia("(min-width: 1280px)");
+  updateWideScreen();
+  wideScreenQuery.addEventListener("change", updateWideScreen);
   void Promise.all([loadDetail(), loadAdminPermission(), syncSessionReceiptCode(), loadLargeDownloadPolicy()]);
 });
 
+const wideLayoutExtensions = ref("");
+
 async function loadLargeDownloadPolicy() {
   try {
-    const response = await httpClient.get<{ large_download_confirm_bytes: number }>("/public/download-policy");
+    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string }>("/public/download-policy");
     const b = Number(response.large_download_confirm_bytes);
     if (Number.isFinite(b) && b > 0) {
       largeDownloadConfirmBytes.value = b;
     }
+    wideLayoutExtensions.value = (response.wide_layout_extensions ?? "").trim();
   } catch {
     /* 默认 1 GiB */
   }
@@ -1166,6 +1192,16 @@ watch(
   () => fileID.value,
   () => {
     fileDescriptionExpanded.value = false;
+  },
+);
+
+// 宽屏左右布局下默认展开简介
+watch(
+  () => useWideDescriptionLayout.value && isWideScreen.value,
+  (enabled) => {
+    if (enabled) {
+      fileDescriptionExpanded.value = true;
+    }
   },
 );
 
@@ -1648,11 +1684,14 @@ function performDownloadFile() {
 </script>
 
 <template>
-  <section :class="panelPresentation ? 'px-3 py-3 sm:px-4 sm:py-4' : 'app-container py-2 sm:py-8 lg:py-8'">
+  <!-- 文件详情页：展示文件元信息、封面图、简介（Markdown）、预览/播放、下载操作，管理员可编辑/删除，访客可反馈 -->
+  <section :class="panelPresentation ? 'px-3 py-3 sm:px-4 sm:py-4' : 'app-container py-2 px-2 sm:py-2 lg:py-2 xl:py-8'">
     <div class="mx-auto w-full space-y-6" :class="detailInnerMaxWidthClass">
       <SurfaceCard>
+        <!-- 加载状态 -->
         <p v-if="loading" class="text-sm text-slate-500">加载中…</p>
 
+        <!-- 错误状态：显示错误信息 + 返回按钮 -->
         <div v-else-if="error" class="space-y-4">
           <p class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
           <div class="flex flex-col gap-3 sm:flex-row">
@@ -1661,7 +1700,9 @@ function performDownloadFile() {
           </div>
         </div>
 
+        <!-- 文件详情主内容（加载完成且有数据时） -->
         <template v-else-if="detail">
+          <!-- 操作反馈消息 -->
           <p v-if="message" class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
           <p
             v-if="linkCopyHint"
@@ -1670,10 +1711,13 @@ function performDownloadFile() {
             {{ linkCopyHint }}
           </p>
 
+          <!-- 文件基本信息区 -->
           <section>
             <div class="space-y-4">
               <div class="flex flex-col gap-4">
+                <!-- 面包屑文件夹路径 + 文件标题 + 备注 + 标签 -->
                 <div class="min-w-0 w-full space-y-2">
+                  <!-- 返回文件夹面包屑 -->
                   <button
                     type="button"
                     class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-blue-200/90 hover:from-blue-50/80 hover:to-slate-50 hover:shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-900/80 dark:hover:border-blue-800/70 dark:hover:from-slate-800/90"
@@ -1691,18 +1735,21 @@ function performDownloadFile() {
                       {{ detailFolderPathLabel }}
                     </span>
                   </button>
+                  <!-- 文件名称 -->
                   <h3
                     class="min-w-0 break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-3xl"
                     :title="detail.name"
                   >
                     {{ detail.name }}
                   </h3>
+                  <!-- 备注 -->
                   <p
                     v-if="(detail.remark ?? '').trim()"
                     class="text-sm leading-relaxed text-slate-700"
                   >
                     {{ (detail.remark ?? "").trim() }}
                   </p>
+                  <!-- 文件标签 -->
                   <FileTagChips
                     v-if="(detail.tags?.length ?? 0) > 0"
                     :tags="detail.tags ?? []"
@@ -1710,6 +1757,7 @@ function performDownloadFile() {
                     size="md"
                   />
                 </div>
+                <!-- 操作按钮行：面板全屏入口、视频元信息切换、编辑/标签/删除（管理员）、反馈、复制直链、磁盘路径复制 -->
                 <div class="w-full min-w-0">
                   <div
                     class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3"
@@ -1822,7 +1870,8 @@ function performDownloadFile() {
                 id="video-file-meta-panel"
                 class="min-w-0 space-y-3"
               >
-                <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <!-- 文件元信息网格：大小、下载量、更新时间、MIME类型等 -->
+                <div class="grid gap-x-8 gap-y-3 sm:grid-cols-3 lg:grid-cols-3">
                   <div
                     v-for="item in secondaryDetailRows"
                     :key="item.label"
@@ -1839,26 +1888,31 @@ function performDownloadFile() {
                 </div>
               </div>
 
+              <!-- 宽屏左右布局：简介左栏 + 内容右栏；非宽屏时保持原有上下布局 -->
+              <div :class="useWideDescriptionLayout && isWideScreen ? 'xl:flex xl:gap-6 xl:pr-0 xl:max-h-[calc(100vh-13rem)]' : ''">
               <div
-                v-if="showFileDescriptionAbovePreview"
-                class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
+                v-if="showFileDescriptionAbovePreview || (useWideDescriptionLayout && isWideScreen)"
+                :class="[
+                  'mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5',
+                  useWideDescriptionLayout && isWideScreen ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:rounded-none xl:border-none xl:bg-transparent xl:px-0 xl:py-0' : '',
+                ]"
               >
                 <div v-if="descriptionHTML" class="space-y-3">
                   <div class="relative">
                     <div
                       ref="fileDescriptionClampRef"
                       class="markdown-content"
-                      :class="!fileDescriptionExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                      :class="!fileDescriptionExpanded && !(useWideDescriptionLayout && isWideScreen) ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
                       v-html="descriptionHTML"
                       @click.capture="handleMarkdownInternalLinkNavigate"
                     />
                     <div
-                      v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible"
+                      v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible && !(useWideDescriptionLayout && isWideScreen)"
                       class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent"
                       aria-hidden="true"
                     />
                   </div>
-                  <div v-if="fileDescriptionFooterVisible" class="flex justify-center sm:justify-start">
+                  <div v-if="fileDescriptionFooterVisible && !(useWideDescriptionLayout && isWideScreen)" class="flex justify-center sm:justify-start">
                     <button
                       type="button"
                       class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-950/[0.04] transition hover:border-slate-300 hover:bg-slate-50"
@@ -1871,6 +1925,7 @@ function performDownloadFile() {
                 <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
               </div>
 
+              <div :class="useWideDescriptionLayout && isWideScreen ? 'xl:min-w-0 xl:flex-1 xl:overflow-y-auto' : ''">
               <div
                 v-if="isVideo"
                 :class="
@@ -2266,16 +2321,20 @@ function performDownloadFile() {
               </div>
             </div>
 
+              </div>
+              </div>
+              <!-- /宽屏左右布局 -->
+
             <div
-              v-if="!showFileDescriptionAbovePreview"
-              class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
+              v-if="!showFileDescriptionAbovePreview && !(useWideDescriptionLayout && isWideScreen)"
+              class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
               <div v-if="descriptionHTML" class="space-y-3">
                 <div class="relative">
                   <div
                     ref="fileDescriptionClampRef"
                     class="markdown-content"
-                    :class="!fileDescriptionExpanded ? 'max-h-[min(42vh,20rem)] overflow-hidden' : ''"
+                    :class="!fileDescriptionExpanded ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
                     v-html="descriptionHTML"
                     @click.capture="handleMarkdownInternalLinkNavigate"
                   />
@@ -2302,6 +2361,7 @@ function performDownloadFile() {
       </SurfaceCard>
     </div>
 
+    <!-- 弹窗：管理员删除文件确认（支持移入回收站或彻底删除） -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="deleteDialogOpen && detail" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
@@ -2352,6 +2412,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：下载确认（需用户确认后触发下载） -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div
@@ -2371,6 +2432,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：反馈提交成功提示 -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="feedbackSuccessModalOpen" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
@@ -2389,6 +2451,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：访客反馈中心（问题描述、联系方式、回执码） -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="feedbackModalOpen && detail" class="fixed inset-0 z-[120] bg-slate-950/40 backdrop-blur-sm">
@@ -2447,6 +2510,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：管理员编辑文件信息（名称、简介Markdown、备注、封面URL、播放URL、下载策略等，支持实时预览） -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="descriptionEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
@@ -2585,6 +2649,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：管理员编辑文件标签（勾选预设标签） -->
     <Teleport to="body">
       <Transition name="modal-shell">
         <div

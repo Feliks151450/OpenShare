@@ -66,7 +66,7 @@
   /* 窄视口（<sm）去掉左右留白，宽屏逐步恢复，避免手机横滑与浪费横向空间 */
   /* xl+ 加宽：首页等「主栏 + 右侧边栏」布局下主栏需约 ≥1200px 才能稳定容纳卡片四列（17.5rem 列宽 + 间距） */
   .app-container {
-    @apply mx-auto w-full max-w-[1360px] px-0 sm:px-4 md:px-6 lg:px-8 xl:max-w-[2150px];
+    @apply mx-auto w-full max-w-[1360px] px-2 sm:px-4 md:px-6 lg:px-8 xl:max-w-[2150px];
   }
 
   .panel {

@@ -43,7 +43,8 @@ func (p *UploadPolicy) UnmarshalJSON(data []byte) error {
 }
 
 type DownloadPolicy struct {
-	LargeDownloadConfirmBytes int64 `json:"large_download_confirm_bytes"`
+	LargeDownloadConfirmBytes int64  `json:"large_download_confirm_bytes"`
+	WideLayoutExtensions      string `json:"wide_layout_extensions"`
 }
 
 type SystemPolicy struct {
@@ -120,6 +121,7 @@ func (s *SystemSettingService) SavePolicy(ctx context.Context, incoming SystemPo
 	if incoming.Download.LargeDownloadConfirmBytes > 0 {
 		policy.Download.LargeDownloadConfirmBytes = incoming.Download.LargeDownloadConfirmBytes
 	}
+	policy.Download.WideLayoutExtensions = incoming.Download.WideLayoutExtensions
 
 	if policy.Upload.MaxUploadTotalBytes <= 0 {
 		return nil, ErrInvalidUploadInput

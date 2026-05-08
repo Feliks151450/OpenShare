@@ -410,7 +410,7 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			Description:             file.Description,
 			Remark:                  file.Remark,
 			Extension:               file.Extension,
-			CoverURL:                strings.TrimSpace(file.CoverURL),
+			CoverURL:                effectiveFileCoverURL(file.CoverURL, file.Extension, file.ID),
 			PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
 			FolderDirectDownloadURL: fd,
 			DownloadAllowed:         allowed,

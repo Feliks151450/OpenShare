@@ -231,6 +231,7 @@ function detailSummary(item: OperationLogItem) {
 </script>
 
 <template>
+  <!-- 操作记录页：以卡片列表展示所有管理后台操作日志（谁、什么操作、对哪个对象、详情、时间IP），支持分页 -->
   <section class="space-y-4">
     <PageHeader
       eyebrow="LOGS"
@@ -243,8 +244,10 @@ function detailSummary(item: OperationLogItem) {
     <section class="space-y-1">
       <p v-if="loading && loaded" class="text-sm text-slate-500">正在刷新日志…</p>
 
+      <!-- 单条操作日志卡片：五列布局（摘要、操作人、对象、详情、时间IP） -->
       <SurfaceCard v-for="item in items" :key="item.id">
         <div class="grid gap-x-3 gap-y-1 text-sm text-slate-600 xl:grid-cols-[minmax(0,1.7fr)_108px_210px_minmax(0,1.15fr)_168px]">
+          <!-- 操作摘要：操作类型标签 + 目标类型标签 + 摘要说明 -->
           <div class="min-w-0 space-y-1">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="inline-flex rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] leading-4 text-slate-700">{{ actionLabel(item.action) }}</span>
@@ -253,18 +256,22 @@ function detailSummary(item: OperationLogItem) {
             <p class="min-w-0 truncate font-medium leading-5 text-slate-900">{{ summaryLabel(item) }}</p>
           </div>
 
+          <!-- 操作人 -->
           <div class="space-y-0.5 xl:self-center">
             <p class="text-[11px] leading-4 text-slate-400">操作人</p>
             <p class="truncate leading-5">{{ actorLabel(item) }}</p>
           </div>
+          <!-- 操作对象 -->
           <div class="space-y-0.5 xl:self-center">
             <p class="text-[11px] leading-4 text-slate-400">对象</p>
             <p class="truncate leading-5">{{ objectLabel(item) }}</p>
           </div>
+          <!-- 详细信息 -->
           <div class="space-y-0.5 xl:self-center">
             <p class="text-[11px] leading-4 text-slate-400">详情</p>
             <p class="truncate leading-5">{{ detailSummary(item) }}</p>
           </div>
+          <!-- 时间和IP -->
           <div class="space-y-0.5 text-left xl:self-center xl:text-right">
             <p class="text-[11px] leading-4 text-slate-400">时间</p>
             <p class="leading-5 text-slate-700">{{ formatDate(item.created_at) }}</p>
@@ -273,8 +280,10 @@ function detailSummary(item: OperationLogItem) {
         </div>
       </SurfaceCard>
 
+      <!-- 空状态 -->
       <EmptyState v-if="!loading && items.length === 0" title="暂无操作记录" description="当前尚未写入后台管理操作记录，请在后续操作后重新查看。" />
 
+      <!-- 分页控件 -->
       <div v-if="totalPages > 1" class="mt-6 flex items-center justify-center gap-3">
         <button class="btn-secondary" :disabled="page <= 1" @click="goToPage(page - 1)">上一页</button>
         <span class="text-sm text-slate-500">{{ page }} / {{ totalPages }}</span>

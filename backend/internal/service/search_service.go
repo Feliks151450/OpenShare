@@ -488,7 +488,7 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			Name:          candidate.Name,
 			Remark:        strings.TrimSpace(candidate.Remark),
 			Extension:     candidate.Extension,
-			CoverURL:      strings.TrimSpace(candidate.CoverURL),
+			CoverURL:      effectiveFileCoverURL(candidate.CoverURL, candidate.Extension, candidate.ID),
 			PlaybackURL:   strings.TrimSpace(candidate.PlaybackURL),
 			FolderDirectDownloadURL: fd,
 			DownloadAllowed:         dl,

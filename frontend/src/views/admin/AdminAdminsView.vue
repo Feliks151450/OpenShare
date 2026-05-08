@@ -308,13 +308,16 @@ function formatDate(value: string) {
 </script>
 
 <template>
+  <!-- 权限管理页：超管可创建管理员并分配权限、查看管理员列表、停用/启用账号、重置密码、删除管理员 -->
   <section class="space-y-8">
     <PageHeader
       eyebrow="PERMISSIONS"
       title="权限管理"
     />
 
+    <!-- 有管理权限时显示双栏布局：左栏创建表单，右栏管理员列表 -->
     <section :class="canManageAdmins ? 'grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]' : 'space-y-6'">
+      <!-- 创建管理员卡片（仅超管可见）：选择权限组并提交，创建成功弹出初始凭证 -->
       <SurfaceCard v-if="canManageAdmins">
         <h2 class="text-lg font-semibold text-slate-900">创建管理员</h2>
         <form class="mt-6 space-y-4" @submit.prevent="createAdmin">
@@ -334,6 +337,7 @@ function formatDate(value: string) {
         </form>
       </SurfaceCard>
 
+      <!-- 管理员列表卡片 -->
       <SurfaceCard>
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -344,9 +348,11 @@ function formatDate(value: string) {
 
         <div v-if="!loaded && loading" class="mt-4 text-sm text-slate-500">加载中…</div>
         <div v-else class="mt-6 space-y-4">
+          <!-- 单条管理员记录：头像 + 名称/角色/状态标签 + 标示ID/创建时间 + 操作按钮 + 权限编辑区 -->
           <article v-for="item in visibleItems" :key="item.id" class="rounded-xl border border-slate-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="flex min-w-0 items-start gap-3">
+                <!-- 头像：有图片则显示，否则显示首字母 -->
                 <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-base font-semibold text-slate-700">
                   <img v-if="item.avatar_url" :src="item.avatar_url" alt="管理员头像" class="h-full w-full object-cover" />
                   <span v-else>{{ item.display_name.slice(0, 1).toUpperCase() || "A" }}</span>
@@ -361,6 +367,7 @@ function formatDate(value: string) {
                   <p class="mt-1.5 text-xs text-slate-500 sm:text-sm">标示ID：{{ item.username }} · 创建时间：{{ formatDate(item.created_at) }}</p>
                 </div>
               </div>
+              <!-- 操作按钮区（超级管理员不可被操作）：停用/启用 + 重置密码 + 删除 -->
               <div v-if="canManageAdmins && item.role !== 'super_admin'" class="flex shrink-0 gap-1.5 self-start">
                 <button
                   class="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 sm:text-sm"
@@ -373,6 +380,7 @@ function formatDate(value: string) {
               </div>
             </div>
 
+            <!-- 权限编辑区：可点击权限标签切换选中状态，修改后保存按钮激活 -->
             <div v-if="canManageAdmins && item.role !== 'super_admin'" class="mt-4 space-y-4">
               <div class="flex items-start justify-between gap-4">
                 <div class="flex flex-1 flex-wrap gap-2">
@@ -399,9 +407,11 @@ function formatDate(value: string) {
       </SurfaceCard>
     </section>
 
+    <!-- 操作反馈消息 -->
     <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
     <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
 
+    <!-- 弹窗1：创建成功后显示初始凭证（标示ID、用户名、初始密码），关闭后不再显示 -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="createdCredentials" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
@@ -435,6 +445,7 @@ function formatDate(value: string) {
       </div>
       </Transition>
 
+      <!-- 弹窗2：删除管理员确认，需输入超管密码 -->
       <Transition name="modal-shell">
       <div v-if="deletingAdmin" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
         <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
@@ -464,6 +475,7 @@ function formatDate(value: string) {
       </div>
       </Transition>
 
+      <!-- 弹窗3：重置管理员密码 -->
       <Transition name="modal-shell">
       <div v-if="resettingAdmin" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
         <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
@@ -493,6 +505,7 @@ function formatDate(value: string) {
       </div>
       </Transition>
 
+      <!-- 弹窗4：停用/启用管理员账号确认 -->
       <Transition name="modal-shell">
       <div v-if="statusConfirmAdmin" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
         <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">

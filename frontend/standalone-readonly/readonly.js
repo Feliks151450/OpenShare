@@ -352,13 +352,23 @@ function isSafeImageUrlForSrc(url) {
   return true;
 }
 
+var internalFileCoverRe = /^\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+function internalFileCoverHref(path) {
+  var m = path.trim().match(internalFileCoverRe);
+  if (!m) return null;
+  return "/api/public/files/" + m[1] + "/download";
+}
+
 function resolveMarkdownImageUrlToHref(raw) {
-  const u = raw.trim();
+  var u = raw.trim();
   if (!u) return "";
   if (/^https?:\/\//i.test(u)) return u;
+  var internal = internalFileCoverHref(u);
+  if (internal) return internal;
   try {
     return new URL(u, window.location.href).href;
-  } catch {
+  } catch (_e) {
     return u;
   }
 }
@@ -1981,7 +1991,7 @@ function renderHome() {
         descHtml
           ? `<div class="space-y-3">
         <div class="relative">
-          <div id="folder-md" class="markdown-content ${descExpanded ? "" : "max-h-[min(42vh,20rem)] overflow-hidden"}">${descHtml}</div>
+          <div id="folder-md" class="markdown-content ${descExpanded ? "" : "max-h-[min(21vh,10rem)] overflow-hidden"}">${descHtml}</div>
           <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent ${descExpanded ? "hidden" : ""}" aria-hidden="true"></div>
         </div>
         <div class="flex justify-center sm:justify-start ${wideLayout ? "hidden" : ""}">
@@ -2421,7 +2431,7 @@ function renderFileDetail() {
   const descBodyHtmlIntro = descHtml
     ? `<div class="space-y-3">
         <div class="relative">
-          <div id="file-md" class="markdown-content ${state.fileMarkdownExpanded ? "" : "max-h-[min(42vh,20rem)] overflow-hidden"}">${descHtml}</div>
+          <div id="file-md" class="markdown-content ${state.fileMarkdownExpanded ? "" : "max-h-[min(21vh,10rem)] overflow-hidden"}">${descHtml}</div>
           <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent ${state.fileMarkdownExpanded ? "hidden" : ""}" aria-hidden="true"></div>
         </div>
         <div class="flex justify-center sm:justify-start">

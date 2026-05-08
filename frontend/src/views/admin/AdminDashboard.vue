@@ -102,7 +102,9 @@ function setMetric(title: string, value: string | number) {
 </script>
 
 <template>
+  <!-- 管理后台控制台：展示站点核心统计指标卡片（访问数、资料数、下载数等），超级管理员可见系统级控件 -->
   <section class="space-y-6">
+    <!-- 页面标题区 -->
     <header class="space-y-2">
       <div class="space-y-2">
         <p class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">CONSOLE</p>
@@ -110,6 +112,7 @@ function setMetric(title: string, value: string | number) {
       </div>
     </header>
 
+    <!-- 指标卡片网格：展示总量与近7天的访问数、资料数、下载数 -->
     <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <StatCard
         v-for="metric in metrics"
@@ -124,8 +127,10 @@ function setMetric(title: string, value: string | number) {
       </StatCard>
     </section>
 
+    <!-- 加载状态提示 -->
     <p v-if="loading" class="text-sm text-slate-500 dark:text-slate-400">正在刷新控制台数据…</p>
 
+    <!-- 超级管理员专有控件（如数据导入等系统级操作） -->
     <AdminSuperadminControls v-if="sessionStore.isSuperAdmin" />
   </section>
 </template>
