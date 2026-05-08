@@ -39,6 +39,7 @@ import {
   fileCoverImageHrefFromFields,
   renderSimpleMarkdown,
 } from "../../lib/markdown";
+import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -469,7 +470,20 @@ const downloadConfirmMessage = computed(() => {
   return `该文件大小为 ${row.sizeText}，已超过本站设定的大文件阈值（${formatSize(largeDownloadConfirmBytes.value)}）。确定要下载吗？`;
 });
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
-const currentFolderDescriptionHTML = computed(() => renderSimpleMarkdown(currentFolderDetail.value?.description ?? ""));
+const currentFolderDescriptionHTML = ref("");
+let folderDescRenderSerial = 0;
+watch(
+  () => currentFolderDetail.value?.description ?? "",
+  (desc) => {
+    const mySerial = ++folderDescRenderSerial;
+    renderMarkdownAsync(desc).then((html) => {
+      if (mySerial === folderDescRenderSerial) {
+        currentFolderDescriptionHTML.value = html;
+      }
+    });
+  },
+  { immediate: true },
+);
 
 const useWideDescriptionLayout = computed(() => {
   if (!currentFolderDetail.value) return false;

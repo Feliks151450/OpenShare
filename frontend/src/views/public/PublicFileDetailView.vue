@@ -21,6 +21,7 @@ import {
 import type { FileTagDefinition, PublicFileTag } from "../../lib/publicFileTags";
 import { fetchPublicFileTagDefinitions, readableTextColorForPreset } from "../../lib/publicFileTags";
 import FileTagChips from "../../components/public/FileTagChips.vue";
+import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
@@ -32,6 +33,7 @@ import {
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { renderSimpleMarkdown } from "../../lib/markdown";
+import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -1065,7 +1067,20 @@ async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
   }
 }
 
-const descriptionHTML = computed(() => renderSimpleMarkdown(detail.value?.description ?? ""));
+const descriptionHTML = ref("");
+let descRenderSerial = 0;
+watch(
+  () => detail.value?.description ?? "",
+  (desc) => {
+    const mySerial = ++descRenderSerial;
+    renderMarkdownAsync(desc).then((html) => {
+      if (mySerial === descRenderSerial) {
+        descriptionHTML.value = html;
+      }
+    });
+  },
+  { immediate: true },
+);
 
 function updateFileDescriptionClampUI() {
   const el = fileDescriptionClampRef.value;
@@ -2016,7 +2031,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
@@ -2042,7 +2056,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
@@ -2174,7 +2187,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
@@ -2200,7 +2212,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
@@ -2367,7 +2378,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
@@ -2393,7 +2403,6 @@ function performDownloadFile() {
                           />
                           <div class="min-w-0 flex-1">
                             <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
-                            <span v-if="peer.id === fileID" class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>
                             <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
                             <div v-if="(peer.tags?.length ?? 0) > 0" class="mt-1 flex flex-wrap gap-1">
                               <span
