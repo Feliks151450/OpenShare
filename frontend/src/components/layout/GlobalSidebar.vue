@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Folder, Home } from "lucide-vue-next";
 
 import { httpClient } from "../../lib/http/client";
-import type { PublicFolderItem } from "../../lib/publicHomeDirectoryCache";
+import { sharedRootFolders, type PublicFolderItem } from "../../lib/publicHomeDirectoryCache";
+import { staticDataLoader } from "../../lib/staticDataLoader";
 import { useSidebar } from "../../composables/useSidebar";
 
 const route = useRoute();
 const router = useRouter();
 const { expanded, loadStoredState, close } = useSidebar();
 
-const folders = ref<PublicFolderItem[]>([]);
 const loading = ref(false);
 
 const activeFolderId = computed(() => {
@@ -26,9 +26,9 @@ async function loadRootFolders() {
   loading.value = true;
   try {
     const response = await httpClient.get<{ items: PublicFolderItem[] }>("/public/folders");
-    folders.value = response.items ?? [];
+    sharedRootFolders.value = response.items ?? [];
   } catch {
-    folders.value = [];
+    sharedRootFolders.value = [];
   } finally {
     loading.value = false;
   }
@@ -46,11 +46,13 @@ function goFolder(id: string) {
 
 onMounted(() => {
   loadStoredState();
-  loadRootFolders();
-});
-
-watch(() => route.name, (name) => {
-  if (name === "public-home") {
+  // 优先用 staticDataLoader 预加载的数据
+  if (sharedRootFolders.value.length === 0 && staticDataLoader.rootFolders) {
+    sharedRootFolders.value = [...(staticDataLoader.rootFolders as unknown as PublicFolderItem[])];
+  }
+  // Home.vue already fetches root folders on the home page;
+  // only fetch independently when mounting on a non-home route.
+  if (route.name !== "public-home" && sharedRootFolders.value.length === 0) {
     loadRootFolders();
   }
 });
@@ -97,7 +99,7 @@ watch(() => route.name, (name) => {
     <!-- Folder list -->
     <div class="flex-1 overflow-y-auto px-2 py-1.5">
       <p
-        v-if="!loading && folders.length === 0"
+        v-if="!loading && sharedRootFolders.length === 0"
         class="px-2 py-4 text-center text-xs text-slate-400"
       >
         暂无目录
@@ -107,7 +109,7 @@ watch(() => route.name, (name) => {
       </div>
       <div class="space-y-0.5">
         <button
-          v-for="folder in folders"
+          v-for="folder in sharedRootFolders"
           :key="folder.id"
           type="button"
           class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition"

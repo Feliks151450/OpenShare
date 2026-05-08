@@ -167,7 +167,7 @@ func (s *AdminAuthService) UpdateProfile(ctx context.Context, adminID, displayNa
 	adminID = strings.TrimSpace(adminID)
 	displayName = strings.TrimSpace(displayName)
 	avatarURL = strings.TrimSpace(avatarURL)
-	if adminID == "" || len([]rune(displayName)) == 0 || len([]rune(displayName)) > 40 || !isValidAvatarDataURL(avatarURL) {
+	if adminID == "" || len([]rune(displayName)) == 0 || len([]rune(displayName)) > 40 || !isValidAvatarURL(avatarURL) {
 		return nil, ErrInvalidAdminProfileUpdate
 	}
 
@@ -208,12 +208,17 @@ func (s *AdminAuthService) UpdateProfile(ctx context.Context, adminID, displayNa
 	return updated, nil
 }
 
-func isValidAvatarDataURL(raw string) bool {
+func isValidAvatarURL(raw string) bool {
 	if raw == "" {
 		return true
 	}
-	if len(raw) > maxAdminAvatarDataURLLength {
-		return false
+	// data:image/... base64
+	if strings.HasPrefix(raw, "data:image/") {
+		return len(raw) <= maxAdminAvatarDataURLLength
 	}
-	return strings.HasPrefix(raw, "data:image/")
+	// http(s) 直链
+	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") {
+		return len(raw) <= maxAdminAvatarDataURLLength
+	}
+	return false
 }

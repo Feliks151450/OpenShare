@@ -8,6 +8,7 @@ import {
   type OpenSharePublicFileInfo,
   type PublicFileDetailPayload,
 } from "./openSharePublicFileInfo";
+import { staticDataLoader } from "./staticDataLoader";
 
 export type { OpenSharePublicFileInfo };
 
@@ -23,6 +24,8 @@ export type OpenShareConsoleApi = {
   runtime: "spa";
   nav: OpenShareConsoleNavSpa;
   home: OpenShareConsoleHomeSpa;
+  /** CDN 静态数据加载器：可配置预导出 JSON 直链，替代部分公开 API 请求 */
+  staticData: typeof staticDataLoader;
 };
 
 export type ConsoleNavOpts = {
@@ -208,5 +211,6 @@ export function mountOpenShareConsole(router: Router): void {
     runtime: "spa",
     nav,
     home,
+    staticData: staticDataLoader,
   };
 }

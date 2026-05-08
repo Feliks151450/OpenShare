@@ -274,8 +274,17 @@ async function parsePayload(response) {
 }
 
 let apiRequestSwitching = false;
+/** 去重：合并同一 URL 的并行 GET 请求 */
+const _inflightRequests = new Map();
 
 async function apiRequest(path, options = {}) {
+  // 对 GET 请求去重：同一 URL 的并行请求共享同一个 promise
+  const isGet = !options.method || options.method.toUpperCase() === "GET";
+  if (isGet && !options.body) {
+    const inflight = _inflightRequests.get(path);
+    if (inflight) return inflight;
+  }
+
   const headers = new Headers({ Accept: "application/json" });
   if (options.headers) new Headers(options.headers).forEach((v, k) => headers.set(k, v));
   let body = options.body;
@@ -291,34 +300,46 @@ async function apiRequest(path, options = {}) {
       credentials: "omit",
     });
   };
-  let response;
-  try {
-    response = await doFetch();
-  } catch (firstErr) {
-    // 仅对网络错误尝试切换 API 地址并重试一次
-    if (firstErr instanceof TypeError && !apiRequestSwitching) {
-      apiRequestSwitching = true;
-      try {
-        const switched = await retryNextApiBase();
-        if (switched) {
-          try {
-            response = await doFetch();
-          } catch {
-            apiRequestSwitching = false;
-            throw firstErr;
+
+  const doRequest = async function () {
+    let response;
+    try {
+      response = await doFetch();
+    } catch (firstErr) {
+      // 仅对网络错误尝试切换 API 地址并重试一次
+      if (firstErr instanceof TypeError && !apiRequestSwitching) {
+        apiRequestSwitching = true;
+        try {
+          const switched = await retryNextApiBase();
+          if (switched) {
+            try {
+              response = await doFetch();
+            } catch {
+              apiRequestSwitching = false;
+              throw firstErr;
+            }
           }
+        } finally {
+          apiRequestSwitching = false;
         }
-      } finally {
-        apiRequestSwitching = false;
       }
+      if (!response) throw firstErr;
     }
-    if (!response) throw firstErr;
+    const payload = await parsePayload(response);
+    if (!response.ok) {
+      throw new HttpError(response.statusText || "Request failed", response.status, payload);
+    }
+    return payload;
+  };
+
+  if (isGet && !options.body) {
+    const promise = doRequest().finally(() => {
+      _inflightRequests.delete(path);
+    });
+    _inflightRequests.set(path, promise);
+    return promise;
   }
-  const payload = await parsePayload(response);
-  if (!response.ok) {
-    throw new HttpError(response.statusText || "Request failed", response.status, payload);
-  }
-  return payload;
+  return doRequest();
 }
 
 function readApiError(err, fallback = "请求失败。") {
@@ -991,12 +1012,138 @@ function fileIconSvg(ext) {
   return Ico.file;
 }
 
+/* --- CDN 静态数据加载器（与 SPA 端 staticDataLoader 对齐） --- */
+const staticDataLoader = (function () {
+  /** @type {{ globalUrl?: string; directoryBaseUrl?: string }} */
+  const config = {};
+  /** @type {object|null} */
+  let _global = null;
+  /** @type {Map<string, object>} */
+  const _directories = new Map();
+  let _globalLoading = false;
+  /** @type {string|null} */
+  let _globalError = null;
+
+  return {
+    configure(cfg) {
+      Object.assign(config, cfg);
+    },
+
+    // ── 加载 ─────────────────────────────────────────────
+
+    /** @param {string|object} [input] */
+    async loadGlobal(input) {
+      if (input != null && typeof input === "object") {
+        _global = input;
+        _globalError = null;
+        _globalLoading = false;
+        return true;
+      }
+      const url = (typeof input === "string" ? input : undefined) ?? config.globalUrl;
+      if (!url || _globalLoading) return false;
+      _globalLoading = true;
+      _globalError = null;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        _global = await res.json();
+        return true;
+      } catch (e) {
+        _globalError = e instanceof Error ? e.message : "Unknown error";
+        _global = null;
+        return false;
+      } finally {
+        _globalLoading = false;
+      }
+    },
+
+    /** @param {string|object} input */
+    async loadDirectory(input, url) {
+      if (typeof input === "object") {
+        const data = input;
+        if (!data.managed_root || !data.managed_root.id) return false;
+        _directories.set(data.managed_root.id, data);
+        return true;
+      }
+      const name = input;
+      const targetUrl = url ?? (/^https?:\/\//.test(name) ? name : config.directoryBaseUrl ? config.directoryBaseUrl.replace(/\/$/, "") + "/" + name + ".json" : undefined);
+      if (!targetUrl) return false;
+      try {
+        const res = await fetch(targetUrl);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        _directories.set(data.managed_root.id, data);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    // ── 全局数据访问器 ─────────────────────────────────
+
+    get hasGlobal() { return _global !== null; },
+    get globalLoading() { return _globalLoading; },
+    get globalError() { return _globalError; },
+    get globalExportedAt() { return _global ? _global.exported_at : null; },
+    get announcements() { return _global ? _global.announcements : null; },
+    get hotFiles() { return _global ? _global.hot_files : null; },
+    get latestFiles() { return _global ? _global.latest_files : null; },
+    get rootFolders() { return _global ? _global.root_folders : null; },
+    get downloadPolicy() { return _global ? _global.download_policy : null; },
+    get fileTags() { return _global ? _global.file_tags : null; },
+
+    // ── 目录数据访问器 ─────────────────────────────────
+
+    hasDirectory(id) { return _directories.has(id); },
+    getManagedRoot(id) { const d = _directories.get(id); return d ? d.managed_root : null; },
+
+    getDirectoryView(folderId) {
+      const data = _directories.get(folderId);
+      if (!data) return null;
+      return data.directories ? data.directories[folderId] : null;
+    },
+
+    findDirectoryView(folderId) {
+      for (const data of _directories.values()) {
+        if (!data.directories) continue;
+        const entry = data.directories[folderId];
+        if (entry) return entry;
+      }
+      return null;
+    },
+
+    findFileDetail(fileId) {
+      for (const data of _directories.values()) {
+        if (!data.directories) continue;
+        for (const entry of Object.values(data.directories)) {
+          if (entry.file_details && entry.file_details[fileId]) {
+            return entry.file_details[fileId];
+          }
+        }
+      }
+      return null;
+    },
+
+    getFolderIdsForManagedRoot(managedRootId) {
+      const data = _directories.get(managedRootId);
+      if (!data || !data.directories) return [];
+      return Object.keys(data.directories);
+    },
+  };
+})();
+
 /* --- 全局 UI 状态 --- */
 const state = {
   route: parseHashRoute(),
   announcements: [],
+  announcementsLoaded: false,
   hotDownloadItems: [],
+  hotDownloadsLoaded: false,
   latestItems: [],
+  latestTitlesLoaded: false,
+  downloadSettingsLoaded: false,
+  /** @type {Map<string, object>} */
+  directoryCache: new Map(),
   folders: [],
   files: [],
   folderDetail: null,
@@ -1284,16 +1431,32 @@ function rootViewLocked() {
   return state.route.root === "1";
 }
 
-async function loadAnnouncements() {
+async function loadAnnouncements(force) {
+  if (state.announcementsLoaded && !force) return;
+  const cached = staticDataLoader.announcements;
+  if (cached && cached.length > 0) {
+    state.announcements = cached;
+    state.announcementsLoaded = true;
+    return;
+  }
   try {
     const response = await apiRequest(`/public/announcements`);
     state.announcements = response.items ?? [];
+    state.announcementsLoaded = true;
   } catch {
     state.announcements = [];
   }
 }
 
-async function loadHotDownloads() {
+async function loadHotDownloads(force) {
+  if (state.hotDownloadsLoaded && !force) return;
+  const cached = staticDataLoader.hotFiles;
+  if (cached) {
+    const items = (cached.items ?? []);
+    state.hotDownloadItems = items.map((item) => ({ id: item.id, name: item.name, downloadCount: item.download_count ?? 0 }));
+    state.hotDownloadsLoaded = true;
+    return;
+  }
   try {
     const response = await apiRequest(`/public/files/hot?limit=20`);
     state.hotDownloadItems = (response.items ?? []).map((item) => ({
@@ -1301,25 +1464,75 @@ async function loadHotDownloads() {
       name: item.name,
       downloadCount: item.download_count ?? 0,
     }));
+    state.hotDownloadsLoaded = true;
   } catch {
     state.hotDownloadItems = [];
   }
 }
 
-async function loadLatestTitles() {
+async function loadLatestTitles(force) {
+  if (state.latestTitlesLoaded && !force) return;
+  const cached = staticDataLoader.latestFiles;
+  if (cached) {
+    const items = (cached.items ?? []);
+    state.latestItems = items.map((item) => ({ id: item.id, name: item.name }));
+    state.latestTitlesLoaded = true;
+    return;
+  }
   try {
     const response = await apiRequest(`/public/files/latest?limit=20`);
     state.latestItems = (response.items ?? []).map((item) => ({
       id: item.id,
       name: item.name,
     }));
+    state.latestTitlesLoaded = true;
   } catch {
     state.latestItems = [];
   }
 }
 
-async function loadDirectory() {
+async function loadDirectory(force) {
   const folderId = state.route.folder;
+  const cacheKey = folderId || "__root__";
+
+  if (!force) {
+    const cached = state.directoryCache.get(cacheKey);
+    if (cached) {
+      state.folders = cached.folders;
+      state.files = cached.files;
+      state.folderDetail = cached.folderDetail;
+      state.breadcrumbs = cached.breadcrumbs;
+      state.loading = false;
+      state.error = "";
+      return;
+    }
+
+    // 尝试从 staticDataLoader 获取预加载的 CDN 数据
+    if (folderId) {
+      const se = staticDataLoader.findDirectoryView(folderId);
+      if (se) {
+        state.folders = se.folders ?? [];
+        state.files = se.files ?? [];
+        state.folderDetail = se.detail ?? null;
+        state.breadcrumbs = (se.detail && se.detail.breadcrumbs) ? se.detail.breadcrumbs : [];
+        state.loading = false;
+        state.error = "";
+        return;
+      }
+    } else {
+      const roots = staticDataLoader.rootFolders;
+      if (roots && roots.length > 0) {
+        state.folders = roots;
+        state.files = [];
+        state.folderDetail = null;
+        state.breadcrumbs = [];
+        state.loading = false;
+        state.error = "";
+        return;
+      }
+    }
+  }
+
   state.loading = true;
   state.error = "";
   try {
@@ -1350,6 +1563,14 @@ async function loadDirectory() {
       state.folderDetail = null;
       state.breadcrumbs = [];
     }
+
+    // 目录缓存（不含 search）
+    state.directoryCache.set(cacheKey, {
+      folders: state.folders,
+      files: state.files,
+      folderDetail: state.folderDetail,
+      breadcrumbs: state.breadcrumbs,
+    });
   } catch (err) {
     state.folders = [];
     state.files = [];
@@ -1360,6 +1581,17 @@ async function loadDirectory() {
   } finally {
     state.loading = false;
   }
+}
+
+/** 清除单个目录缓存 */
+function invalidateDirectoryCache(folderId) {
+  const key = folderId || "__root__";
+  state.directoryCache.delete(key);
+}
+
+/** 清除所有目录缓存 */
+function invalidateAllDirectoryCache() {
+  state.directoryCache.clear();
 }
 
 async function runSearch(keyword) {
@@ -1445,6 +1677,41 @@ async function loadFileDetail() {
   state.peerListAsideTempHidden = false;
   state.filePdfPreviewLoading = false;
   state.filePdfPreviewError = "";
+
+  // 优先从 staticDataLoader 获取预加载的文件详情
+  const cachedDetail = staticDataLoader.findFileDetail(id);
+  if (cachedDetail) {
+    state.fileDetail = cachedDetail;
+    const d = cachedDetail;
+    if (d && isVideoDetail(d)) {
+      const fid = (d.folder_id ?? "").trim();
+      if (fid) await loadFolderVideoPeers(fid, d.id);
+    } else if (d) {
+      const fid = (d.folder_id ?? "").trim();
+      const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase() || extractExtension(d.name);
+      if (fid && (ext === "pdf" || ext === "nc")) {
+        await loadFolderSameExtensionPeers(fid, d.id, ext);
+      }
+      const pv = fileDetailPreviewVisualKind(d);
+      if (pv === "pdf" && isBackendPublicFileDownloadHref(absoluteMediaDownloadURL(d, d.id))) {
+        state.filePdfPreviewLoading = true;
+        state.filePdfPreviewError = "";
+        void loadFilePdfBlobPreview(d);
+      }
+      if (pv && ["markdown", "plain", "csv", "netcdf"].includes(pv)) {
+        state.filePreviewTextLoading = true;
+        state.filePreviewTextError = "";
+        state.filePreviewFetchedText = "";
+        state.filePreviewNetcdfStructure = null;
+        state.filePreviewTruncated = false;
+      }
+      void loadFileInlinePreview(d);
+    }
+    state.fileLoading = false;
+    render();
+    return;
+  }
+
   try {
     const d = await apiRequest(`/public/files/${encodeURIComponent(id)}`);
     state.fileDetail = d;
@@ -1607,12 +1874,30 @@ async function loadFilePdfBlobPreview(d) {
   }
 }
 
+function getFolderFilesFromStaticCache(folderID) {
+  const entry = staticDataLoader.findDirectoryView(folderID);
+  if (!entry || !entry.files) return null;
+  return entry.files;
+}
+
 async function loadFolderSameExtensionPeers(folderID, currentFileId, ext) {
   const want = String(ext ?? "")
     .replace(/^\./, "")
     .toLowerCase();
   state.folderVideoPeersLoading = true;
   state.folderVideoPeers = [];
+
+  const cachedFiles = getFolderFilesFromStaticCache(folderID);
+  if (cachedFiles) {
+    state.folderVideoPeers = cachedFiles.filter((f) => {
+      const e = ((f.extension ?? "").replace(/^\./, "") || extractExtension(f.name)).toLowerCase();
+      return e === want;
+    });
+    state.folderVideoPeersLoading = false;
+    scrollCurrentPeerIntoView();
+    return;
+  }
+
   try {
     const params = new URLSearchParams({ page: "1", page_size: "100", sort: "name_asc" });
     const response = await apiRequest(`/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`);
@@ -1632,6 +1917,15 @@ async function loadFolderSameExtensionPeers(folderID, currentFileId, ext) {
 async function loadFolderVideoPeers(folderID, currentFileId) {
   state.folderVideoPeersLoading = true;
   state.folderVideoPeers = [];
+
+  const cachedFiles = getFolderFilesFromStaticCache(folderID);
+  if (cachedFiles) {
+    state.folderVideoPeers = cachedFiles.filter((f) => VIDEO_EXT.has(((f.extension ?? "").replace(/^\./, "") || extractExtension(f.name)).toLowerCase()));
+    state.folderVideoPeersLoading = false;
+    scrollCurrentPeerIntoView();
+    return;
+  }
+
   try {
     const params = new URLSearchParams({ page: "1", page_size: "100", sort: "name_asc" });
     const response = await apiRequest(`/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`);
@@ -1803,13 +2097,24 @@ function downloadFileFromDetail() {
   performDownloadFileFromDetail();
 }
 
-async function loadDownloadSettings() {
+async function loadDownloadSettings(force) {
+  if (state.downloadSettingsLoaded && !force) return;
+  const cached = staticDataLoader.downloadPolicy;
+  if (cached) {
+    const b = Number(cached.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
+    else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
+    state.wideLayoutExtensions = (cached.wide_layout_extensions ?? "").trim();
+    state.downloadSettingsLoaded = true;
+    return;
+  }
   try {
     const r = await apiRequest("/public/download-policy");
     const b = Number(r?.large_download_confirm_bytes);
     if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
     else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
     state.wideLayoutExtensions = (r?.wide_layout_extensions ?? "").trim();
+    state.downloadSettingsLoaded = true;
   } catch {
     state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
     state.wideLayoutExtensions = "";
@@ -3250,6 +3555,7 @@ function buildOpenSharePublicFileInfoReadonly(payload) {
 window.OpenShare = {
   version: "1.0",
   runtime: "readonly",
+  staticData: staticDataLoader,
   nav: {
     getRoute() {
       return { ...parseHashRoute(), hash: location.hash };

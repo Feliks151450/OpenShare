@@ -122,6 +122,8 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		handlers.imports.RescanManagedDirectory,
 	)
 	adminProtected.GET("/folders/tree", handlers.imports.GetFolderTree)
+	adminProtected.GET("/export/global", handlers.export_.ExportGlobal)
+	adminProtected.GET("/export/directory/:folderID", handlers.export_.ExportDirectory)
 	adminProtected.POST(
 			"/resources/folders",
 			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),

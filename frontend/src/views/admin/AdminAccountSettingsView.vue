@@ -30,6 +30,8 @@ const profileForm = reactive({
   avatarUrl: "",
 });
 
+const avatarUrlInput = ref("");
+
 const passwordForm = reactive({
   newPassword: "",
   confirmPassword: "",
@@ -81,6 +83,17 @@ async function onAvatarSelected(event: Event) {
 
 function clearAvatar() {
   profileForm.avatarUrl = "";
+  avatarUrlInput.value = "";
+}
+
+function applyAvatarUrl() {
+  const url = avatarUrlInput.value.trim();
+  if (!url) return;
+  if (!/^https?:\/\//.test(url)) {
+    error.value = "图片直链需以 https:// 或 http:// 开头。";
+    return;
+  }
+  profileForm.avatarUrl = url;
 }
 
 async function saveProfile() {
@@ -166,21 +179,37 @@ function readFileAsDataURL(file: File) {
           <h2 class="text-lg font-semibold text-slate-900">基本资料</h2>
         </div>
 
-        <!-- 头像区域：圆形预览 + 上传/移除按钮 -->
-        <div class="mt-6 flex items-center gap-4">
-          <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-3xl font-semibold text-slate-700">
+        <!-- 头像区域：圆形预览 + 上传/URL/移除 -->
+        <div class="mt-6 flex items-start gap-4">
+          <div class="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-3xl font-semibold text-slate-700">
             <img v-if="profileForm.avatarUrl" :src="profileForm.avatarUrl" alt="头像预览" class="h-full w-full object-cover" />
             <!-- 无头像时显示用户名首字母 -->
             <span v-else>{{ sessionStore.displayName.slice(0, 1).toUpperCase() || "A" }}</span>
           </div>
           <div class="flex flex-col gap-3">
             <label class="inline-flex h-10 cursor-pointer items-center rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900">
-              <span>更改头像</span>
+              <span>本地上传</span>
               <input type="file" accept="image/*" class="hidden" @change="onAvatarSelected" />
             </label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="avatarUrlInput"
+                type="url"
+                class="field h-10 w-64 text-sm"
+                placeholder="或粘贴图片直链 https://..."
+                @blur="applyAvatarUrl"
+              />
+              <button
+                type="button"
+                class="inline-flex h-10 shrink-0 items-center rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+                @click="applyAvatarUrl"
+              >
+                使用
+              </button>
+            </div>
             <button
               type="button"
-              class="inline-flex h-10 items-center rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+              class="inline-flex h-10 w-fit items-center rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
               @click="clearAvatar"
             >
               移除头像

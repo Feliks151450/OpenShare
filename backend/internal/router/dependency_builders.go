@@ -95,5 +95,6 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		search:             handler.NewSearchHandler(services.search),
 		siteVisit:          handler.NewSiteVisitHandler(services.siteVisit),
 		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting),
+		export_:            handler.NewExportHandler(services.announcement, services.publicCatalog, services.systemSetting, services.fileTag, services.imports, services.publicDownload),
 	}
 }

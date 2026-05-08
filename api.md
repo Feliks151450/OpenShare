@@ -20,6 +20,7 @@
 | `runtime` | `'spa' \| 'readonly'` | **`spa`**：Vue Router + History；**`readonly`**：hash 路由。 |
 | `nav` | object | 页面导航相关。 |
 | `home` | object | 首页目录列表视图／排序偏好（不涉及搜索关键词等临时状态）。 |
+| `staticData` | `StaticDataLoader` | CDN 静态数据加载器，可配置预导出 JSON 直链以替代部分公开 API 请求。 |
 
 ---
 
@@ -284,6 +285,183 @@ OpenShare.home.setSortDirection("desc");
 - 按 **`folderID`** 拉取 **目录详情**、列目录内文件等 **已知 id** 的公开接口：服务端不会因「根被隐藏」而单独拒绝；访客若拿不到 id，通常仍无法从未过滤的首页／搜索／热门进入该树。
 
 SPA 与只读静态页共用同一套后端行为，控制台脚本无需分叉处理。
+
+---
+
+## `OpenShare.staticData`
+
+CDN 静态数据加载器，可配置预导出的 JSON 文件直链，命中时无需请求源服务器 API。未命中时调用方可降级为实时 HTTP 请求。
+
+**类型**：`StaticDataLoader`（单例），定义于 `frontend/src/lib/staticDataLoader.ts`。
+
+### `staticData.configure(config)`
+
+配置 CDN 直链地址。
+
+**`config`**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `globalUrl` | `string` | 全局数据 JSON 文件的 CDN 直链。 |
+| `directoryBaseUrl` | `string` | 目录 JSON 文件的基础 URL，文件名格式为 `{目录名}.json`。 |
+
+```js
+OpenShare.staticData.configure({
+  globalUrl: "https://cdn.example.com/openshare-global-2026-05-09.json",
+  directoryBaseUrl: "https://cdn.example.com/directories",
+});
+```
+
+### `staticData.loadGlobal(url?)`
+
+从 CDN 加载全局数据文件，返回 `Promise<boolean>`（成功 `true`）。
+
+### `staticData.loadDirectory(urlOrName, url?)`
+
+从 CDN 加载单个托管目录的数据文件，返回 `Promise<boolean>`。两种用法：
+
+**直接传完整 URL（无需配置 `directoryBaseUrl`）**：
+
+```js
+await OpenShare.staticData.loadDirectory("https://cdn.example.com/my-folder.json");
+const view = OpenShare.staticData.getDirectoryView("folder-id-xxx");
+```
+
+**传文件名 + 已配置 `directoryBaseUrl`**（加载多个目录时更简洁）：
+
+```js
+OpenShare.staticData.configure({
+  directoryBaseUrl: "https://cdn.example.com/directories",
+});
+// 自动拼接为 https://cdn.example.com/directories/my-folder.json
+await OpenShare.staticData.loadDirectory("my-folder");
+await OpenShare.staticData.loadDirectory("another-folder");
+```
+
+### 数据访问器
+
+所有访问器在数据未加载时返回 `null`。
+
+| 访问器 | 返回值 | 对应 API |
+|--------|--------|----------|
+| `staticData.hasGlobal` | `boolean` | — |
+| `staticData.globalLoading` | `boolean` | — |
+| `staticData.globalError` | `string \| null` | — |
+| `staticData.globalExportedAt` | `string \| null` | — |
+| `staticData.announcements` | `ExportAnnouncement[] \| null` | `GET /public/announcements` |
+| `staticData.hotFiles` | `ExportHotFiles \| null` | `GET /public/files/hot` |
+| `staticData.latestFiles` | `ExportLatestFiles \| null` | `GET /public/files/latest` |
+| `staticData.rootFolders` | `ExportPublicFolderItem[] \| null` | `GET /public/folders` |
+| `staticData.downloadPolicy` | `ExportDownloadPolicy \| null` | `GET /public/download-policy` |
+| `staticData.fileTags` | `ExportFileTag[] \| null` | `GET /public/file-tags` |
+
+### 目录数据访问器
+
+| 访问器 | 说明 |
+|--------|------|
+| `staticData.hasDirectory(id)` | 该托管根目录数据是否已加载 |
+| `staticData.getManagedRoot(id)` | 获取托管根元信息 |
+| `staticData.getDirectoryView(folderId)` | 获取某个文件夹的视图数据（详情 + 子文件夹 + 文件） |
+| `staticData.findDirectoryView(folderId)` | 在所有已加载目录数据中查找某个文件夹 ID |
+| `staticData.getFolderIdsForManagedRoot(managedRootId)` | 获取托管树下所有已缓存的文件夹 ID |
+
+### 使用示例
+
+```js
+// ── 加载全局数据 ──
+OpenShare.staticData.configure({
+  globalUrl: "https://cdn.example.com/openshare-global.json",
+});
+await OpenShare.staticData.loadGlobal();
+
+// 直接读取，无需请求服务器
+const folders = OpenShare.staticData.rootFolders;
+const tags = OpenShare.staticData.fileTags;
+
+// ── 加载单个托管目录（直接传 URL，无需配置 baseUrl）──
+await OpenShare.staticData.loadDirectory("https://cdn.example.com/my-folder.json");
+const view = OpenShare.staticData.getDirectoryView("folder-id-xxx");
+if (view) {
+  console.log(view.detail, view.folders, view.files);
+}
+
+// ── 加载多个托管目录（先配置 baseUrl，再传文件名）──
+OpenShare.staticData.configure({
+  directoryBaseUrl: "https://cdn.example.com/directories",
+});
+await OpenShare.staticData.loadDirectory("dir-a");  // → .../directories/dir-a.json
+await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b.json
+```
+
+---
+
+## 管理端导出接口
+
+管理员可在后台"系统配置 → 当前已托管文件目录"区域导出静态 JSON 文件，上传至 CDN 后供前端 `staticData` 加载。
+
+所有导出接口需 **admin 登录态**（`credentials: include`）。
+
+### `GET /api/admin/export/global`
+
+导出全局公开数据，包含 announcements、hot_files、latest_files、root_folders、download_policy、file_tags。
+
+**响应**：
+
+```json
+{
+  "version": 1,
+  "exported_at": "2026-05-09T12:00:00Z",
+  "announcements": [...],
+  "hot_files": { "items": [...] },
+  "latest_files": { "items": [...] },
+  "root_folders": [...],
+  "download_policy": {
+    "large_download_confirm_bytes": 1073741824,
+    "wide_layout_extensions": "md,markdown"
+  },
+  "file_tags": [...]
+}
+```
+
+### `GET /api/admin/export/directory/:folderID`
+
+导出指定托管目录的完整数据，包含该目录树下每个子目录的详情、子文件夹和全部文件（自动分页拉全）。
+
+**路径参数**：`folderID` — 托管根目录的 ID。
+
+**响应**：
+
+```json
+{
+  "version": 1,
+  "exported_at": "2026-05-09T12:00:00Z",
+  "managed_root": {
+    "id": "...",
+    "name": "...",
+    "source_path": "/data/...",
+    "file_count": 42,
+    "download_count": 1000,
+    "total_size": 123456789
+  },
+  "directories": {
+    "<folderId>": {
+      "detail": { ... },
+      "folders": [ ... ],
+      "files": [ ... ]
+    }
+  }
+}
+```
+
+`directories` 为 `folderId → { detail, folders, files }` 的映射，detail 为 `GET /public/folders/:id` 响应体，folders 为 `GET /public/folders?parent_id=:id` 的 items 数组，files 为该目录下全部文件（`GET /public/folders/:id/files` 的分页聚合）。
+
+### 使用流程
+
+1. 管理员在后台点击"导出全局数据"按钮，下载 `openshare-global-YYYY-MM-DD.json`
+2. 管理员点击各托管目录行的"导出数据"按钮，下载 `{目录名}.json`
+3. 将 JSON 文件上传至 CDN
+4. 前端在 `main.ts` 或初始化脚本中调用 `staticData.configure()` + `loadGlobal()` / `loadDirectory()`
+5. 后续 API 数据优先从 `staticData` 读取，未命中时降级为真实 HTTP 请求
 
 ---
 

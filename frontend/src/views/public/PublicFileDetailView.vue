@@ -24,6 +24,7 @@ import FileTagChips from "../../components/public/FileTagChips.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { staticDataLoader } from "../../lib/staticDataLoader";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
 import {
@@ -1020,10 +1021,26 @@ function extensionOfListItem(item: FolderFileListItem): string {
   return match ? match[1].toLowerCase() : "";
 }
 
+function getFolderFilesFromStaticCache(folderID: string): FolderFileListItem[] | null {
+  const entry = staticDataLoader.findDirectoryView(folderID);
+  if (!entry || !entry.files) return null;
+  return (entry.files as unknown as FolderFileListItem[]);
+}
+
 async function loadFolderSameExtensionPeers(folderID: string, currentFileId: string, ext: string) {
   const want = ext.replace(/^\./, "").toLowerCase();
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
+
+  const cached = getFolderFilesFromStaticCache(folderID);
+  if (cached) {
+    folderVideoPeers.value = cached.filter((f) => extensionOfListItem(f) === want);
+    folderVideoPeersLoading.value = false;
+    await nextTick();
+    scrollCurrentPeerIntoView();
+    return;
+  }
+
   try {
     const params = new URLSearchParams({
       page: "1",
@@ -1047,6 +1064,16 @@ async function loadFolderSameExtensionPeers(folderID: string, currentFileId: str
 async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
+
+  const cached = getFolderFilesFromStaticCache(folderID);
+  if (cached) {
+    folderVideoPeers.value = cached.filter((f) => VIDEO_EXTENSIONS.has(extensionOfListItem(f)));
+    folderVideoPeersLoading.value = false;
+    await nextTick();
+    scrollCurrentPeerIntoView();
+    return;
+  }
+
   try {
     const params = new URLSearchParams({
       page: "1",
@@ -1170,6 +1197,13 @@ onMounted(() => {
 const wideLayoutExtensions = ref("");
 
 async function loadLargeDownloadPolicy() {
+  const cached = staticDataLoader.downloadPolicy;
+  if (cached) {
+    const b = Number(cached.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+    wideLayoutExtensions.value = (cached.wide_layout_extensions ?? "").trim();
+    return;
+  }
   try {
     const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string }>("/public/download-policy");
     const b = Number(response.large_download_confirm_bytes);
@@ -1295,6 +1329,33 @@ async function loadDetail() {
   detail.value = null;
   folderVideoPeers.value = [];
   folderVideoPeersLoading.value = false;
+
+  // 优先从 staticDataLoader 获取预加载的文件详情
+  const cachedDetail = staticDataLoader.findFileDetail(fileID.value);
+  if (cachedDetail) {
+    detail.value = cachedDetail as unknown as FileDetailResponse;
+    if (detail.value) {
+      editFileName.value = detail.value.name;
+      editDescription.value = detail.value.description;
+      editRemark.value = (detail.value.remark ?? "").trim();
+      editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
+      editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
+      editCoverUrl.value = (detail.value.cover_url ?? "").trim();
+      editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
+      const fid = detail.value.folder_id?.trim() ?? "";
+      if (fid && !props.panelPresentation) {
+        if (isVideoDetail(detail.value)) {
+          loadFolderVideoPeers(fid, fileID.value);
+        } else {
+          loadFolderSameExtensionPeers(fid, fileID.value, detail.value.extension);
+        }
+      }
+      try { await requestFileTags(); } catch { /* ignore */ }
+      loading.value = false;
+      return;
+    }
+  }
+
   try {
     detail.value = await httpClient.get<FileDetailResponse>(`/public/files/${encodeURIComponent(fileID.value)}`);
     if (detail.value) {

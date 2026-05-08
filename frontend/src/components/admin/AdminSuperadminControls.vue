@@ -51,6 +51,8 @@ const unmanageMessage = ref("");
 const rescanningFolderID = ref("");
 const rescanError = ref("");
 const rescanMessage = ref("");
+const exportingGlobal = ref(false);
+const exportingFolderId = ref("");
 const uploadSizeValue = ref(5);
 const uploadSizeUnit = ref<"B" | "KB" | "MB" | "GB">("GB");
 const uploadSnapshot = ref("");
@@ -290,6 +292,41 @@ async function loadManagedFolders() {
   }
 }
 
+function downloadJsonBlob(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportGlobalData() {
+  exportingGlobal.value = true;
+  try {
+    const data = await httpClient.get("/admin/export/global");
+    const date = new Date().toISOString().slice(0, 10);
+    downloadJsonBlob(data, `openshare-global-${date}.json`);
+  } catch (err: unknown) {
+    rescanError.value = readApiError(err, "导出全局数据失败。");
+  } finally {
+    exportingGlobal.value = false;
+  }
+}
+
+async function exportDirectoryData(folderId: string, folderName: string) {
+  exportingFolderId.value = folderId;
+  try {
+    const data = await httpClient.get(`/admin/export/directory/${folderId}`);
+    downloadJsonBlob(data, `${folderName}.json`);
+  } catch (err: unknown) {
+    rescanError.value = readApiError(err, `导出 ${folderName} 失败。`);
+  } finally {
+    exportingFolderId.value = "";
+  }
+}
+
 async function openDirectoryPicker() {
   directoryPickerOpen.value = true;
   importFilter.value = "";
@@ -470,9 +507,14 @@ function isManagedRootClientChild(path: string, root: string) {
           <div>
             <h3 class="text-lg font-semibold text-slate-900">当前已托管文件目录</h3>
           </div>
-          <button type="button" class="btn-secondary" :disabled="managedFoldersLoading" @click="loadManagedFolders">
-            {{ managedFoldersLoading ? "刷新中…" : "刷新" }}
-          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" class="btn-secondary" :disabled="managedFoldersLoading || exportingGlobal" @click="exportGlobalData">
+              {{ exportingGlobal ? "导出中…" : "导出全局数据" }}
+            </button>
+            <button type="button" class="btn-secondary" :disabled="managedFoldersLoading" @click="loadManagedFolders">
+              {{ managedFoldersLoading ? "刷新中…" : "刷新" }}
+            </button>
+          </div>
         </div>
 
         <div v-if="managedFoldersLoading" class="text-sm text-slate-500">正在加载托管目录…</div>
@@ -523,6 +565,14 @@ function isManagedRootClientChild(path: string, root: string) {
                   @click="rescanManagedFolder(folder.id)"
                 >
                   {{ rescanningFolderID === folder.id ? "扫描中…" : "重新扫描" }}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="managedFoldersLoading || rescanningFolderID === folder.id || catalogVisibilitySaving === folder.id || exportingFolderId === folder.id"
+                  @click="exportDirectoryData(folder.id, folder.name)"
+                >
+                  {{ exportingFolderId === folder.id ? "导出中…" : "导出数据" }}
                 </button>
                 <button
                   type="button"

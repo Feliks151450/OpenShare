@@ -1,3 +1,5 @@
+import { ref } from "vue";
+
 /** 公开首页目录 API 响应形状（与 Home.vue 一致） */
 import type { PublicFileTag } from "./publicFileTags";
 
@@ -105,3 +107,8 @@ export function invalidateDirectoryViewCacheAll() {
 export function invalidateDirectoryViewCacheFolder(folderID: string) {
   directoryViewCache.delete(directoryViewCacheKey(folderID));
 }
+
+/** 模块级共享响应式数据：根目录文件夹列表。
+ *  Home.vue 的 loadDirectory() 在拉取根目录时写入，
+ *  GlobalSidebar 直接读取，避免重复请求。 */
+export const sharedRootFolders = ref<PublicFolderItem[]>([]);

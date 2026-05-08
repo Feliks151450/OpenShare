@@ -25,6 +25,7 @@ type routeHandlers struct {
 	search             *handler.SearchHandler
 	siteVisit          *handler.SiteVisitHandler
 	systemSetting      *handler.SystemSettingHandler
+	export_            *handler.ExportHandler
 }
 
 type routeRepositories struct {

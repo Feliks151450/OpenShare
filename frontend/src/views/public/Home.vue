@@ -55,12 +55,14 @@ import {
   peekDirectoryViewLoadToken,
   readDirectoryViewCache,
   takeDirectoryViewLoadToken,
+  sharedRootFolders,
   writeDirectoryViewCache,
   type DirectoryViewCacheEntry,
   type FolderDetailResponse,
   type PublicFileItem,
   type PublicFolderItem,
 } from "../../lib/publicHomeDirectoryCache";
+import { staticDataLoader } from "../../lib/staticDataLoader";
 import FileTagChips from "../../components/public/FileTagChips.vue";
 import { type PublicFileTag, readableTextColorForPreset } from "../../lib/publicFileTags";
 
@@ -999,6 +1001,12 @@ onMounted(async () => {
 });
 
 async function loadLargeDownloadPolicy() {
+  const cached = staticDataLoader.downloadPolicy;
+  if (cached) {
+    const b = Number(cached.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+    return;
+  }
   try {
     const response = await httpClient.get<{ large_download_confirm_bytes: number }>("/public/download-policy");
     const b = Number(response.large_download_confirm_bytes);
@@ -1068,6 +1076,11 @@ watch(markdownCatalogNavigateConfirmRoute, (r, _p, onCleanup) => {
 });
 
 async function loadAnnouncements() {
+  const cached = staticDataLoader.announcements;
+  if (cached && cached.length > 0) {
+    announcements.value = cached as unknown as AnnouncementItem[];
+    return;
+  }
   try {
     const response = await httpClient.get<{ items: AnnouncementItem[] }>("/public/announcements");
     announcements.value = response.items ?? [];
@@ -1171,6 +1184,16 @@ function openLatestItemsModal() {
 }
 
 async function loadHotDownloads() {
+  const cached = staticDataLoader.hotFiles;
+  if (cached) {
+    const items = (cached as unknown as { items: PublicFileItem[] }).items ?? [];
+    hotDownloadItems.value = items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      downloadCount: item.download_count ?? 0,
+    }));
+    return;
+  }
   try {
     const response = await httpClient.get<{ items: PublicFileItem[] }>("/public/files/hot?limit=20");
     hotDownloadItems.value = (response.items ?? []).map((item) => ({
@@ -1184,6 +1207,15 @@ async function loadHotDownloads() {
 }
 
 async function loadLatestTitles() {
+  const cached = staticDataLoader.latestFiles;
+  if (cached) {
+    const items = (cached as unknown as { items: PublicFileItem[] }).items ?? [];
+    latestItems.value = items.map((item) => ({
+      id: item.id,
+      name: item.name,
+    }));
+    return;
+  }
   try {
     const response = await httpClient.get<{ items: PublicFileItem[] }>("/public/files/latest?limit=20");
     latestItems.value = (response.items ?? []).map((item) => ({
@@ -1243,8 +1275,45 @@ async function loadDirectory(options?: { force?: boolean }) {
       actionMessage.value = "";
       actionError.value = "";
       applyDirectoryViewToState(cached);
+      if (!requestedKey) {
+        sharedRootFolders.value = [...folders.value];
+      }
       loading.value = false;
       return;
+    }
+
+    // 尝试从 staticDataLoader 获取预加载的 CDN 数据
+    if (requestedKey) {
+      const staticEntry = staticDataLoader.findDirectoryView(requestedKey);
+      if (staticEntry) {
+        if (gen !== peekDirectoryViewLoadToken()) return;
+        error.value = "";
+        actionMessage.value = "";
+        actionError.value = "";
+        applyDirectoryViewToState({
+          folders: staticEntry.folders as unknown as PublicFolderItem[],
+          files: staticEntry.files as unknown as PublicFileItem[],
+          detail: staticEntry.detail as unknown as FolderDetailResponse,
+        });
+        loading.value = false;
+        return;
+      }
+    } else {
+      const staticRoots = staticDataLoader.rootFolders;
+      if (staticRoots && staticRoots.length > 0) {
+        if (gen !== peekDirectoryViewLoadToken()) return;
+        error.value = "";
+        actionMessage.value = "";
+        actionError.value = "";
+        applyDirectoryViewToState({
+          folders: staticRoots as unknown as PublicFolderItem[],
+          files: [],
+          detail: null,
+        });
+        sharedRootFolders.value = [...folders.value];
+        loading.value = false;
+        return;
+      }
     }
   }
 
@@ -1288,6 +1357,9 @@ async function loadDirectory(options?: { force?: boolean }) {
     }
 
     folders.value = (folderResponse as { items: PublicFolderItem[] }).items ?? [];
+    if (!fetchKey) {
+      sharedRootFolders.value = [...folders.value];
+    }
     files.value = fetchKey ? ((fileResponse as { items: PublicFileItem[] } | undefined)?.items ?? []) : [];
 
     if (!fetchKey && !rootViewLocked.value && folders.value.length === 1) {
