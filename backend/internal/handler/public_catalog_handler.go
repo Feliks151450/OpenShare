@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,11 +12,12 @@ import (
 )
 
 type PublicCatalogHandler struct {
-	service *service.PublicCatalogService
+	service       *service.PublicCatalogService
+	systemSetting *service.SystemSettingService
 }
 
-func NewPublicCatalogHandler(service *service.PublicCatalogService) *PublicCatalogHandler {
-	return &PublicCatalogHandler{service: service}
+func NewPublicCatalogHandler(service *service.PublicCatalogService, systemSetting *service.SystemSettingService) *PublicCatalogHandler {
+	return &PublicCatalogHandler{service: service, systemSetting: systemSetting}
 }
 
 func (h *PublicCatalogHandler) ListPublicFolderFiles(ctx *gin.Context) {
@@ -83,7 +85,8 @@ func (h *PublicCatalogHandler) ListLatestFiles(ctx *gin.Context) {
 }
 
 func (h *PublicCatalogHandler) ListPublicFolders(ctx *gin.Context) {
-	items, err := h.service.ListPublicFolders(ctx.Request.Context(), ctx.Query("parent_id"))
+	parentID := ctx.Query("parent_id")
+	items, err := h.service.ListPublicFolders(ctx.Request.Context(), parentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrFolderNotFound):
@@ -94,7 +97,20 @@ func (h *PublicCatalogHandler) ListPublicFolders(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"items": items})
+	resp := gin.H{"items": items}
+
+	// 根目录请求时附带 download_policy，避免前端额外请求
+	if strings.TrimSpace(parentID) == "" && h.systemSetting != nil {
+		if policy, pErr := h.systemSetting.GetPolicy(ctx.Request.Context()); pErr == nil {
+			resp["download_policy"] = gin.H{
+				"large_download_confirm_bytes": policy.Download.LargeDownloadConfirmBytes,
+				"wide_layout_extensions":       policy.Download.WideLayoutExtensions,
+				"cdn_mode":                     policy.Download.CdnMode,
+			}
+		}
+	}
+
+	ctx.JSON(http.StatusOK, resp)
 }
 
 func (h *PublicCatalogHandler) GetPublicFolderDetail(ctx *gin.Context) {

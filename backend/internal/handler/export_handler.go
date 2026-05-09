@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"openshare/backend/internal/repository"
 	"openshare/backend/internal/service"
 )
 
@@ -20,6 +21,7 @@ type ExportHandler struct {
 	fileTag        *service.FileTagService
 	imports        *service.ImportService
 	publicDownload *service.PublicDownloadService
+	importRepo     *repository.ImportRepository
 }
 
 func NewExportHandler(
@@ -29,6 +31,7 @@ func NewExportHandler(
 	fileTag *service.FileTagService,
 	imports *service.ImportService,
 	publicDownload *service.PublicDownloadService,
+	importRepo *repository.ImportRepository,
 ) *ExportHandler {
 	return &ExportHandler{
 		announcement:   announcement,
@@ -37,14 +40,17 @@ func NewExportHandler(
 		fileTag:        fileTag,
 		imports:        imports,
 		publicDownload: publicDownload,
+		importRepo:     importRepo,
 	}
 }
 
 // ─── 全局数据导出 ────────────────────────────────────────────────
 
 type downloadPolicyExport struct {
-	LargeDownloadConfirmBytes int64  `json:"large_download_confirm_bytes"`
-	WideLayoutExtensions      string `json:"wide_layout_extensions"`
+	LargeDownloadConfirmBytes int64             `json:"large_download_confirm_bytes"`
+	WideLayoutExtensions      string            `json:"wide_layout_extensions"`
+	CdnMode                   bool              `json:"cdn_mode"`
+	DirectoryCdnUrls          map[string]string `json:"directory_cdn_urls,omitempty"`
 }
 
 type GlobalExportData struct {
@@ -107,6 +113,7 @@ func (h *ExportHandler) ExportGlobal(ctx *gin.Context) {
 		DownloadPolicy: downloadPolicyExport{
 			LargeDownloadConfirmBytes: policy.Download.LargeDownloadConfirmBytes,
 			WideLayoutExtensions:      policy.Download.WideLayoutExtensions,
+			CdnMode:                   policy.Download.CdnMode,
 		},
 		FileTags: fileTags,
 	}

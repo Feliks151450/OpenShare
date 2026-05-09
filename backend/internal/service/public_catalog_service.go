@@ -68,6 +68,7 @@ type PublicFolderItem struct {
 	Description     string    `json:"description"`
 	Remark          string    `json:"remark"`
 	CoverURL        string    `json:"cover_url"`
+	CdnURL          string    `json:"cdn_url"`
 	DownloadAllowed bool      `json:"download_allowed"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	FileCount       int64     `json:"file_count"`
@@ -213,6 +214,7 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 			Description:     row.Description,
 			Remark:          row.Remark,
 			CoverURL:        strings.TrimSpace(row.CoverURL),
+				CdnURL:          strings.TrimSpace(row.CdnURL),
 			DownloadAllowed: allowed,
 			UpdatedAt:       row.UpdatedAt,
 			FileCount:       row.FileCount,

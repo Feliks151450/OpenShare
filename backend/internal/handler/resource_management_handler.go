@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strings"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,7 @@ type updateManagedFolderDescriptionRequest struct {
 	Remark           string  `json:"remark"`
 	CoverURL         string  `json:"cover_url"`
 	DirectLinkPrefix string  `json:"direct_link_prefix"`
+	CdnURL           string  `json:"cdn_url"`
 	DownloadPolicy   *string `json:"download_policy"`
 }
 
@@ -122,6 +124,7 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 		Remark:           req.Remark,
 		CoverURL:         req.CoverURL,
 		DirectLinkPrefix: req.DirectLinkPrefix,
+			CdnURL:           req.CdnURL,
 		DownloadPolicy:   req.DownloadPolicy,
 		OperatorID:       identity.AdminID,
 		OperatorIP:       ctx.ClientIP(),
@@ -289,4 +292,32 @@ func (h *ResourceManagementHandler) CreateFolder(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusCreated, gin.H{"id": folder.ID, "name": folder.Name})
+}
+
+type patchFolderCdnUrlRequest struct {
+	CdnURL string `json:"cdn_url"`
+}
+
+func (h *ResourceManagementHandler) PatchFolderCdnUrl(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	var req patchFolderCdnUrlRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	err := h.service.PatchFolderCdnUrl(ctx.Request.Context(), ctx.Param("folderID"), strings.TrimSpace(req.CdnURL), identity.AdminID, ctx.ClientIP())
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update cdn url"})
+		}
+		return
+	}
+	ctx.Status(http.StatusNoContent)
 }

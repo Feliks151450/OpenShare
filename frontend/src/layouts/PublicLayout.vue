@@ -5,6 +5,7 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import GlobalSidebar from "../components/layout/GlobalSidebar.vue";
 import Navbar from "../components/layout/Navbar.vue";
 import { httpClient } from "../lib/http/client";
+import { staticDataLoader } from "../lib/staticDataLoader";
 import { useNavActions, type PanelName } from "../composables/useNavActions";
 import { useSidebar } from "../composables/useSidebar";
 
@@ -59,7 +60,30 @@ const links = [
 
 onMounted(() => {
   void trackVisit();
+  void prefetchDownloadPolicy();
 });
+
+async function prefetchDownloadPolicy() {
+  if (staticDataLoader.policyApplied || staticDataLoader.policyPromise) return;
+  let taskResolve!: () => void;
+  staticDataLoader.setPolicyPromise(new Promise<void>((r) => { taskResolve = r; }));
+  try {
+    const resp = await httpClient.get<{
+      cdn_mode?: boolean;
+      global_cdn_url?: string;
+      directory_cdn_urls?: Record<string, string>;
+      large_download_confirm_bytes?: number;
+    }>("/public/download-policy");
+    if (resp.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(resp.directory_cdn_urls);
+    if (resp.global_cdn_url) staticDataLoader.setGlobalCdnUrl(resp.global_cdn_url);
+    staticDataLoader.markPolicyApplied();
+  } catch {
+    /* 忽略 */
+  } finally {
+    taskResolve();
+    staticDataLoader.setPolicyPromise(null);
+  }
+}
 
 async function trackVisit() {
   try {

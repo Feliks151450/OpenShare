@@ -12,6 +12,8 @@ interface SystemPolicy {
   download: {
     large_download_confirm_bytes: number;
     wide_layout_extensions?: string;
+    cdn_mode?: boolean;
+    global_cdn_url?: string;
   };
 }
 
@@ -20,6 +22,7 @@ interface ManagedFolderNode {
   name: string;
   source_path: string;
   hide_public_catalog?: boolean;
+  cdn_url?: string;
   folders: ManagedFolderNode[];
 }
 
@@ -40,7 +43,7 @@ const pendingImportPath = ref("");
 const manualBrowsePath = ref("");
 const confirmedImportPath = ref("");
 const importFilter = ref("");
-const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string; hidePublicCatalog: boolean }>>([]);
+const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string; hidePublicCatalog: boolean; cdnUrl: string }>>([]);
 const managedFoldersLoading = ref(false);
 const managedFoldersError = ref("");
 const catalogVisibilitySaving = ref("");
@@ -66,6 +69,8 @@ const form = reactive<SystemPolicy>({
   download: {
     large_download_confirm_bytes: 1024 * 1024 * 1024,
     wide_layout_extensions: "",
+    cdn_mode: false,
+    global_cdn_url: "",
   },
 });
 
@@ -125,6 +130,8 @@ function serializeDownloadState() {
   return JSON.stringify({
     large_download_confirm_bytes: toBytes(downloadConfirmSizeValue.value, downloadConfirmSizeUnit.value),
     wide_layout_extensions: (form.download.wide_layout_extensions ?? "").trim(),
+    cdn_mode: form.download.cdn_mode ?? false,
+    global_cdn_url: (form.download.global_cdn_url ?? "").trim(),
   });
 }
 
@@ -283,6 +290,7 @@ async function loadManagedFolders() {
       name: item.name,
       sourcePath: item.source_path,
       hidePublicCatalog: Boolean(item.hide_public_catalog),
+      cdnUrl: (item as any).cdn_url ?? "",
     }));
   } catch (err: unknown) {
     managedFolders.value = [];
@@ -324,6 +332,22 @@ async function exportDirectoryData(folderId: string, folderName: string) {
     rescanError.value = readApiError(err, `导出 ${folderName} 失败。`);
   } finally {
     exportingFolderId.value = "";
+  }
+}
+
+const savingCdnUrlFolderId = ref("");
+
+async function saveFolderCdnUrl(folderId: string, cdnUrl: string) {
+  savingCdnUrlFolderId.value = folderId;
+  try {
+    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(folderId)}/cdn-url`, {
+      method: "PATCH",
+      body: { cdn_url: cdnUrl.trim() },
+    });
+  } catch (err: unknown) {
+    rescanError.value = readApiError(err, "更新 CDN 地址失败。");
+  } finally {
+    savingCdnUrlFolderId.value = "";
   }
 }
 
@@ -538,6 +562,24 @@ function isManagedRootClientChild(path: string, root: string) {
                   >访客首页已隐藏</span>
                 </p>
                 <p class="mt-1 break-all text-sm text-slate-500">{{ folder.sourcePath || "未记录源目录" }}</p>
+                <div class="mt-2 flex items-center gap-2">
+                  <input
+                    :value="folder.cdnUrl"
+                    type="url"
+                    class="field h-9 flex-1 text-sm"
+                    placeholder="CDN JSON 直链（可选）"
+                    @change="(e) => { const target = e.target as HTMLInputElement; folder.cdnUrl = target.value; }"
+                    @blur="(e) => { const target = e.target as HTMLInputElement; const v = target.value.trim(); if (v !== (folder.cdnUrl ?? '')) { folder.cdnUrl = v; saveFolderCdnUrl(folder.id, v); } }"
+                  />
+                  <button
+                    type="button"
+                    class="inline-flex h-9 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+                    :disabled="savingCdnUrlFolderId === folder.id"
+                    @click="saveFolderCdnUrl(folder.id, folder.cdnUrl)"
+                  >
+                    {{ savingCdnUrlFolderId === folder.id ? '保存中…' : '保存' }}
+                  </button>
+                </div>
               </div>
               <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 <button
@@ -651,6 +693,19 @@ function isManagedRootClientChild(path: string, root: string) {
         <div class="space-y-2">
           <label class="text-sm font-medium text-slate-700">启用后缀列表</label>
           <input v-model="form.download.wide_layout_extensions" class="field" placeholder="例如：.md,.txt,.nc" />
+        </div>
+        <div class="border-t border-slate-200 pt-5">
+          <h4 class="text-sm font-semibold text-slate-800">CDN 模式</h4>
+          <p class="mt-1 text-sm text-slate-500">开启后，访客首页将优先从各托管目录配置的 CDN JSON 直链加载数据，减少源服务器请求。</p>
+        </div>
+        <label class="mt-3 inline-flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" v-model="form.download.cdn_mode" class="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+          <span class="text-sm font-medium text-slate-700">{{ form.download.cdn_mode ? '已开启' : '已关闭' }}</span>
+        </label>
+        <div v-if="form.download.cdn_mode" class="mt-3 space-y-2">
+          <label class="text-sm font-medium text-slate-700">全局数据 CDN 直链</label>
+          <input v-model="form.download.global_cdn_url" type="url" class="field" placeholder="https://cdn.example.com/openshare-global.json" />
+          <p class="text-sm text-slate-500">填入导出全局数据 JSON 后在 CDN 上的直链地址。</p>
         </div>
         <button type="submit" class="btn-primary" :disabled="uploadSaving || !systemPolicyDirty">
           {{ uploadSaving ? "更新中…" : "确认更新" }}

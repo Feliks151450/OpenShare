@@ -222,3 +222,25 @@ func resolveNewFolderSourcePath(parent *model.Folder, childName string) *string 
 	result := filepath.Join(rootPath, childName)
 	return &result
 }
+
+func (s *ResourceManagementService) PatchFolderCdnUrl(ctx context.Context, folderID string, cdnURL string, operatorID string, operatorIP string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return ErrManagedFolderNotFound
+	}
+	current, err := s.repo.FindFolderByID(ctx, folderID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrManagedFolderNotFound
+	}
+	if current.SourcePath == nil || strings.TrimSpace(*current.SourcePath) == "" {
+		return ErrInvalidResourceEdit
+	}
+	logID, err := identity.NewID()
+	if err != nil {
+		return fmt.Errorf("generate cdn url update log id: %w", err)
+	}
+	return s.repo.PatchFolderCdnUrl(ctx, folderID, cdnURL, operatorID, operatorIP, logID, s.nowFunc())
+}

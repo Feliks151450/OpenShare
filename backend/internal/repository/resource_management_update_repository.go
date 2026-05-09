@@ -197,3 +197,23 @@ func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder 
 		return createOperationLogTx(tx, logID, operatorID, "folder_created", "folder", folder.ID, folder.Name, operatorIP, now)
 	})
 }
+
+func (r *ResourceManagementRepository) PatchFolderCdnUrl(ctx context.Context, folderID string, cdnURL string, operatorID string, operatorIP string, logID string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Update("cdn_url", cdnURL)
+		if result.Error != nil {
+			return fmt.Errorf("patch folder cdn url: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("folder not found: %s", folderID)
+		}
+		comment := fmt.Sprintf("CDN URL updated to: %s", cdnURL)
+		if cdnURL == "" {
+			comment = "CDN URL removed"
+		}
+		if err := createOperationLogTx(tx, logID, operatorID, "folder_cdn_url_updated", "folder", folderID, comment, operatorIP, now); err != nil {
+			return fmt.Errorf("log folder cdn url update: %w", err)
+		}
+		return nil
+	})
+}

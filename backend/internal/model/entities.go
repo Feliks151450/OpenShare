@@ -81,6 +81,8 @@ type Folder struct {
 	CoverURL string `gorm:"column:cover_url;type:text;not null;default:''"`
 	// DirectLinkPrefix 为 http(s) 根地址时，其下文件直链为该前缀 + 相对路径（相对最内层已配置前缀的祖先文件夹）
 	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
+	// CdnURL 该托管目录的静态数据 JSON 文件 CDN 直链（cdn_mode 开启时前端按此加载）
+	CdnURL string `gorm:"column:cdn_url;type:text;not null;default:''"`
 	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。
 	HidePublicCatalog bool `gorm:"column:hide_public_catalog;not null;default:false"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载

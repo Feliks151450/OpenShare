@@ -1197,22 +1197,36 @@ onMounted(() => {
 const wideLayoutExtensions = ref("");
 
 async function loadLargeDownloadPolicy() {
-  const cached = staticDataLoader.downloadPolicy;
-  if (cached) {
-    const b = Number(cached.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
-    wideLayoutExtensions.value = (cached.wide_layout_extensions ?? "").trim();
-    return;
+  if (staticDataLoader.policyApplied) return;
+  if (staticDataLoader.policyPromise) {
+    await staticDataLoader.policyPromise;
+    if (staticDataLoader.policyApplied) return;
   }
+  // 先同步设 Promise 再启动异步工作，消除竞态窗口
+  let taskResolve!: () => void;
+  staticDataLoader.setPolicyPromise(new Promise<void>((r) => { taskResolve = r; }));
   try {
-    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string }>("/public/download-policy");
-    const b = Number(response.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) {
-      largeDownloadConfirmBytes.value = b;
+    const cached = staticDataLoader.downloadPolicy;
+    if (cached) {
+      const b = Number(cached.large_download_confirm_bytes);
+      if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+      wideLayoutExtensions.value = (cached.wide_layout_extensions ?? "").trim();
+      if (cached.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(cached.directory_cdn_urls);
+      staticDataLoader.markPolicyApplied();
+      return;
     }
+    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
+    const b = Number(response.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
     wideLayoutExtensions.value = (response.wide_layout_extensions ?? "").trim();
+    if (response.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(response.directory_cdn_urls);
+    if ((response as any).global_cdn_url) staticDataLoader.setGlobalCdnUrl((response as any).global_cdn_url);
+    staticDataLoader.markPolicyApplied();
   } catch {
     /* 默认 1 GiB */
+  } finally {
+    taskResolve();
+    staticDataLoader.setPolicyPromise(null);
   }
 }
 
@@ -1330,6 +1344,15 @@ async function loadDetail() {
   folderVideoPeers.value = [];
   folderVideoPeersLoading.value = false;
 
+  // 确保 download-policy 已加载 → 探测缓存 → 加载已缓存目录
+  if (!staticDataLoader.policyApplied) {
+    await loadLargeDownloadPolicy();
+  }
+  await staticDataLoader.preloadCachedDirectories();
+  if (staticDataLoader.globalCdnUrl) {
+    await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+  }
+
   // 优先从 staticDataLoader 获取预加载的文件详情
   const cachedDetail = staticDataLoader.findFileDetail(fileID.value);
   if (cachedDetail) {
@@ -1366,7 +1389,9 @@ async function loadDetail() {
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
+      // API 返回了 folder_id，按需加载对应目录的 CDN 数据供后续使用
       const fid = detail.value.folder_id?.trim() ?? "";
+      if (fid) void staticDataLoader.ensureDirectoryLoaded(fid);
       if (fid && !props.panelPresentation) {
         if (isVideoDetail(detail.value)) {
           void loadFolderVideoPeers(fid, detail.value.id);

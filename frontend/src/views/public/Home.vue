@@ -236,6 +236,10 @@ const actionError = ref("");
 const batchDownloadSubmitting = ref(false);
 const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
 const largeDownloadConfirmBytes = ref(DEFAULT_LARGE_DOWNLOAD_CONFIRM);
+let downloadPolicyLoaded = false;
+let announcementsLoaded = false;
+let hotDownloadsLoaded = false;
+let latestTitlesLoaded = false;
 type DownloadConfirmState = { mode: "single"; row: DirectoryRow } | { mode: "batch" };
 const downloadConfirm = ref<DownloadConfirmState | null>(null);
 const folders = ref<PublicFolderItem[]>([]);
@@ -984,9 +988,6 @@ onMounted(async () => {
   }
   currentReceiptCode.value = await syncSessionReceiptCode();
   await Promise.all([
-    loadAnnouncements(),
-    loadHotDownloads(),
-    loadLatestTitles(),
     loadDirectory(),
     loadLargeDownloadPolicy(),
   ]);
@@ -1001,20 +1002,36 @@ onMounted(async () => {
 });
 
 async function loadLargeDownloadPolicy() {
-  const cached = staticDataLoader.downloadPolicy;
-  if (cached) {
-    const b = Number(cached.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
-    return;
+  if (downloadPolicyLoaded || staticDataLoader.policyApplied) return;
+  if (staticDataLoader.policyPromise) {
+    await staticDataLoader.policyPromise;
+    if (staticDataLoader.policyApplied) return;
   }
+  // 先同步设 Promise 再启动异步工作，消除竞态窗口
+  let taskResolve!: () => void;
+  staticDataLoader.setPolicyPromise(new Promise<void>((r) => { taskResolve = r; }));
   try {
-    const response = await httpClient.get<{ large_download_confirm_bytes: number }>("/public/download-policy");
-    const b = Number(response.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) {
-      largeDownloadConfirmBytes.value = b;
+    const cached = staticDataLoader.downloadPolicy;
+    if (cached) {
+      const b = Number(cached.large_download_confirm_bytes);
+      if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+      if (cached.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(cached.directory_cdn_urls);
+      downloadPolicyLoaded = true;
+      staticDataLoader.markPolicyApplied();
+      return;
     }
+    const response = await httpClient.get<{ large_download_confirm_bytes: number; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
+    const b = Number(response.large_download_confirm_bytes);
+    if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+    if (response.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(response.directory_cdn_urls);
+    if ((response as any).global_cdn_url) staticDataLoader.setGlobalCdnUrl((response as any).global_cdn_url);
+    downloadPolicyLoaded = true;
+    staticDataLoader.markPolicyApplied();
   } catch {
     /* 使用默认 1 GiB */
+  } finally {
+    taskResolve();
+    staticDataLoader.setPolicyPromise(null);
   }
 }
 
@@ -1076,14 +1093,17 @@ watch(markdownCatalogNavigateConfirmRoute, (r, _p, onCleanup) => {
 });
 
 async function loadAnnouncements() {
+  if (announcementsLoaded) return;
   const cached = staticDataLoader.announcements;
   if (cached && cached.length > 0) {
     announcements.value = cached as unknown as AnnouncementItem[];
+    announcementsLoaded = true;
     return;
   }
   try {
     const response = await httpClient.get<{ items: AnnouncementItem[] }>("/public/announcements");
     announcements.value = response.items ?? [];
+    announcementsLoaded = true;
   } catch {
     announcements.value = [];
   }
@@ -1093,7 +1113,8 @@ function selectAnnouncement(id: string) {
   selectedAnnouncementId.value = id;
 }
 
-function openAnnouncementList() {
+async function openAnnouncementList() {
+  if (!announcementsLoaded) await loadAnnouncements();
   announcementListOpen.value = true;
   if (announcements.value.length > 0 && !selectedAnnouncementId.value) {
     selectedAnnouncementId.value = announcements.value[0].id;
@@ -1158,7 +1179,8 @@ function openSidebarDetailItem(item: InfoPanelCardItem) {
   openFile(item.id);
 }
 
-function openHotDownloadsModal() {
+async function openHotDownloadsModal() {
+  if (!hotDownloadsLoaded) await loadHotDownloads();
   openSidebarDetailModal({
     eyebrow: "Hot Downloads",
     title: "热门下载",
@@ -1171,19 +1193,8 @@ function openHotDownloadsModal() {
   });
 }
 
-function openLatestItemsModal() {
-  openSidebarDetailModal({
-    eyebrow: "Latest Files",
-    title: "资料上新",
-    description: "展示最新发布的前 20 份资料，点击标题可跳转文件详情页。",
-    items: latestItems.value.map((item) => ({
-      id: item.id,
-      label: item.name,
-    })),
-  });
-}
-
 async function loadHotDownloads() {
+  if (hotDownloadsLoaded) return;
   const cached = staticDataLoader.hotFiles;
   if (cached) {
     const items = (cached as unknown as { items: PublicFileItem[] }).items ?? [];
@@ -1192,6 +1203,7 @@ async function loadHotDownloads() {
       name: item.name,
       downloadCount: item.download_count ?? 0,
     }));
+    hotDownloadsLoaded = true;
     return;
   }
   try {
@@ -1201,12 +1213,14 @@ async function loadHotDownloads() {
       name: item.name,
       downloadCount: item.download_count ?? 0,
     }));
+    hotDownloadsLoaded = true;
   } catch {
     hotDownloadItems.value = [];
   }
 }
 
 async function loadLatestTitles() {
+  if (latestTitlesLoaded) return;
   const cached = staticDataLoader.latestFiles;
   if (cached) {
     const items = (cached as unknown as { items: PublicFileItem[] }).items ?? [];
@@ -1214,6 +1228,7 @@ async function loadLatestTitles() {
       id: item.id,
       name: item.name,
     }));
+    latestTitlesLoaded = true;
     return;
   }
   try {
@@ -1222,9 +1237,23 @@ async function loadLatestTitles() {
       id: item.id,
       name: item.name,
     }));
+    latestTitlesLoaded = true;
   } catch {
     latestItems.value = [];
   }
+}
+
+async function openLatestItemsModal() {
+  if (!latestTitlesLoaded) await loadLatestTitles();
+  openSidebarDetailModal({
+    eyebrow: "Latest Files",
+    title: "资料上新",
+    description: "展示最新发布的前 20 份资料，点击标题可跳转文件详情页。",
+    items: latestItems.value.map((item) => ({
+      id: item.id,
+      label: item.name,
+    })),
+  });
 }
 
 function snapshotDirectoryViewFromRefs(): DirectoryViewCacheEntry {
@@ -1282,11 +1311,19 @@ async function loadDirectory(options?: { force?: boolean }) {
       return;
     }
 
-    // 尝试从 staticDataLoader 获取预加载的 CDN 数据
+    // 尝试从 staticDataLoader 获取预加载的 CDN 数据（按需拉取）
     if (requestedKey) {
+      // 若 download-policy 尚未加载，先拉取以获取 directory_cdn_urls 映射
+      if (!downloadPolicyLoaded && !staticDataLoader.policyApplied) {
+        await loadLargeDownloadPolicy();
+      }
+      if (gen !== peekDirectoryViewLoadToken() || currentFolderID.value !== requestedKey) return;
+
+      await staticDataLoader.ensureDirectoryLoaded(requestedKey);
+      if (gen !== peekDirectoryViewLoadToken() || currentFolderID.value !== requestedKey) return;
+
       const staticEntry = staticDataLoader.findDirectoryView(requestedKey);
       if (staticEntry) {
-        if (gen !== peekDirectoryViewLoadToken()) return;
         error.value = "";
         actionMessage.value = "";
         actionError.value = "";
@@ -1299,6 +1336,18 @@ async function loadDirectory(options?: { force?: boolean }) {
         return;
       }
     } else {
+      // 若 download-policy 尚未加载，先拉取以获取 global_cdn_url
+      if (!downloadPolicyLoaded && !staticDataLoader.policyApplied) {
+        await loadLargeDownloadPolicy();
+      }
+      if (gen !== peekDirectoryViewLoadToken()) return;
+
+      // 尝试加载已缓存的全局 CDN JSON
+      if (staticDataLoader.globalCdnUrl) {
+        await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+      }
+      if (gen !== peekDirectoryViewLoadToken()) return;
+
       const staticRoots = staticDataLoader.rootFolders;
       if (staticRoots && staticRoots.length > 0) {
         if (gen !== peekDirectoryViewLoadToken()) return;
@@ -1359,6 +1408,18 @@ async function loadDirectory(options?: { force?: boolean }) {
     folders.value = (folderResponse as { items: PublicFolderItem[] }).items ?? [];
     if (!fetchKey) {
       sharedRootFolders.value = [...folders.value];
+
+      // 根目录响应内嵌了 download_policy，应用之
+      const embeddedPolicy = (folderResponse as any).download_policy;
+      if (embeddedPolicy) {
+        const b = Number(embeddedPolicy.large_download_confirm_bytes);
+        if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+        downloadPolicyLoaded = true;
+        staticDataLoader.markPolicyApplied();
+        if (embeddedPolicy.cdn_mode) {
+          staticDataLoader.setCdnUrlMap(folders.value as Array<{ id: string; cdn_url?: string }>);
+        }
+      }
     }
     files.value = fetchKey ? ((fileResponse as { items: PublicFileItem[] } | undefined)?.items ?? []) : [];
 

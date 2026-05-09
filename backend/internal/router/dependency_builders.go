@@ -14,7 +14,7 @@ import (
 func buildRouteHandlers(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *routeHandlers {
 	repos := buildRouteRepositories(db)
 	services := buildRouteServices(db, cfg, repos, sessionManager)
-	return buildHandlers(cfg, sessionManager, services)
+	return buildHandlers(cfg, sessionManager, services, repos)
 }
 
 func buildRouteRepositories(db *gorm.DB) *routeRepositories {
@@ -75,7 +75,7 @@ func buildRouteServices(
 	}
 }
 
-func buildHandlers(cfg config.Config, sessionManager *session.Manager, services *routeServices) *routeHandlers {
+func buildHandlers(cfg config.Config, sessionManager *session.Manager, services *routeServices, repos *routeRepositories) *routeHandlers {
 	return &routeHandlers{
 		adminAuth:          handler.NewAdminAuthHandler(services.adminAuth, sessionManager),
 		adminDashboard:     handler.NewAdminDashboardHandler(services.adminDashboard),
@@ -86,7 +86,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		imports:            handler.NewImportHandler(services.imports, services.adminAuth),
 		moderation:         handler.NewModerationHandler(services.moderation),
 		operationLog:       handler.NewOperationLogHandler(services.operationLog),
-		publicCatalog:      handler.NewPublicCatalogHandler(services.publicCatalog),
+		publicCatalog:      handler.NewPublicCatalogHandler(services.publicCatalog, services.systemSetting),
 		publicDownload:     handler.NewPublicDownloadHandler(services.publicDownload),
 		publicReceipt:      handler.NewPublicReceiptHandler(services.publicReceipt),
 		publicSubmission:   handler.NewPublicSubmissionHandler(services.publicSubmission),
@@ -94,7 +94,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		resourceManagement: handler.NewResourceManagementHandler(services.resourceManagement, services.adminAuth),
 		search:             handler.NewSearchHandler(services.search),
 		siteVisit:          handler.NewSiteVisitHandler(services.siteVisit),
-		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting),
-		export_:            handler.NewExportHandler(services.announcement, services.publicCatalog, services.systemSetting, services.fileTag, services.imports, services.publicDownload),
+		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting, repos.imports),
+		export_:            handler.NewExportHandler(services.announcement, services.publicCatalog, services.systemSetting, services.fileTag, services.imports, services.publicDownload, repos.imports),
 	}
 }

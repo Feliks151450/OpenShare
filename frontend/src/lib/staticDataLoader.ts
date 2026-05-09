@@ -38,6 +38,9 @@ export interface ExportFileTag {
 export interface ExportDownloadPolicy {
   large_download_confirm_bytes: number;
   wide_layout_extensions: string;
+  cdn_mode?: boolean;
+  directory_cdn_urls?: Record<string, string>;
+  global_cdn_url?: string;
 }
 
 export interface ExportPublicFolderItem {
@@ -155,6 +158,10 @@ class StaticDataLoader {
   private _directories = new Map<string, DirectoryExportData>();
   private _globalLoading = false;
   private _globalError: string | null = null;
+  /** 下载策略是否已通过任一途径加载（内嵌于 folder 响应 / loadGlobal / loadDownloadPolicy API） */
+  private _policyApplied = false;
+  /** folderId → cdn_url 映射，cdn_mode 下由根目录 folder 响应填充 */
+  private _cdnUrlMap = new Map<string, string>();
 
   // ── 配置 ─────────────────────────────────────────────────────
 
@@ -174,20 +181,21 @@ class StaticDataLoader {
     // 直接传 JSON 对象
     if (input != null && typeof input === "object") {
       this._global = input as GlobalExportData;
+      this._bootstrapCdnUrlMap();
       this._globalError = null;
       this._globalLoading = false;
       return true;
     }
-
     const targetUrl = (typeof input === "string" ? input : undefined) ?? this.config.globalUrl;
     if (!targetUrl || this._globalLoading) return false;
 
     this._globalLoading = true;
     this._globalError = null;
     try {
-      const response = await fetch(targetUrl);
+      const response = await fetch(targetUrl, { cache: "force-cache" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       this._global = (await response.json()) as GlobalExportData;
+      this._bootstrapCdnUrlMap();
       return true;
     } catch (err: unknown) {
       this._globalError = err instanceof Error ? err.message : "Unknown error";
@@ -235,6 +243,120 @@ class StaticDataLoader {
   }
 
   // ── 全局数据访问器 ────────────────────────────────────────────
+
+  /** 正在进行的 download-policy 请求 Promise，用于并发调用去重与等待 */
+  private _policyPromise: Promise<void> | null = null;
+
+  /** 返回 download-policy 是否已加载完成 */
+  get policyApplied(): boolean {
+    return this._policyApplied;
+  }
+
+  markPolicyApplied(): void {
+    this._policyApplied = true;
+  }
+
+  /** 若有正在进行的请求则返回其 Promise（供并发者 await），否则返回 null */
+  get policyPromise(): Promise<void> | null {
+    return this._policyPromise;
+  }
+
+  setPolicyPromise(p: Promise<void> | null): void {
+    this._policyPromise = p;
+  }
+
+  /** 加载全局 CDN JSON（force-cache 优先本地缓存）。
+   *  应在拿到 download-policy 后、发起其他 API 请求前调用。
+   *  已加载过则跳过。 */
+  async preloadGlobalCdn(url: string): Promise<boolean> {
+    if (!url || this._global) return false;
+    console.log(`[staticData] loading global CDN: ${url}`);
+    return this.loadGlobal(url);
+  }
+
+  /** 存储从 download-policy 中获取的 global_cdn_url，供后续调用 */
+  get globalCdnUrl(): string {
+    return this._globalCdnUrl;
+  }
+  setGlobalCdnUrl(url: string): void {
+    this._globalCdnUrl = url;
+  }
+  private _globalCdnUrl = "";
+
+  /** 从根目录 folder 列表填充 cdn_url 映射（cdn_mode 开启时调用） */
+  setCdnUrlMap(folders: Array<{ id: string; cdn_url?: string }>): void {
+    this._cdnUrlMap.clear();
+    for (const f of folders) {
+      const url = (f.cdn_url ?? "").trim();
+      if (url) this._cdnUrlMap.set(f.id, url);
+    }
+  }
+
+  /** 从普通对象 { folderId: cdnUrl } 填充 cdn_url 映射 */
+  setCdnUrlMapFromObject(map: Record<string, string>): void {
+    for (const [id, url] of Object.entries(map)) {
+      if (url && url.trim()) this._cdnUrlMap.set(id, url.trim());
+    }
+  }
+
+  /** 按需加载目录数据：若该 folderId 有 cdn_url 映射且未缓存，则拉取 */
+  async ensureDirectoryLoaded(folderId: string): Promise<void> {
+    if (this._directories.has(folderId)) return;
+    const url = this._cdnUrlMap.get(folderId);
+    if (!url) return;
+    await this.loadDirectory(url);
+  }
+
+  /** 用 force-cache 探测浏览器缓存中已有哪些 CDN JSON。
+   *  拿到 directory_cdn_urls 后立即调用；命中缓存则秒加载（不产生网络请求），
+   *  未命中会被浏览器自动回退到网络请求（等同于提前预加载）。
+   *  后续 ensureDirectoryLoaded 发现已缓存时会跳过，不再重复拉取。 */
+  /** 用 HEAD + 计时法探测浏览器缓存。
+   *  已缓存 → 加载完整数据；未缓存 → 跳过（HEAD 流量极小），留给 ensureDirectoryLoaded 按需拉取。 */
+  async preloadCachedDirectories(): Promise<void> {
+    if (this._cdnUrlMap.size === 0) return;
+    const loads: Promise<void>[] = [];
+    let checked = 0;
+    let cached = 0;
+    const CACHE_THRESHOLD_MS = 20; // 本地缓存 < 5ms，网络 > 50ms，20ms 安全分界线
+
+    for (const [id, url] of this._cdnUrlMap) {
+      if (this._directories.has(id)) continue;
+      checked++;
+      loads.push((async () => {
+        try {
+          const t0 = performance.now();
+          const headRes = await fetch(url, { method: "HEAD", cache: "force-cache" });
+          const elapsed = performance.now() - t0;
+          if (!headRes.ok) return;
+
+          if (elapsed < CACHE_THRESHOLD_MS) {
+            // 计时判断是本地缓存命中，加载完整数据
+            const res = await fetch(url, { cache: "force-cache" });
+            if (!res.ok) return;
+            const data = (await res.json()) as DirectoryExportData;
+            this._directories.set(data.managed_root.id, data);
+            cached++;
+            console.log(`[staticData] CDN cache hit (${elapsed.toFixed(1)}ms): ${url}`);
+          } else {
+            console.log(`[staticData] CDN miss (${elapsed.toFixed(1)}ms), deferred: ${url}`);
+          }
+        } catch {
+          // 跳过
+        }
+      })());
+    }
+
+    if (checked > 0) {
+      console.log(`[staticData] CDN probe: ${cached}/${checked} cached, ${checked - cached} deferred`);
+      await Promise.all(loads);
+    }
+  }
+
+  private _bootstrapCdnUrlMap(): void {
+    const urls = this._global?.download_policy?.directory_cdn_urls;
+    if (urls) this.setCdnUrlMapFromObject(urls);
+  }
 
   get hasGlobal(): boolean {
     return this._global !== null;

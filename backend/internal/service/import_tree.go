@@ -10,6 +10,7 @@ type FolderTreeNode struct {
 	Name              string           `json:"name"`
 	SourcePath        string           `json:"source_path"`
 	HidePublicCatalog bool             `json:"hide_public_catalog"`
+	CdnURL            string           `json:"cdn_url"`
 	Folders           []FolderTreeNode `json:"folders"`
 	Files             []FolderTreeFile `json:"files"`
 }
@@ -41,6 +42,7 @@ func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, er
 			Name:              folder.Name,
 			SourcePath:        derefString(folder.SourcePath),
 			HidePublicCatalog: folder.HidePublicCatalog,
+				CdnURL:            folder.CdnURL,
 			Folders:           []FolderTreeNode{},
 			Files:             []FolderTreeFile{},
 		}

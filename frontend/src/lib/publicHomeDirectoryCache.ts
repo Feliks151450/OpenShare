@@ -9,6 +9,7 @@ export interface PublicFolderItem {
   description?: string;
   remark?: string;
   cover_url?: string;
+  cdn_url?: string;
   download_allowed?: boolean;
   updated_at: string;
   file_count: number;

@@ -146,6 +146,13 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		patchCatalogVisibility,
 	)
+	patchFolderCdnUrl := handlers.resourceManagement.PatchFolderCdnUrl
+	adminProtected.PATCH(
+		"/resources/folders/:folderID/cdn-url",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		patchFolderCdnUrl,
+	)
+
 	adminProtected.PUT(
 		"/resources/files/:fileID/tags",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),

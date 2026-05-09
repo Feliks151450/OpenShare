@@ -1023,6 +1023,22 @@ const staticDataLoader = (function () {
   let _globalLoading = false;
   /** @type {string|null} */
   let _globalError = null;
+  let _policyApplied = false;
+  let _policyPromise = null;
+  /** @type {Map<string, string>} */
+  const _cdnUrlMap = new Map();
+  let _globalCdnUrl = "";
+
+  function bootstrapCdnUrlMap() {
+    var urls = _global && _global.download_policy && _global.download_policy.directory_cdn_urls;
+    if (urls) {
+      var keys = Object.keys(urls);
+      for (var i = 0; i < keys.length; i++) {
+        var url = (urls[keys[i]] ?? "").trim();
+        if (url) _cdnUrlMap.set(keys[i], url);
+      }
+    }
+  }
 
   return {
     configure(cfg) {
@@ -1035,6 +1051,7 @@ const staticDataLoader = (function () {
     async loadGlobal(input) {
       if (input != null && typeof input === "object") {
         _global = input;
+        bootstrapCdnUrlMap();
         _globalError = null;
         _globalLoading = false;
         return true;
@@ -1044,9 +1061,10 @@ const staticDataLoader = (function () {
       _globalLoading = true;
       _globalError = null;
       try {
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: "force-cache" });
         if (!res.ok) throw new Error("HTTP " + res.status);
         _global = await res.json();
+        bootstrapCdnUrlMap();
         return true;
       } catch (e) {
         _globalError = e instanceof Error ? e.message : "Unknown error";
@@ -1081,6 +1099,72 @@ const staticDataLoader = (function () {
 
     // ── 全局数据访问器 ─────────────────────────────────
 
+    get policyApplied() { return _policyApplied; },
+    markPolicyApplied() { _policyApplied = true; },
+    get policyPromise() { return _policyPromise; },
+    setPolicyPromise(p) { _policyPromise = p; },
+    get globalCdnUrl() { return _globalCdnUrl; },
+    setGlobalCdnUrl(url) { _globalCdnUrl = url; },
+    async preloadGlobalCdn(url) {
+      if (!url || _global) return false;
+      console.log("[staticData] loading global CDN: " + url);
+      return this.loadGlobal(url);
+    },
+    setCdnUrlMap(folders) {
+      _cdnUrlMap.clear();
+      for (let i = 0; i < folders.length; i++) {
+        const url = (folders[i].cdn_url ?? "").trim();
+        if (url) _cdnUrlMap.set(folders[i].id, url);
+      }
+    },
+    setCdnUrlMapFromObject(map) {
+      var keys = Object.keys(map);
+      for (var i = 0; i < keys.length; i++) {
+        var url = (map[keys[i]] ?? "").trim();
+        if (url) _cdnUrlMap.set(keys[i], url);
+      }
+    },
+    async ensureDirectoryLoaded(folderId) {
+      if (_directories.has(folderId)) return;
+      const url = _cdnUrlMap.get(folderId);
+      if (!url) return;
+      await this.loadDirectory(url);
+    },
+    async preloadCachedDirectories() {
+      if (_cdnUrlMap.size === 0) return;
+      var tasks = [];
+      var checked = 0;
+      var cached = 0;
+      var CACHE_THRESHOLD_MS = 20;
+      _cdnUrlMap.forEach(function(url, id) {
+        if (_directories.has(id)) return;
+        checked++;
+        tasks.push((async function() {
+          try {
+            var t0 = performance.now();
+            var headRes = await fetch(url, { method: "HEAD", cache: "force-cache" });
+            var elapsed = performance.now() - t0;
+            if (!headRes.ok) return;
+            if (elapsed < CACHE_THRESHOLD_MS) {
+              var res = await fetch(url, { cache: "force-cache" });
+              if (!res.ok) return;
+              var data = await res.json();
+              _directories.set(data.managed_root.id, data);
+              cached++;
+              console.log("[staticData] CDN cache hit (" + elapsed.toFixed(1) + "ms): " + url);
+            } else {
+              console.log("[staticData] CDN miss (" + elapsed.toFixed(1) + "ms), deferred: " + url);
+            }
+          } catch (e) {
+            // 跳过
+          }
+        })());
+      });
+      if (checked > 0) {
+        console.log("[staticData] CDN probe: " + cached + "/" + checked + " cached, " + (checked - cached) + " deferred");
+        await Promise.all(tasks);
+      }
+    },
     get hasGlobal() { return _global !== null; },
     get globalLoading() { return _globalLoading; },
     get globalError() { return _globalError; },
@@ -1242,6 +1326,13 @@ function closeSidebarOverlay() {
 }
 
 async function loadSidebarFolders() {
+  // 优先从 staticDataLoader 获取
+  const cached = staticDataLoader.rootFolders;
+  if (cached && cached.length > 0) {
+    state.sidebarFolders = cached;
+    state.sidebarLoading = false;
+    return;
+  }
   state.sidebarLoading = true;
   try {
     const response = await apiRequest("/public/folders");
@@ -1253,13 +1344,15 @@ async function loadSidebarFolders() {
   }
 }
 
-function openSidebarPanel(name) {
+async function openSidebarPanel(name) {
   if (name === "announcements") {
+    if (!state.announcementsLoaded) await loadAnnouncements();
     state.modalAnnouncementList = true;
     if (state.announcements.length > 0 && !state.announcementSelectedId) {
       state.announcementSelectedId = state.announcements[0].id;
     }
   } else if (name === "hotDownloads") {
+    if (!state.hotDownloadsLoaded) await loadHotDownloads();
     state.modalSidebar = {
       eyebrow: "Hot Downloads",
       title: "热门下载",
@@ -1269,6 +1362,7 @@ function openSidebarPanel(name) {
       }),
     };
   } else if (name === "latestItems") {
+    if (!state.latestTitlesLoaded) await loadLatestTitles();
     state.modalSidebar = {
       eyebrow: "Latest Files",
       title: "资料上新",
@@ -1507,8 +1601,13 @@ async function loadDirectory(force) {
       return;
     }
 
-    // 尝试从 staticDataLoader 获取预加载的 CDN 数据
+    // 尝试从 staticDataLoader 获取预加载的 CDN 数据（按需拉取）
     if (folderId) {
+      // 若 download-policy 尚未加载，先拉取获取 directory_cdn_urls 映射
+      if (!state.downloadSettingsLoaded && !staticDataLoader.policyApplied) {
+        await loadDownloadSettings();
+      }
+      await staticDataLoader.ensureDirectoryLoaded(folderId);
       const se = staticDataLoader.findDirectoryView(folderId);
       if (se) {
         state.folders = se.folders ?? [];
@@ -1520,6 +1619,14 @@ async function loadDirectory(force) {
         return;
       }
     } else {
+      // 若 download-policy 尚未加载，先拉取获取 global_cdn_url
+      if (!state.downloadSettingsLoaded && !staticDataLoader.policyApplied) {
+        await loadDownloadSettings();
+      }
+      // 尝试加载已缓存的全局 CDN JSON
+      if (staticDataLoader.globalCdnUrl) {
+        await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+      }
       const roots = staticDataLoader.rootFolders;
       if (roots && roots.length > 0) {
         state.folders = roots;
@@ -1550,6 +1657,21 @@ async function loadDirectory(force) {
     state.folders = folderResponse.items ?? [];
     state.files = folderId && results[1] ? results[1].items ?? [] : [];
     const folderDetail = folderId && results[2] ? results[2] : null;
+
+    // 根目录响应内嵌了 download_policy，应用之
+    if (!folderId) {
+      const embeddedPolicy = folderResponse.download_policy;
+      if (embeddedPolicy) {
+        const b = Number(embeddedPolicy.large_download_confirm_bytes);
+        if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
+        state.wideLayoutExtensions = (embeddedPolicy.wide_layout_extensions ?? "").trim();
+        state.downloadSettingsLoaded = true;
+        staticDataLoader.markPolicyApplied();
+        if (embeddedPolicy.cdn_mode) {
+          staticDataLoader.setCdnUrlMap(state.folders);
+        }
+      }
+    }
 
     if (!folderId && !rootViewLocked() && state.folders.length === 1) {
       setHashRoute({ view: "home", folder: state.folders[0].id, root: "", fileId: "", t: "" });
@@ -1678,6 +1800,15 @@ async function loadFileDetail() {
   state.filePdfPreviewLoading = false;
   state.filePdfPreviewError = "";
 
+  // 确保 download-policy 已加载 → 探测缓存 → 加载已缓存目录
+  if (!staticDataLoader.policyApplied) {
+    await loadDownloadSettings();
+  }
+  await staticDataLoader.preloadCachedDirectories();
+  if (staticDataLoader.globalCdnUrl) {
+    await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+  }
+
   // 优先从 staticDataLoader 获取预加载的文件详情
   const cachedDetail = staticDataLoader.findFileDetail(id);
   if (cachedDetail) {
@@ -1715,6 +1846,8 @@ async function loadFileDetail() {
   try {
     const d = await apiRequest(`/public/files/${encodeURIComponent(id)}`);
     state.fileDetail = d;
+    // API 返回了 folder_id，按需加载对应目录的 CDN 数据供后续使用
+    if (d && d.folder_id) void staticDataLoader.ensureDirectoryLoaded(d.folder_id);
     if (d && isVideoDetail(d)) {
       const fid = (d.folder_id ?? "").trim();
       if (fid) await loadFolderVideoPeers(fid, d.id);
@@ -2099,25 +2232,47 @@ function downloadFileFromDetail() {
 
 async function loadDownloadSettings(force) {
   if (state.downloadSettingsLoaded && !force) return;
-  const cached = staticDataLoader.downloadPolicy;
-  if (cached) {
-    const b = Number(cached.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
-    else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
-    state.wideLayoutExtensions = (cached.wide_layout_extensions ?? "").trim();
-    state.downloadSettingsLoaded = true;
-    return;
+  if (staticDataLoader.policyApplied) return;
+  if (staticDataLoader.policyPromise) {
+    await staticDataLoader.policyPromise;
+    if (staticDataLoader.policyApplied) return;
   }
+  // 先设 Promise 再启动，避免竞态
+  var taskResolve, taskReject;
+  staticDataLoader.setPolicyPromise(new Promise(function(resolve, reject) {
+    taskResolve = resolve;
+    taskReject = reject;
+  }));
   try {
-    const r = await apiRequest("/public/download-policy");
-    const b = Number(r?.large_download_confirm_bytes);
-    if (Number.isFinite(b) && b > 0) state.largeDownloadConfirmBytes = b;
+    var cached = staticDataLoader.downloadPolicy;
+    if (cached) {
+      var cb = Number(cached.large_download_confirm_bytes);
+      if (Number.isFinite(cb) && cb > 0) state.largeDownloadConfirmBytes = cb;
+      else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
+      state.wideLayoutExtensions = (cached.wide_layout_extensions ?? "").trim();
+      if (cached.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(cached.directory_cdn_urls);
+      if (cached.global_cdn_url) staticDataLoader.setGlobalCdnUrl(cached.global_cdn_url);
+      state.downloadSettingsLoaded = true;
+      staticDataLoader.markPolicyApplied();
+      taskResolve();
+      return;
+    }
+    var r = await apiRequest("/public/download-policy");
+    var rb = Number(r && r.large_download_confirm_bytes ? r.large_download_confirm_bytes : 0);
+    if (Number.isFinite(rb) && rb > 0) state.largeDownloadConfirmBytes = rb;
     else state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
-    state.wideLayoutExtensions = (r?.wide_layout_extensions ?? "").trim();
+    state.wideLayoutExtensions = (r && r.wide_layout_extensions ? r.wide_layout_extensions : "").trim();
+    if (r && r.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(r.directory_cdn_urls);
+    if (r && r.global_cdn_url) staticDataLoader.setGlobalCdnUrl(r.global_cdn_url);
     state.downloadSettingsLoaded = true;
-  } catch {
+    staticDataLoader.markPolicyApplied();
+    taskResolve();
+  } catch (e) {
     state.largeDownloadConfirmBytes = DEFAULT_LARGE_DOWNLOAD_CONFIRM;
     state.wideLayoutExtensions = "";
+    taskReject(e);
+  } finally {
+    staticDataLoader.setPolicyPromise(null);
   }
 }
 
@@ -3442,10 +3597,16 @@ async function bootstrapRoute() {
   state.videoPlaybackStep = 0;
   state.downloadConfirm = null;
   if (state.route.view === "file") {
-    await Promise.all([loadFileDetail(), loadDownloadSettings()]);
+    await loadDownloadSettings();
+    if (staticDataLoader.globalCdnUrl) await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+    loadSidebarFolders();
+    await loadFileDetail();
   } else {
     clearSearchState();
-    await Promise.all([loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), loadDirectory(), loadDownloadSettings()]);
+    await loadDownloadSettings();
+    if (staticDataLoader.globalCdnUrl) await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
+    loadSidebarFolders();
+    await loadDirectory();
   }
   render();
 }
@@ -3652,7 +3813,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   consumeApiFromQueryOnce();
   consumeApiFromHashQuery();
   await autoDetectApi();
-  loadSidebarFolders();
   void bootstrapRoute();
 });
 

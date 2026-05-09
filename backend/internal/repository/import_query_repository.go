@@ -17,6 +17,7 @@ type FolderTreeFolderRow struct {
 	Name              string
 	SourcePath        *string
 	HidePublicCatalog bool
+	CdnURL            string
 }
 
 type FolderTreeFileRow struct {
@@ -57,7 +58,7 @@ func (r *ImportRepository) ListFolders(ctx context.Context) ([]FolderTreeFolderR
 	var rows []FolderTreeFolderRow
 	err := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, source_path, hide_public_catalog").
+		Select("id, parent_id, name, source_path, hide_public_catalog, cdn_url").
 		Order("name ASC").
 		Find(&rows).Error
 	if err != nil {
@@ -101,6 +102,25 @@ func (r *ImportRepository) ListManagedRoots(ctx context.Context) ([]ManagedRootR
 		Order("source_path ASC").
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list managed roots: %w", err)
+	}
+	return rows, nil
+}
+
+type ManagedRootCdnUrlRow struct {
+	ID     string
+	CdnURL string
+}
+
+func (r *ImportRepository) ListManagedRootCdnUrls(ctx context.Context) ([]ManagedRootCdnUrlRow, error) {
+	var rows []ManagedRootCdnUrlRow
+	if err := r.db.WithContext(ctx).
+		Model(&model.Folder{}).
+		Select("id, cdn_url").
+		Where("parent_id IS NULL").
+		Where("source_path IS NOT NULL AND TRIM(source_path) <> ''").
+		Where("cdn_url IS NOT NULL AND TRIM(cdn_url) <> ''").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list managed root cdn urls: %w", err)
 	}
 	return rows, nil
 }
