@@ -2302,7 +2302,7 @@ async function syncSessionReceiptCode() {
             <section>
               <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1 space-y-3">
-                  <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-blue-600 sm:text-2xl dark:text-slate-100">
+                  <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-sky-700 sm:text-2xl dark:text-sky-400">
                     {{ currentFolderDetail.name }}
                   </p>
                   <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-500">
@@ -2640,8 +2640,11 @@ async function syncSessionReceiptCode() {
             <article
               v-for="row in block.rows"
               :key="`${row.kind}-${row.id}`"
-              class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm"
-              :class="row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5'"
+              class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border transition hover:shadow-sm"
+              :class="[
+                row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5',
+                row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 hover:border-sky-300 hover:bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-100',
+              ]"
               @click="onCardOpenClick(row)"
             >
               <template v-if="row.coverUrl">
@@ -2666,7 +2669,7 @@ async function syncSessionReceiptCode() {
                   </div>
                 </div>
                 <div class="flex min-h-0 flex-1 flex-col px-2.5 pb-2.5 pt-3 sm:px-2.5">
-                  <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">{{ row.name }}</h3>
+                  <h3 class="line-clamp-2 text-base font-semibold leading-snug" :class="row.kind === 'folder' ? 'text-sky-900' : 'text-slate-900'">{{ row.name }}</h3>
                   <p
                     v-if="row.kind === 'folder' && cardRemarkPreview(row.remark)"
                     class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500"
@@ -2701,7 +2704,7 @@ async function syncSessionReceiptCode() {
                   <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                     <button
                       type="button"
-                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                       @click.stop="openFeedbackModal({ id: row.id, type: row.kind, name: row.name })"
                     >
                       <Flag class="h-4 w-4" />
@@ -2710,7 +2713,7 @@ async function syncSessionReceiptCode() {
                       <button
                         type="button"
                         title="在新窗口中打开"
-                        class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                         aria-label="在新窗口中打开"
                         @click.stop="openInNewWindow(row)"
                       >
@@ -2729,7 +2732,7 @@ async function syncSessionReceiptCode() {
                       <button
                         v-if="row.downloadAllowed"
                         type="button"
-                        class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                         @click.stop="downloadResource(row)"
                       >
                         <Download class="h-4 w-4" />
@@ -2750,8 +2753,11 @@ async function syncSessionReceiptCode() {
                 </div>
                 <div class="flex items-start gap-2.5 sm:gap-2.5">
                   <div
-                    class="flex h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-slate-100 text-slate-500"
-                    :class="row.coverUrl ? '' : 'items-center justify-center'"
+                    :class="[
+                      'flex h-12 w-12 shrink-0 overflow-hidden rounded-2xl',
+                      row.coverUrl ? '' : 'items-center justify-center',
+                      row.kind === 'folder' ? 'bg-sky-50/50 text-sky-500' : 'bg-slate-100 text-slate-500',
+                    ]"
                   >
                     <img
                       v-if="row.coverUrl"
@@ -2760,7 +2766,7 @@ async function syncSessionReceiptCode() {
                       class="h-full w-full object-cover"
                       loading="lazy"
                     />
-                    <Folder v-else-if="row.kind === 'folder'" class="h-6 w-6 text-blue-500" />
+                    <Folder v-else-if="row.kind === 'folder'" class="h-6 w-6 text-sky-500" />
                     <component v-else :is="fileIconComponent(row.extension)" class="h-6 w-6" />
                   </div>
                   <div
@@ -2768,7 +2774,7 @@ async function syncSessionReceiptCode() {
                     :class="cardMultiSelectMode ? 'pr-9 sm:pr-10' : 'pr-0'"
                   >
                     <h3
-                      class="line-clamp-2 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]"
+                      class="line-clamp-2 break-words text-base font-semibold leading-snug [overflow-wrap:anywhere]" :class="row.kind === 'folder' ? 'text-sky-900' : 'text-slate-900'"
                     >
                       {{ row.name }}
                     </h3>
@@ -2810,7 +2816,7 @@ async function syncSessionReceiptCode() {
                 <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 py-2.5">
                   <button
                     type="button"
-                    class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                     @click.stop="openFeedbackModal({ id: row.id, type: row.kind, name: row.name })"
                   >
                     <Flag class="h-4 w-4" />
@@ -2819,7 +2825,7 @@ async function syncSessionReceiptCode() {
                     <button
                       type="button"
                       title="在新窗口中打开"
-                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                       aria-label="在新窗口中打开"
                       @click.stop="openInNewWindow(row)"
                     >
@@ -2838,7 +2844,7 @@ async function syncSessionReceiptCode() {
                     <button
                       v-if="row.downloadAllowed"
                       type="button"
-                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                       @click.stop="downloadResource(row)"
                     >
                       <Download class="h-4 w-4" />
@@ -2888,10 +2894,10 @@ async function syncSessionReceiptCode() {
                         class="mt-0.5 h-5 w-5 shrink-0 rounded object-cover"
                         loading="lazy"
                       />
-                      <Folder v-else class="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
+                      <Folder v-else class="mt-0.5 h-5 w-5 shrink-0 text-sky-500" />
                       <div class="min-w-0 flex-1">
                         <span
-                          class="block truncate text-base font-medium leading-snug text-slate-900 dark:text-slate-100"
+                          class="block truncate text-base font-medium leading-snug text-sky-900 dark:text-sky-400"
                           :title="row.name"
                         >{{ row.name }}</span>
                         <p

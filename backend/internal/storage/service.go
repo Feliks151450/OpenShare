@@ -593,6 +593,7 @@ func (s *Service) ScanDirectory(rootPath string) ([]ScannedEntry, error) {
 	}
 
 	entries := make([]ScannedEntry, 0, 32)
+	visited := make(map[string]bool)
 	err = filepath.WalkDir(rootPath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -607,6 +608,75 @@ func (s *Service) ScanDirectory(rootPath string) ([]ScannedEntry, error) {
 			return nil
 		}
 		if d.Type()&os.ModeSymlink != 0 {
+			targetInfo, err := os.Stat(path)
+			if err != nil || !targetInfo.IsDir() {
+				return nil
+			}
+			realPath, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil
+			}
+			realPath = filepath.Clean(realPath)
+			if visited[realPath] {
+				return nil
+			}
+			visited[realPath] = true
+
+			relLinkPath, err := filepath.Rel(rootPath, path)
+			if err != nil {
+				return nil
+			}
+			symlinkRel := filepath.ToSlash(relLinkPath)
+
+			entries = append(entries, ScannedEntry{
+				AbsolutePath: path,
+				RelativePath: symlinkRel,
+				Name:         d.Name(),
+				IsDir:        true,
+			})
+
+			_ = filepath.WalkDir(realPath, func(subPath string, subD os.DirEntry, subErr error) error {
+				if subErr != nil {
+					return subErr
+				}
+				if subPath == realPath {
+					return nil
+				}
+				if shouldIgnoreImportEntry(subD.Name()) {
+					if subD.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				relWithin, err := filepath.Rel(realPath, subPath)
+				if err != nil {
+					return err
+				}
+				entryRelPath := filepath.ToSlash(filepath.Join(symlinkRel, relWithin))
+
+				entryAbsPath := filepath.Join(rootPath, filepath.FromSlash(entryRelPath))
+				entry := ScannedEntry{
+					AbsolutePath: entryAbsPath,
+					RelativePath: entryRelPath,
+					Name:         subD.Name(),
+					IsDir:        subD.IsDir(),
+				}
+				if !subD.IsDir() {
+					fi, err := subD.Info()
+					if err != nil {
+						return fmt.Errorf("read file info: %w", err)
+					}
+					entry.Size = fi.Size()
+					entry.Extension = strings.ToLower(filepath.Ext(subD.Name()))
+					entry.MimeType = mime.TypeByExtension(entry.Extension)
+					if entry.MimeType == "" {
+						entry.MimeType = "application/octet-stream"
+					}
+				}
+				entries = append(entries, entry)
+				return nil
+			})
+
 			return nil
 		}
 

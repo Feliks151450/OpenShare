@@ -17,6 +17,8 @@ export interface NetCDFDumpVar {
   shape?: number[];
   attributes?: NetCDFDumpAttr[];
   unreadable?: boolean;
+  values?: string[];
+  values_truncated?: boolean;
 }
 
 export interface NetCDFDumpGroup {
@@ -72,6 +74,24 @@ function variableAttributesDisclosureHtml(v: NetCDFDumpVar): string {
   );
 }
 
+/** 一维变量值折叠块，以可读形式展示数值。 */
+function variableValuesDisclosureHtml(v: NetCDFDumpVar): string {
+  const vals = v.values ?? [];
+  if (vals.length === 0) return "";
+  const n = vals.length;
+  const truncatedNote = v.values_truncated
+    ? ` <span class="netcdf-var-values-truncated-note">（仅展示前 ${n} 项）</span>`
+    : "";
+  const summary = `变量值 <span class="netcdf-attrs-disclosure-count">（${n} 项）</span>${truncatedNote}`;
+  const valuesList = vals.map((val) => escapeHtmlCell(val)).join(", ");
+  return (
+    `<details class="netcdf-attrs-disclosure netcdf-var-values-disclosure">\n` +
+    `<summary class="netcdf-attrs-disclosure-summary">${summary}</summary>\n` +
+    `<div class="netcdf-var-values-body">${valuesList}</div>\n` +
+    `</details>`
+  );
+}
+
 function variableCardHtml(v: NetCDFDumpVar): string {
   const vDims = v.dimensions ?? [];
   const sh = v.shape ?? [];
@@ -93,7 +113,8 @@ function variableCardHtml(v: NetCDFDumpVar): string {
     metaParts.length > 0 ? `<div class="netcdf-var-card-meta">${metaParts.join("")}</div>` : "";
 
   const attrsHtml = vAttr.length > 0 ? variableAttributesDisclosureHtml(v) : "";
-  const bodyInner = [metaHtml, attrsHtml].filter(Boolean).join("\n");
+  const valuesHtml = variableValuesDisclosureHtml(v);
+  const bodyInner = [valuesHtml, metaHtml, attrsHtml].filter(Boolean).join("\n");
 
   return (
     `<section class="netcdf-var-card">\n` +

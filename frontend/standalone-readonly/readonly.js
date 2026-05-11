@@ -558,6 +558,23 @@ function netcdfVariableAttributesDisclosureHtml(v) {
   );
 }
 
+function netcdfVariableValuesDisclosureHtml(v) {
+  const vals = v.values ?? [];
+  if (vals.length === 0) return "";
+  const n = vals.length;
+  const truncatedNote = v.values_truncated
+    ? ` <span class="netcdf-var-values-truncated-note">（仅展示前 ${n} 项）</span>`
+    : "";
+  const summary = `变量值 <span class="netcdf-attrs-disclosure-count">（${n} 项）</span>${truncatedNote}`;
+  const valuesList = vals.map((val) => escapeHtml(String(val ?? ""))).join(", ");
+  return (
+    `<details class="netcdf-attrs-disclosure netcdf-var-values-disclosure">\n` +
+    `<summary class="netcdf-attrs-disclosure-summary">${summary}</summary>\n` +
+    `<div class="netcdf-var-values-body">${valuesList}</div>\n` +
+    `</details>`
+  );
+}
+
 function netcdfVariableCardHtml(v) {
   const vDims = v.dimensions ?? [];
   const sh = v.shape ?? [];
@@ -578,7 +595,8 @@ function netcdfVariableCardHtml(v) {
   const metaHtml =
     metaParts.length > 0 ? `<div class="netcdf-var-card-meta">${metaParts.join("")}</div>` : "";
   const attrsHtml = vAttr.length > 0 ? netcdfVariableAttributesDisclosureHtml(v) : "";
-  const bodyInner = [metaHtml, attrsHtml].filter(Boolean).join("\n");
+  const valuesHtml = netcdfVariableValuesDisclosureHtml(v);
+  const bodyInner = [valuesHtml, metaHtml, attrsHtml].filter(Boolean).join("\n");
   const name = escapeHtml(String(v.name ?? ""));
   const type = escapeHtml(String(v.type ?? ""));
   return (
@@ -961,7 +979,7 @@ const Ico = {
     '<svg class="h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>',
   download: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
   clock: '<svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-  folder: '<svg class="h-7 w-7 text-blue-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.04 3.6a2 2 0 0 0-1.69-.9H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',
+  folder: '<svg class="h-7 w-7 text-sky-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.04 3.6a2 2 0 0 0-1.69-.9H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',
   file: '<svg class="h-7 w-7" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4h4"/></svg>',
   search: '<svg class="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
   x: '<svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
@@ -2638,12 +2656,12 @@ function renderCard(row) {
 
   if (cover) {
     return `
-    <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition hover:border-slate-300 hover:shadow-sm min-h-0" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
+    <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border transition hover:shadow-sm min-h-0 ${row.kind === 'folder' ? 'border-sky-200 bg-sky-50 hover:border-sky-300' : 'border-slate-200 bg-white hover:border-slate-300'}" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
       <div class="relative aspect-[16/10] min-h-[132px] w-full max-h-[220px] shrink-0 overflow-hidden bg-slate-100 sm:min-h-[148px] sm:max-h-[240px]">
         <img src="${escapeHtml(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
       </div>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-3 sm:px-5">
-        <h3 class="line-clamp-2 text-base font-semibold leading-snug text-slate-900">${escapeHtml(row.name)}</h3>
+        <h3 class="line-clamp-2 text-base font-semibold leading-snug ${row.kind === 'folder' ? 'text-sky-700' : 'text-slate-900'}">${escapeHtml(row.name)}</h3>
         ${row.kind === "folder" && remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
         ${row.kind === "file" ? renderTagChips(row.tags) : ""}
         <div class="mt-3 flex w-full min-w-0 items-start text-xs ${row.kind === "file" ? "gap-2" : "flex-wrap items-center gap-x-4 gap-y-1"}">
@@ -2658,11 +2676,11 @@ function renderCard(row) {
   }
   const icon = row.kind === "folder" ? Ico.folder : fileIconSvg(row.extension);
   return `
-  <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:shadow-sm sm:px-4" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
+  <article class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border px-4 py-4 transition hover:shadow-sm sm:px-4 ${row.kind === 'folder' ? 'border-sky-200 bg-sky-50 hover:border-sky-300' : 'border-slate-200 bg-white hover:border-slate-300'}" data-open-row="${escapeHtml(row.kind)}:${escapeHtml(row.id)}">
     <div class="flex items-start gap-2.5 sm:gap-2.5">
-      <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-slate-500">${icon}</div>
+      <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl ${row.kind === 'folder' ? 'bg-sky-50 text-sky-500' : 'bg-slate-100 text-slate-500'}">${icon}</div>
       <div class="min-w-0 flex-1 pr-2 pt-0.5">
-        <h3 class="line-clamp-2 break-words text-base font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]">${escapeHtml(row.name)}</h3>
+        <h3 class="line-clamp-2 break-words text-base font-semibold leading-snug [overflow-wrap:anywhere] ${row.kind === 'folder' ? 'text-sky-700' : 'text-slate-900'}">${escapeHtml(row.name)}</h3>
         ${row.kind === "folder" && remarkPreview ? `<p class="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">${escapeHtml(remarkPreview)}</p>` : ""}
       </div>
     </div>
@@ -2730,8 +2748,8 @@ function folderPeerAsideHtml(peerKind, opts = {}) {
     : state.folderVideoPeers.length
       ? `<ul class="space-y-1">${state.folderVideoPeers.map((p) => {
         const isCurrent = p.id === currentId;
-        const liClass = isCurrent ? "bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200" : "text-slate-700 hover:bg-slate-50";
-        const icon = isCurrent ? meta.icon.replace("text-slate-400", "text-blue-500") : meta.icon;
+        const liClass = isCurrent ? "bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200" : "text-slate-700 hover:bg-slate-50";
+        const icon = isCurrent ? meta.icon.replace("text-slate-400", "text-sky-500") : meta.icon;
         const currentBadge = isCurrent ? '<span class="ml-1.5 text-[11px] font-medium text-blue-500">当前</span>' : "";
         const remark = (p.remark ?? "").trim();
         const remarkHtml = remark ? `<p class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">${escapeHtml(remark)}</p>` : "";

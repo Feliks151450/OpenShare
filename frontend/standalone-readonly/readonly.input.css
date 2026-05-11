@@ -255,6 +255,14 @@
     @apply my-0;
   }
 
+  .markdown-content .netcdf-var-values-body {
+    @apply border-t border-slate-200 px-3 py-3 font-mono text-sm leading-relaxed text-slate-700 break-all;
+  }
+
+  .markdown-content .netcdf-var-values-truncated-note {
+    @apply text-amber-600;
+  }
+
   .markdown-content pre {
     @apply overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-4;
   }

@@ -1831,12 +1831,12 @@ function performDownloadFile() {
                   <!-- 返回文件夹面包屑 -->
                   <button
                     type="button"
-                    class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-blue-200/90 hover:from-blue-50/80 hover:to-slate-50 hover:shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-900/80 dark:hover:border-blue-800/70 dark:hover:from-slate-800/90"
+                    class="flex w-full min-w-0 max-w-full cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/90 px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(15_23_42/0.06)] ring-1 ring-slate-900/[0.04] transition hover:border-sky-200/90 hover:from-sky-50/80 hover:to-slate-50 hover:shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-900/80 dark:hover:border-sky-800/70 dark:hover:from-slate-800/90"
                     :title="props.panelPresentation ? '关闭并回到目录' : '在资料目录中打开该文件夹'"
                     @click="goBack"
                   >
                     <Folder
-                      class="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400"
+                      class="mt-0.5 h-5 w-5 shrink-0 text-sky-700 dark:text-sky-400"
                       aria-hidden="true"
                     />
                     <span

@@ -121,7 +121,7 @@ onMounted(() => {
           :title="folder.name"
           @click="goFolder(folder.id)"
         >
-          <Folder class="h-4 w-4 shrink-0" />
+          <Folder class="h-4 w-4 shrink-0 text-sky-500" />
           <span class="truncate">{{ folder.name }}</span>
         </button>
       </div>

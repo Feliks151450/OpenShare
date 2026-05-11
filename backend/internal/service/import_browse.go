@@ -33,10 +33,16 @@ func (s *ImportService) ListDirectories(_ context.Context, rootPath string) (*Im
 
 	items := make([]ImportDirectoryItem, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+		if !entry.IsDir() {
 			continue
 		}
 		childPath := filepath.Join(currentPath, entry.Name())
+		if entry.Type()&os.ModeSymlink != 0 {
+			targetInfo, err := os.Stat(childPath)
+			if err != nil || !targetInfo.IsDir() {
+				continue
+			}
+		}
 		items = append(items, ImportDirectoryItem{
 			Name: entry.Name(),
 			Path: childPath,

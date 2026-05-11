@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -35,12 +37,14 @@ type NetCDFDumpDim struct {
 
 // NetCDFDumpVar 为变量的类型、维度、形状与属性（不含数据值）。
 type NetCDFDumpVar struct {
-	Name       string           `json:"name"`
-	Type       string           `json:"type"`
-	Dimensions []string         `json:"dimensions,omitempty"`
-	Shape      []int64          `json:"shape,omitempty"`
-	Attributes []NetCDFDumpAttr `json:"attributes,omitempty"`
-	Unreadable bool             `json:"unreadable,omitempty"`
+	Name            string           `json:"name"`
+	Type            string           `json:"type"`
+	Dimensions      []string         `json:"dimensions,omitempty"`
+	Shape           []int64          `json:"shape,omitempty"`
+	Attributes      []NetCDFDumpAttr `json:"attributes,omitempty"`
+	Unreadable      bool             `json:"unreadable,omitempty"`
+	Values          []string         `json:"values,omitempty"`
+	ValuesTruncated bool             `json:"values_truncated,omitempty"`
 }
 
 // NetCDFDumpGroup 为单个组（含根组）的结构化摘要。
@@ -173,6 +177,12 @@ func writeNetCDFGroup(sb *strings.Builder, trunc *bool, indent string, g api.Gro
 				Shape:      append([]int64(nil), shape...),
 			}
 			writeAttrs(sb, trunc, attrIndent, "", vg.Attributes(), &vEntry.Attributes)
+			// 一维变量：读取变量值供前端预览展示
+			if len(vDims) == 1 {
+				vals, vt := readOneDimValues(vg)
+				vEntry.Values = vals
+				vEntry.ValuesTruncated = vt
+			}
 			node.Variables = append(node.Variables, vEntry)
 		}
 		tryWrite(sb, trunc, "\n")
@@ -323,6 +333,62 @@ func (s *PublicDownloadService) PrepareNetCDFDumpFallback(ctx context.Context, f
 	}
 
 	return raw, truncated, nil
+}
+
+// max1DValues 为单维变量展示的数值上限，避免变量过大时内存/输出溢出。
+const max1DValues = 100
+
+// readOneDimValues 从 VarGetter 读取一维变量的值并格式化为字符串切片。
+func readOneDimValues(vg api.VarGetter) (values []string, truncated bool) {
+	raw, err := vg.Values()
+	if err != nil || raw == nil {
+		return nil, false
+	}
+	rv := reflect.ValueOf(raw)
+	if rv.Kind() != reflect.Slice {
+		return nil, false
+	}
+	n := rv.Len()
+	if n == 0 {
+		return nil, false
+	}
+	limit := n
+	if limit > max1DValues {
+		limit = max1DValues
+		truncated = true
+	}
+	values = make([]string, limit)
+	for i := 0; i < limit; i++ {
+		values[i] = formatAtom(rv.Index(i))
+	}
+	return values, truncated
+}
+
+// formatAtom 将 Go 基础数值/字符串转为可读字符串，特殊处理 NaN/Inf。
+func formatAtom(v reflect.Value) string {
+	switch v.Kind() {
+	case reflect.String:
+		return v.String()
+	case reflect.Float32, reflect.Float64:
+		f := v.Float()
+		if math.IsNaN(f) {
+			return "NaN"
+		}
+		if math.IsInf(f, 1) {
+			return "Infinity"
+		}
+		if math.IsInf(f, -1) {
+			return "-Infinity"
+		}
+		// 保留最多 8 位小数，去除尾部零
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.8f", f), "0"), ".")
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return fmt.Sprintf("%d", v.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return fmt.Sprintf("%d", v.Uint())
+	default:
+		return fmt.Sprintf("%v", v.Interface())
+	}
 }
 
 func tryWrite(sb *strings.Builder, trunc *bool, s string) {

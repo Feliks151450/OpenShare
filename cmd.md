@@ -4,5 +4,7 @@
 # 后台运行
 ./start_back.sh
 
+# 检查端口占用
+sudo lsof -i :8080
 # 重建readonly.css
-tailwindcss -c tailwind.config.ts -i ./standalone-readonly/readonly.input.css -o ./standalone-readonly/readonly.css --minify
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && cd /home/llf/OpenShare/frontend && npm run build:readonly 2>&1
