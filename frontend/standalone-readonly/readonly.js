@@ -877,6 +877,7 @@ const PREVIEW_IMG_EXT = new Set(["png", "jpeg", "jpg", "jfif", "gif", "webp", "s
 /** @param {object} d @returns {PreviewVisualKind} */
 function fileDetailPreviewVisualKind(d) {
   if (isVideoDetail(d)) return null;
+  if (d.playback_url && (!d.storage_path || !d.storage_path.trim())) return null;
   const mime = (d.mime_type ?? "").toLowerCase();
   const ext = (d.extension ?? "").replace(/^\./, "").toLowerCase();
   if (mime.startsWith("image/") || PREVIEW_IMG_EXT.has(ext)) return "image";
@@ -2216,8 +2217,8 @@ function performDownloadCurrentFolder() {
 
 function downloadCurrentFolder() {
   const d = state.folderDetail;
-  if (!d || d.download_allowed === false) {
-    showWarning("该文件夹不允许下载。");
+  if (!d || d.download_allowed === false || d.is_virtual) {
+    showWarning(d && d.is_virtual ? "虚拟目录暂不支持下载整个文件夹。" : "该文件夹不允许下载。");
     return;
   }
   state.downloadConfirm = { kind: "folderToolbar" };
@@ -3079,7 +3080,7 @@ function renderModals() {
         '<div class="flex-1 overflow-y-auto px-6 py-5">' +
           '<div class="markdown-content">' + renderSimpleMarkdown(selectedItem.content) + '</div>' +
         '</div>'
-      : '<div class="flex flex-1 items-center justify-center text-sm text-slate-400">请选择一条公告</div>';
+      : '<div class="flex flex-1 flex-col"><div class="flex items-center justify-end border-b border-slate-200 px-6 py-4"><button type="button" class="btn-secondary" data-action="close-announcement-list">关闭</button></div><div class="flex flex-1 items-center justify-center text-sm text-slate-400">请选择一条公告</div></div>';
 
     html += `
     <div class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4" data-close-modal="1">

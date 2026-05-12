@@ -83,6 +83,8 @@ type Folder struct {
 	DirectLinkPrefix string `gorm:"column:direct_link_prefix;type:text;not null;default:''"`
 	// CdnURL 该托管目录的静态数据 JSON 文件 CDN 直链（cdn_mode 开启时前端按此加载）
 	CdnURL string `gorm:"column:cdn_url;type:text;not null;default:''"`
+	// IsVirtual 为 true 时表示虚拟目录（无物理磁盘路径，仅存数据库，文件通过 CDN 直链提供）。
+	IsVirtual bool `gorm:"column:is_virtual;not null;default:false"`
 	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。
 	HidePublicCatalog bool `gorm:"column:hide_public_catalog;not null;default:false"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载

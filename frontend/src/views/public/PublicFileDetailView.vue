@@ -527,9 +527,19 @@ function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisual
   return null;
 }
 
-const previewVisualKind = computed((): DetailPreviewVisualKind | null =>
-  detail.value ? fileDetailPreviewVisualKind(detail.value) : null,
-);
+/** 虚拟文件（有 playback_url 但无本地 storage_path）不支持内嵌预览 */
+const isVirtualDetailFile = computed(() => {
+  if (!detail.value) return false;
+  const hasPlayback = (detail.value.playback_url ?? "").trim().length > 0;
+  const hasStorage = (detail.value.storage_path ?? "").trim().length > 0;
+  return hasPlayback && !hasStorage;
+});
+
+const previewVisualKind = computed((): DetailPreviewVisualKind | null => {
+  if (!detail.value) return null;
+  if (isVirtualDetailFile.value) return null;
+  return fileDetailPreviewVisualKind(detail.value);
+});
 
 /** NetCDF：工具栏复制托管磁盘绝对路径（非网页 URL） */
 const showNcCopyServerStoragePath = computed(() => {

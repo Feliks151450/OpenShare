@@ -46,6 +46,12 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 		}
 		return
 	}
+
+	// 虚拟文件：302 跳转到 CDN 直链
+	if download.RedirectURL != "" {
+		ctx.Redirect(http.StatusFound, download.RedirectURL)
+		return
+	}
 	defer download.Content.Close()
 
 	if download.MimeType != "" {

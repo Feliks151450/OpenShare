@@ -286,6 +286,108 @@ function closeCreateFolderModal() {
   syncBodyScrollLock();
 }
 
+// 虚拟目录创建
+const virtualFolderModalOpen = ref(false);
+const virtualFolderNameDraft = ref("");
+const virtualFolderSaving = ref(false);
+const virtualFolderError = ref("");
+
+function openCreateVirtualFolderModal() {
+  virtualFolderNameDraft.value = "";
+  virtualFolderError.value = "";
+  virtualFolderModalOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function closeCreateVirtualFolderModal() {
+  virtualFolderModalOpen.value = false;
+  virtualFolderSaving.value = false;
+  virtualFolderError.value = "";
+  syncBodyScrollLock();
+}
+
+async function submitCreateVirtualFolder() {
+  const name = virtualFolderNameDraft.value.trim();
+  if (!name) {
+    virtualFolderError.value = "请输入文件夹名称。";
+    return;
+  }
+  if (!currentFolderDetail.value) return;
+  virtualFolderSaving.value = true;
+  virtualFolderError.value = "";
+  try {
+    await httpClient.request("/admin/resources/virtual-folders", {
+      method: "POST",
+      body: {
+        name,
+        parent_id: currentFolderDetail.value.id,
+      },
+    });
+    closeCreateVirtualFolderModal();
+    invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
+    await loadDirectory({ force: true });
+  } catch (err: unknown) {
+    virtualFolderError.value = readApiError(err, "创建虚拟目录失败。");
+  } finally {
+    virtualFolderSaving.value = false;
+  }
+}
+
+// 虚拟文件添加
+const virtualFileModalOpen = ref(false);
+const virtualFileNameDraft = ref("");
+const virtualFileUrlDraft = ref("");
+const virtualFileSaving = ref(false);
+const virtualFileError = ref("");
+
+function openAddVirtualFileModal() {
+  virtualFileNameDraft.value = "";
+  virtualFileUrlDraft.value = "";
+  virtualFileError.value = "";
+  virtualFileModalOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function closeAddVirtualFileModal() {
+  virtualFileModalOpen.value = false;
+  virtualFileSaving.value = false;
+  virtualFileError.value = "";
+  syncBodyScrollLock();
+}
+
+async function submitAddVirtualFile() {
+  const name = virtualFileNameDraft.value.trim();
+  const url = virtualFileUrlDraft.value.trim();
+  if (!name) {
+    virtualFileError.value = "请输入文件名称。";
+    return;
+  }
+  if (!url) {
+    virtualFileError.value = "请输入 CDN 直链地址。";
+    return;
+  }
+  if (!currentFolderDetail.value) return;
+  virtualFileSaving.value = true;
+  virtualFileError.value = "";
+  try {
+    await httpClient.request("/admin/resources/virtual-files", {
+      method: "POST",
+      body: {
+        name,
+        folder_id: currentFolderDetail.value.id,
+        playback_url: url,
+      },
+    });
+    closeAddVirtualFileModal();
+    invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
+    await loadDirectory({ force: true });
+  } catch (err: unknown) {
+    virtualFileError.value = readApiError(err, "添加虚拟文件失败。");
+  } finally {
+    virtualFileSaving.value = false;
+  }
+}
+
 async function submitCreateFolder() {
   const name = createFolderNameDraft.value.trim();
   if (!name) {
@@ -333,7 +435,9 @@ function folderIdFromRouteQuery(raw: unknown): string {
   return "";
 }
 const currentFolderID = computed(() => folderIdFromRouteQuery(route.query.folder));
-const canUploadToCurrentFolder = computed(() => currentFolderID.value.length > 0);
+const canUploadToCurrentFolder = computed(() => currentFolderID.value.length > 0 && !isCurrentFolderVirtual.value);
+/** 当前目录是否为虚拟目录（无物理磁盘路径，文件通过 CDN 直链提供） */
+const isCurrentFolderVirtual = computed(() => currentFolderDetail.value?.is_virtual === true);
 const rootViewLocked = computed(() => route.query.root === "1");
 
 type DirectoryRow = {
@@ -638,10 +742,13 @@ const canGoUp = computed(() => currentFolderID.value.length > 0);
 const backButtonLabel = computed(() => (searchKeyword.value ? "返回所在目录" : "返回上一级"));
 const canUseBackButton = computed(() => searchKeyword.value.length > 0 || canGoUp.value);
 
-/** 当前详情为托管根目录（无父级）时可重新扫描磁盘，与后台 rescan API 一致。 */
+/** 当前详情为托管根目录（无父级）时可重新扫描磁盘，与后台 rescan API 一致。虚拟目录不可重新扫描。 */
 const showRescanCurrentManagedFolder = computed(() => {
   const d = currentFolderDetail.value;
   if (!d || !canManageResourceDescriptions.value) {
+    return false;
+  }
+  if (d.is_virtual) {
     return false;
   }
   const p = d.parent_id;
@@ -894,6 +1001,8 @@ function syncBodyScrollLock() {
       || feedbackSuccessModalOpen.value
       || folderDescriptionEditorOpen.value
       || createFolderModalOpen.value
+      || virtualFolderModalOpen.value
+      || virtualFileModalOpen.value
       || deleteResourceTarget.value
       || downloadConfirm.value
       || Boolean(fileDetailPanelFileId.value)
@@ -1613,7 +1722,8 @@ function openDeleteFolderDialog() {
     name: currentFolderDetail.value.name,
   };
   deleteResourcePassword.value = "";
-  deleteResourceMoveToTrash.value = true;
+  // 虚拟目录无磁盘文件，只能彻底删除（DB 记录）
+  deleteResourceMoveToTrash.value = !isCurrentFolderVirtual.value;
   deleteResourceError.value = "";
 }
 
@@ -1646,9 +1756,13 @@ async function confirmDeleteResource() {
     const parentID = currentFolderDetail.value?.parent_id ?? "";
     invalidateDirectoryViewCacheAll();
     closeDeleteResourceDialog();
-    actionMessage.value = movedToTrash
-      ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
-      : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
+    if (isCurrentFolderVirtual.value) {
+      actionMessage.value = `虚拟目录 ${deletedName} 已从数据库中移除。`;
+    } else {
+      actionMessage.value = movedToTrash
+        ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
+        : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
+    }
     clearSearchState();
     if (parentID) {
       await router.push({ name: "public-home", query: { folder: parentID } });
@@ -2326,12 +2440,29 @@ async function syncSessionReceiptCode() {
                     编辑
                   </button>
                   <button
-                    v-if="canManageResourceDescriptions"
+                    v-if="canManageResourceDescriptions && !isCurrentFolderVirtual"
                     type="button"
                     class="btn-secondary"
                     @click="openCreateFolderModal"
                   >
                     创建文件夹
+                  </button>
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary"
+                    @click="openCreateVirtualFolderModal"
+                  >
+                    创建虚拟目录
+                  </button>
+                  <!-- 虚拟目录下的文件添加按钮 -->
+                  <button
+                    v-if="canManageResourceDescriptions && isCurrentFolderVirtual"
+                    type="button"
+                    class="btn-secondary"
+                    @click="openAddVirtualFileModal"
+                  >
+                    添加虚拟文件
                   </button>
                   <button
                     v-if="canManageResourceDescriptions"
@@ -2361,7 +2492,7 @@ async function syncSessionReceiptCode() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <button
-                    v-if="currentFolderDetail.download_allowed !== false"
+                    v-if="currentFolderDetail.download_allowed !== false && !isCurrentFolderVirtual"
                     type="button"
                     class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     aria-label="下载文件夹"
@@ -2451,7 +2582,9 @@ async function syncSessionReceiptCode() {
                 {{ backButtonLabel }}
               </button>
 
+              <!-- 普通目录上传按钮（虚拟目录不显示） -->
               <button
+                v-if="!isCurrentFolderVirtual"
                 type="button"
                 class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                 :disabled="!canUploadToCurrentFolder"
@@ -3250,8 +3383,13 @@ async function syncSessionReceiptCode() {
               <div class="markdown-content" v-html="renderSimpleMarkdown(selectedAnnouncement.content)" />
             </div>
           </template>
-          <div v-else class="flex flex-1 items-center justify-center text-sm text-slate-400">
-            请选择一条公告
+          <div v-else class="flex flex-1 flex-col">
+            <div class="flex items-center justify-end border-b border-slate-200 px-6 py-4">
+              <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
+            </div>
+            <div class="flex flex-1 items-center justify-center text-sm text-slate-400">
+              请选择一条公告
+            </div>
           </div>
         </div>
       </div>
@@ -3267,7 +3405,11 @@ async function syncSessionReceiptCode() {
         <div>
           <h3 class="text-lg font-semibold text-slate-900">确认删除文件夹</h3>
           <p class="mt-2 text-sm leading-6 text-slate-500">
-            <template v-if="deleteResourceMoveToTrash">
+            <!-- 虚拟目录只有 DB 记录，直接提示彻底删除 -->
+            <template v-if="isCurrentFolderVirtual">
+              该目录为虚拟目录（无磁盘文件），将<strong class="text-rose-700">从数据库中移除</strong>，无法恢复。
+            </template>
+            <template v-else-if="deleteResourceMoveToTrash">
               将把该文件夹及其子目录、文件移动到<strong class="text-slate-800">所在磁盘根目录下的 trash</strong> 文件夹（可从文件系统找回）。
             </template>
             <template v-else>
@@ -3279,7 +3421,8 @@ async function syncSessionReceiptCode() {
           </p>
         </div>
         <div class="mt-6 space-y-4">
-          <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+          <!-- 虚拟目录不显示垃圾桶选项 -->
+          <div v-if="!isCurrentFolderVirtual" class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
             <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
               <input v-model="deleteResourceMoveToTrash" type="radio" class="mt-1" :value="true" />
               <span>移动到垃圾桶（写入所在磁盘根目录的 <code class="rounded bg-white px-1 text-xs">trash</code>）</span>
@@ -3710,6 +3853,93 @@ async function syncSessionReceiptCode() {
             <button type="button" class="btn-secondary" :disabled="createFolderSaving" @click="closeCreateFolderModal">取消</button>
             <button type="button" class="btn-primary" :disabled="createFolderSaving" @click="submitCreateFolder">
               {{ createFolderSaving ? "创建中…" : "创建" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：管理员创建虚拟目录 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div v-if="virtualFolderModalOpen" class="fixed inset-0 z-[125] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+      <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+        <div class="modal-card panel relative my-auto flex w-full max-w-md flex-col overflow-hidden p-6">
+          <div class="shrink-0 border-b border-slate-200 pb-4">
+            <h3 class="text-lg font-semibold text-slate-900">创建虚拟目录</h3>
+            <p class="mt-1 text-sm text-slate-500">
+              在「{{ currentFolderDetail?.name ?? "" }}」中创建虚拟目录（无物理磁盘路径，子文件通过 CDN 直链提供）。
+            </p>
+          </div>
+          <div class="py-5 space-y-4">
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">目录名称</span>
+              <input
+                v-model="virtualFolderNameDraft"
+                class="field"
+                placeholder="输入虚拟目录名"
+                autocomplete="off"
+                @keyup.enter="submitCreateVirtualFolder"
+              />
+            </label>
+            <p v-if="virtualFolderError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {{ virtualFolderError }}
+            </p>
+          </div>
+          <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+            <button type="button" class="btn-secondary" :disabled="virtualFolderSaving" @click="closeCreateVirtualFolderModal">取消</button>
+            <button type="button" class="btn-primary" :disabled="virtualFolderSaving" @click="submitCreateVirtualFolder">
+              {{ virtualFolderSaving ? "创建中…" : "创建" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：管理员在虚拟目录下添加虚拟文件 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div v-if="virtualFileModalOpen" class="fixed inset-0 z-[125] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+      <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+        <div class="modal-card panel relative my-auto flex w-full max-w-md flex-col overflow-hidden p-6">
+          <div class="shrink-0 border-b border-slate-200 pb-4">
+            <h3 class="text-lg font-semibold text-slate-900">添加虚拟文件</h3>
+            <p class="mt-1 text-sm text-slate-500">
+              在虚拟目录「{{ currentFolderDetail?.name ?? "" }}」中添加文件（通过 CDN 直链提供下载，无需本地存储）。
+            </p>
+          </div>
+          <div class="py-5 space-y-4">
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">文件名称（含扩展名）</span>
+              <input
+                v-model="virtualFileNameDraft"
+                class="field"
+                placeholder="例如：report.pdf"
+                autocomplete="off"
+              />
+            </label>
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">CDN 直链地址</span>
+              <input
+                v-model="virtualFileUrlDraft"
+                class="field"
+                placeholder="https://cdn.example.com/files/report.pdf"
+                autocomplete="off"
+                @keyup.enter="submitAddVirtualFile"
+              />
+            </label>
+            <p v-if="virtualFileError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {{ virtualFileError }}
+            </p>
+          </div>
+          <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+            <button type="button" class="btn-secondary" :disabled="virtualFileSaving" @click="closeAddVirtualFileModal">取消</button>
+            <button type="button" class="btn-primary" :disabled="virtualFileSaving" @click="submitAddVirtualFile">
+              {{ virtualFileSaving ? "添加中…" : "添加" }}
             </button>
           </div>
         </div>

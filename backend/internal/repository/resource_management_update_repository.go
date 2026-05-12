@@ -198,6 +198,19 @@ func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder 
 	})
 }
 
+func (r *ResourceManagementRepository) CreateFile(ctx context.Context, file *model.File, operatorID string, operatorIP string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(file).Error; err != nil {
+			return fmt.Errorf("create file: %w", err)
+		}
+		logID, err := identity.NewID()
+		if err != nil {
+			return fmt.Errorf("generate log id: %w", err)
+		}
+		return createOperationLogTx(tx, logID, operatorID, "file_created", "file", file.ID, file.Name, operatorIP, now)
+	})
+}
+
 func (r *ResourceManagementRepository) PatchFolderCdnUrl(ctx context.Context, folderID string, cdnURL string, operatorID string, operatorIP string, logID string, now time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Update("cdn_url", cdnURL)

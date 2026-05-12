@@ -129,6 +129,11 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 			handlers.resourceManagement.CreateFolder,
 		)
+		adminProtected.POST(
+			"/resources/virtual-folders",
+			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+			handlers.resourceManagement.CreateVirtualFolder,
+		)
 		adminProtected.GET("/resources/files", handlers.resourceManagement.ListFiles)
 	adminProtected.PUT(
 		"/resources/folders/:folderID",
@@ -157,6 +162,11 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		"/resources/files/:fileID/tags",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.fileTag.AdminReplaceFileTags,
+	)
+	adminProtected.POST(
+		"/resources/virtual-files",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.CreateVirtualFile,
 	)
 	adminProtected.GET(
 		"/file-tags",

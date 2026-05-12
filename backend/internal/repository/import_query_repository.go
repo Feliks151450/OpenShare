@@ -39,6 +39,7 @@ type ManagedSubtreeFolderRow struct {
 	Name        string
 	Description string
 	SourcePath  *string
+	IsVirtual   bool
 	CreatedAt   time.Time
 }
 
@@ -127,16 +128,16 @@ func (r *ImportRepository) ListManagedRootCdnUrls(ctx context.Context) ([]Manage
 
 func (r *ImportRepository) ListManagedSubtreeFolders(ctx context.Context, rootFolderID string) ([]ManagedSubtreeFolderRow, error) {
 	query := `
-		WITH RECURSIVE folder_tree(id, parent_id, name, description, source_path, created_at) AS (
-			SELECT id, parent_id, name, description, source_path, created_at
+		WITH RECURSIVE folder_tree(id, parent_id, name, description, source_path, is_virtual, created_at) AS (
+			SELECT id, parent_id, name, description, source_path, is_virtual, created_at
 			FROM folders
 			WHERE id = ?
 			UNION ALL
-			SELECT folders.id, folders.parent_id, folders.name, folders.description, folders.source_path, folders.created_at
+			SELECT folders.id, folders.parent_id, folders.name, folders.description, folders.source_path, folders.is_virtual, folders.created_at
 			FROM folders
 			JOIN folder_tree ON folders.parent_id = folder_tree.id
 		)
-		SELECT id, parent_id, name, description, source_path, created_at
+		SELECT id, parent_id, name, description, source_path, is_virtual, created_at
 		FROM folder_tree
 	`
 

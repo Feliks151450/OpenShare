@@ -65,7 +65,12 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 	fsFolderPaths, fsFiles := buildFilesystemSnapshot(rootPath, entries)
 	existingFoldersByPath := make(map[string]repository.ManagedSubtreeFolderRow, len(folders))
 	folderSourcePathByID := make(map[string]string, len(folders))
+	// 虚拟目录 ID 集合，重新扫描时跳过删除
+	virtualFolderIDs := make(map[string]struct{})
 	for _, folder := range folders {
+		if folder.IsVirtual {
+			virtualFolderIDs[folder.ID] = struct{}{}
+		}
 		if folder.SourcePath == nil || strings.TrimSpace(*folder.SourcePath) == "" {
 			continue
 		}
@@ -201,6 +206,12 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 		if _, ok := matchedFileIDs[file.ID]; ok {
 			continue
 		}
+		// 跳过虚拟目录下的文件：没有磁盘对应，不应被重新扫描删除
+		if file.FolderID != nil {
+			if _, isVirtual := virtualFolderIDs[*file.FolderID]; isVirtual {
+				continue
+			}
+		}
 		deletedFileIDs = append(deletedFileIDs, file.ID)
 	}
 	result.DeletedFiles = len(deletedFileIDs)
@@ -211,6 +222,10 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 			continue
 		}
 		if _, ok := matchedFolderIDs[folder.ID]; ok {
+			continue
+		}
+		// 跳过虚拟目录：没有磁盘对应，不应被重新扫描删除
+		if folder.IsVirtual {
 			continue
 		}
 		deletedFolderIDs = append(deletedFolderIDs, folder.ID)

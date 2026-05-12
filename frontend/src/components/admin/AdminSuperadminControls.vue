@@ -54,6 +54,10 @@ const unmanageMessage = ref("");
 const rescanningFolderID = ref("");
 const rescanError = ref("");
 const rescanMessage = ref("");
+// 虚拟托管根目录创建
+const virtualRootName = ref("");
+const virtualRootCreating = ref(false);
+const virtualRootError = ref("");
 const exportingGlobal = ref(false);
 const exportingFolderId = ref("");
 const uploadSizeValue = ref(5);
@@ -433,6 +437,26 @@ async function importDirectory() {
   }
 }
 
+// 创建虚拟托管根目录（无本地磁盘路径）
+async function createVirtualManagedRoot() {
+  const name = virtualRootName.value.trim();
+  if (!name) {
+    virtualRootError.value = "请输入目录名称。";
+    return;
+  }
+  virtualRootCreating.value = true;
+  virtualRootError.value = "";
+  try {
+    await httpClient.post("/admin/resources/virtual-folders", { name, parent_id: "" });
+    virtualRootName.value = "";
+    await loadManagedFolders();
+  } catch (err: unknown) {
+    virtualRootError.value = readApiError(err, "创建虚拟托管目录失败。");
+  } finally {
+    virtualRootCreating.value = false;
+  }
+}
+
 async function patchManagedRootCatalogVisibility(folderID: string, hide: boolean) {
   catalogVisibilitySaving.value = folderID;
   managedFoldersError.value = "";
@@ -731,6 +755,24 @@ function isManagedRootClientChild(path: string, root: string) {
             {{ importLoading ? "导入中…" : "确认导入" }}
           </button>
         </div>
+      </SurfaceCard>
+
+      <!-- 创建虚拟托管目录（无物理磁盘路径，仅存数据库，文件通过 CDN 直链提供） -->
+      <SurfaceCard class="space-y-6">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">创建虚拟托管目录</h3>
+          <p class="mt-1 text-sm text-slate-500">无需本地磁盘路径，目录结构与文件仅存储在数据库中，文件通过 CDN 直链提供下载。</p>
+        </div>
+        <div class="space-y-4">
+          <label class="space-y-2">
+            <span class="text-sm font-medium text-slate-700">目录名称</span>
+            <input v-model="virtualRootName" type="text" class="field" placeholder="输入虚拟托管根目录名称" @keyup.enter="createVirtualManagedRoot" />
+          </label>
+        </div>
+        <p v-if="virtualRootError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ virtualRootError }}</p>
+        <button type="button" class="btn-primary w-full" :disabled="virtualRootCreating || !virtualRootName.trim()" @click="createVirtualManagedRoot">
+          {{ virtualRootCreating ? "创建中…" : "创建虚拟托管目录" }}
+        </button>
       </SurfaceCard>
       </div>
     </div>

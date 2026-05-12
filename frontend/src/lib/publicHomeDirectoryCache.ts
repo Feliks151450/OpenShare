@@ -11,6 +11,7 @@ export interface PublicFolderItem {
   cover_url?: string;
   cdn_url?: string;
   download_allowed?: boolean;
+  is_virtual?: boolean;
   updated_at: string;
   file_count: number;
   download_count: number;
@@ -49,6 +50,8 @@ export interface FolderDetailResponse {
   download_policy?: "inherit" | "allow" | "deny";
   /** 仅托管根目录：为 true 时访客首页根列表不出现该托管树 */
   hide_public_catalog?: boolean;
+  /** 虚拟目录：无物理磁盘路径，子文件通过 CDN 直链提供 */
+  is_virtual?: boolean;
   breadcrumbs: Array<{
     id: string;
     name: string;

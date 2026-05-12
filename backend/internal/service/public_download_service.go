@@ -37,6 +37,8 @@ type DownloadableFile struct {
 	Size     int64
 	ModTime  time.Time
 	Content  *os.File
+	// RedirectURL 非空表示虚拟文件，应 302 跳转到 CDN 直链，不读本地磁盘。
+	RedirectURL string
 	// PlaybackInlineOnly 为 true 时表示策略禁止「下载」，但仍允许浏览器内嵌播放音/视频（inline），不计入下载次数。
 	PlaybackInlineOnly bool
 }
@@ -264,6 +266,23 @@ func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID stri
 		return nil, ErrDownloadFileNotFound
 	}
 
+	// 虚拟目录下的文件：通过 CDN 直链（playback_url）302 跳转，不读本地磁盘
+	if file.FolderID != nil && strings.TrimSpace(*file.FolderID) != "" {
+		if virtual, checkErr := s.isFileInVirtualFolder(ctx, *file); checkErr == nil && virtual {
+			redirectURL := strings.TrimSpace(file.PlaybackURL)
+			if redirectURL == "" {
+				return nil, ErrDownloadFileUnavailable
+			}
+			return &DownloadableFile{
+				FileID:      file.ID,
+				FileName:    file.Name,
+				MimeType:    file.MimeType,
+				Size:        file.Size,
+				RedirectURL: redirectURL,
+			}, nil
+		}
+	}
+
 	allowed, err := s.EffectiveDownloadAllowedForFile(ctx, file)
 	if err != nil {
 		return nil, err
@@ -298,6 +317,18 @@ func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID stri
 		Content:            opened.File,
 		PlaybackInlineOnly: playbackInlineOnly,
 	}, nil
+}
+
+// isFileInVirtualFolder 检查文件所属目录是否为虚拟目录。
+func (s *PublicDownloadService) isFileInVirtualFolder(ctx context.Context, file model.File) (bool, error) {
+	folders, err := s.repository.ListManagedFoldersByIDs(ctx, []string{strings.TrimSpace(*file.FolderID)})
+	if err != nil {
+		return false, err
+	}
+	if len(folders) == 0 {
+		return false, nil
+	}
+	return folders[0].IsVirtual, nil
 }
 
 func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string) (*PublicFileDetail, error) {
@@ -597,6 +628,11 @@ func (s *PublicDownloadService) PrepareFolderDownload(ctx context.Context, folde
 		return nil, fmt.Errorf("find downloadable folder: %w", err)
 	}
 	if root == nil {
+		return nil, ErrDownloadFolderNotFound
+	}
+
+	// 虚拟目录无本地文件，不支持整目录下载
+	if root.IsVirtual {
 		return nil, ErrDownloadFolderNotFound
 	}
 

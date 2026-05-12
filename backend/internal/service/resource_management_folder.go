@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -221,6 +223,153 @@ func resolveNewFolderSourcePath(parent *model.Folder, childName string) *string 
 	rootPath := filepath.Clean(strings.TrimSpace(*parent.SourcePath))
 	result := filepath.Join(rootPath, childName)
 	return &result
+}
+
+// CreateVirtualFolder 创建虚拟目录（无物理磁盘路径，仅存数据库，子文件通过 CDN 直链提供）。
+func (s *ResourceManagementService) CreateVirtualFolder(ctx context.Context, input CreateFolderInput) (*model.Folder, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, ErrInvalidResourceEdit
+	}
+	parentID := strings.TrimSpace(input.ParentID)
+
+	var parentIDPtr *string
+	if parentID != "" {
+		parent, err := s.repo.FindFolderByID(ctx, parentID)
+		if err != nil {
+			return nil, fmt.Errorf("find parent folder: %w", err)
+		}
+		if parent == nil {
+			return nil, ErrManagedFolderNotFound
+		}
+		parentIDPtr = &parent.ID
+	}
+
+	conflict, err := s.repo.FolderNameExists(ctx, parentIDPtr, name, "")
+	if err != nil {
+		return nil, err
+	}
+	if conflict {
+		return nil, ErrManagedFolderConflict
+	}
+	fileConflict, err := s.repo.FileNameExists(ctx, parentIDPtr, name, "")
+	if err != nil {
+		return nil, err
+	}
+	if fileConflict {
+		return nil, ErrManagedFolderConflict
+	}
+
+	id, err := identity.NewID()
+	if err != nil {
+		return nil, fmt.Errorf("generate folder id: %w", err)
+	}
+
+	now := s.nowFunc()
+	folder := &model.Folder{
+		ID:         id,
+		ParentID:   parentIDPtr,
+		Name:       name,
+		IsVirtual:  true,
+		SourcePath: nil,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := s.repo.CreateFolder(ctx, folder, input.OperatorID, input.OperatorIP, now); err != nil {
+		return nil, fmt.Errorf("create virtual folder: %w", err)
+	}
+	return folder, nil
+}
+
+// CreateVirtualFileInput 创建虚拟文件入参（仅用于虚拟目录下的文件）。
+type CreateVirtualFileInput struct {
+	Name        string
+	FolderID    string
+	PlaybackURL string
+	Description string
+	Remark      string
+	OperatorID  string
+	OperatorIP  string
+}
+
+// CreateVirtualFile 在虚拟目录下创建虚拟文件（通过 CDN 直链提供下载）。
+func (s *ResourceManagementService) CreateVirtualFile(ctx context.Context, input CreateVirtualFileInput) (*model.File, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.FolderID = strings.TrimSpace(input.FolderID)
+	input.PlaybackURL = strings.TrimSpace(input.PlaybackURL)
+
+	if input.Name == "" || input.FolderID == "" {
+		return nil, ErrInvalidResourceEdit
+	}
+
+	// 校验 CDN 直链
+	candidate, err := normalizeOptionalHTTPURL(input.PlaybackURL)
+	if err != nil || candidate == "" {
+		return nil, ErrInvalidResourceEdit
+	}
+
+	// 确认父文件夹存在且为虚拟目录
+	folder, err := s.repo.FindFolderByID(ctx, input.FolderID)
+	if err != nil {
+		return nil, fmt.Errorf("find parent folder: %w", err)
+	}
+	if folder == nil {
+		return nil, ErrManagedFolderNotFound
+	}
+	if !folder.IsVirtual {
+		return nil, ErrInvalidResourceEdit
+	}
+
+	// 检查文件名冲突
+	conflict, err := s.repo.FileNameExists(ctx, &folder.ID, input.Name, "")
+	if err != nil {
+		return nil, err
+	}
+	if conflict {
+		return nil, ErrManagedFileConflict
+	}
+
+	// HEAD 请求获取文件大小
+	fileSize := int64(0)
+	client := &http.Client{Timeout: 10 * time.Second}
+	headResp, err := client.Head(input.PlaybackURL)
+	if err == nil && headResp != nil {
+		headResp.Body.Close()
+		if headResp.ContentLength > 0 {
+			fileSize = headResp.ContentLength
+		}
+	}
+
+	// 解析文件名和扩展名
+	name, extension, ok := model.NormalizeManagedFileName(input.Name)
+	if !ok {
+		return nil, ErrInvalidResourceEdit
+	}
+
+	id, err := identity.NewID()
+	if err != nil {
+		return nil, fmt.Errorf("generate file id: %w", err)
+	}
+
+	now := s.nowFunc()
+	file := &model.File{
+		ID:          id,
+		FolderID:    &folder.ID,
+		Name:        name,
+		Description: strings.TrimSpace(input.Description),
+		Remark:      normalizeManagedRemark(input.Remark),
+		Extension:   extension,
+		PlaybackURL: candidate,
+		Size:        fileSize,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := s.repo.CreateFile(ctx, file, input.OperatorID, input.OperatorIP, now); err != nil {
+		return nil, fmt.Errorf("create virtual file: %w", err)
+	}
+	return file, nil
 }
 
 func (s *ResourceManagementService) PatchFolderCdnUrl(ctx context.Context, folderID string, cdnURL string, operatorID string, operatorIP string) error {

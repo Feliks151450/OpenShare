@@ -294,6 +294,89 @@ func (h *ResourceManagementHandler) CreateFolder(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gin.H{"id": folder.ID, "name": folder.Name})
 }
 
+// CreateVirtualFolder 创建虚拟目录（无物理磁盘路径，子文件通过 CDN 直链提供）。
+func (h *ResourceManagementHandler) CreateVirtualFolder(ctx *gin.Context) {
+	adminIdentity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req createManagedFolderRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	folder, err := h.service.CreateVirtualFolder(ctx.Request.Context(), service.CreateFolderInput{
+		Name:       req.Name,
+		ParentID:   req.ParentID,
+		OperatorID: adminIdentity.AdminID,
+		OperatorIP: ctx.ClientIP(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder name"})
+		case errors.Is(err, service.ErrManagedFolderConflict):
+			ctx.JSON(http.StatusConflict, gin.H{"error": "folder name already exists"})
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "parent folder not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create virtual folder"})
+		}
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"id": folder.ID, "name": folder.Name})
+}
+
+type createVirtualFileRequest struct {
+	Name        string `json:"name"`
+	FolderID    string `json:"folder_id"`
+	PlaybackURL string `json:"playback_url"`
+	Description string `json:"description"`
+	Remark      string `json:"remark"`
+}
+
+// CreateVirtualFile 在虚拟目录下创建虚拟文件。
+func (h *ResourceManagementHandler) CreateVirtualFile(ctx *gin.Context) {
+	adminIdentity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req createVirtualFileRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	file, err := h.service.CreateVirtualFile(ctx.Request.Context(), service.CreateVirtualFileInput{
+		Name:        req.Name,
+		FolderID:    req.FolderID,
+		PlaybackURL: req.PlaybackURL,
+		Description: req.Description,
+		Remark:      req.Remark,
+		OperatorID:  adminIdentity.AdminID,
+		OperatorIP:  ctx.ClientIP(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		case errors.Is(err, service.ErrManagedFileConflict):
+			ctx.JSON(http.StatusConflict, gin.H{"error": "file name already exists"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create virtual file"})
+		}
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"id": file.ID, "name": file.Name})
+}
+
 type patchFolderCdnUrlRequest struct {
 	CdnURL string `json:"cdn_url"`
 }

@@ -70,6 +70,7 @@ type PublicFolderItem struct {
 	CoverURL        string    `json:"cover_url"`
 	CdnURL          string    `json:"cdn_url"`
 	DownloadAllowed bool      `json:"download_allowed"`
+	IsVirtual       bool      `json:"is_virtual"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	FileCount       int64     `json:"file_count"`
 	DownloadCount   int64     `json:"download_count"`
@@ -96,6 +97,8 @@ type PublicFolderDetail struct {
 	DirectLinkPrefix string                       `json:"direct_link_prefix"`
 	DownloadAllowed  bool                         `json:"download_allowed"`
 	DownloadPolicy   string                       `json:"download_policy"`
+	// IsVirtual 为 true 时表示虚拟目录（无物理磁盘路径，文件通过 CDN 直链提供）。
+	IsVirtual bool `json:"is_virtual"`
 	// HidePublicCatalog 仅托管根目录返回：访客首页根列表是否隐藏该托管树。
 	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
 }
@@ -216,6 +219,7 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 			CoverURL:        strings.TrimSpace(row.CoverURL),
 				CdnURL:          strings.TrimSpace(row.CdnURL),
 			DownloadAllowed: allowed,
+			IsVirtual:       row.IsVirtual,
 			UpdatedAt:       row.UpdatedAt,
 			FileCount:       row.FileCount,
 			DownloadCount:   row.DownloadCount,
@@ -285,6 +289,7 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		DirectLinkPrefix: strings.TrimSpace(current.DirectLinkPrefix),
 		DownloadAllowed:  dlAllowed,
 		DownloadPolicy:   DownloadPolicyString(current.AllowDownload),
+		IsVirtual:        current.IsVirtual,
 	}
 	if current.ParentID == nil {
 		h := current.HidePublicCatalog

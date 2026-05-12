@@ -24,6 +24,7 @@ type ManagedFolderNode struct {
 	ParentID   *string
 	Name       string
 	SourcePath *string
+	IsVirtual  bool
 }
 
 func NewPublicDownloadRepository(db *gorm.DB) *PublicDownloadRepository {
@@ -99,7 +100,7 @@ func (r *PublicDownloadRepository) ListManagedFoldersByIDs(ctx context.Context, 
 	var rows []ManagedFolderNode
 	err := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, source_path").
+		Select("id, parent_id, name, source_path, is_virtual").
 		Where("id IN ?", folderIDs).
 		Find(&rows).
 		Error
@@ -276,7 +277,7 @@ func (r *PublicDownloadRepository) ListManagedFoldersByParentIDs(ctx context.Con
 	var rows []ManagedFolderNode
 	err := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Select("id, parent_id, name, source_path").
+		Select("id, parent_id, name, source_path, is_virtual").
 		Where("parent_id IN ?", parentIDs).
 		Order("name ASC").
 		Find(&rows).
