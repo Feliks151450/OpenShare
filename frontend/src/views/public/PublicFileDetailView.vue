@@ -2033,7 +2033,6 @@ function performDownloadFile() {
                     </button>
                   </div>
                 </div>
-                <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
               </div>
 
               <div :class="useWideDescriptionLayout && isWideScreen ? 'xl:min-w-0 xl:flex-1 xl:overflow-y-auto' : ''">
@@ -2543,7 +2542,6 @@ function performDownloadFile() {
                   </button>
                 </div>
               </div>
-              <p v-else class="text-sm text-slate-400">该文件暂无简介orz</p>
             </div>
           </section>
         </template>

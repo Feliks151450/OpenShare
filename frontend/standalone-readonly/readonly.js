@@ -2495,7 +2495,7 @@ function renderHome() {
           <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-folder-md">${state.folderMarkdownExpanded ? "收起简介" : "展开全文"}</button>
         </div>
       </div>`
-          : `<p class="text-sm text-slate-400">该文件夹暂无简介orz</p>`
+          : ``
       }
     </div>`
       : "";
@@ -2943,7 +2943,7 @@ function renderFileDetail() {
           <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-file-md">${state.fileMarkdownExpanded ? "收起简介" : "展开全文"}</button>
         </div>
       </div>`
-    : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`;
+    : ``;
   const introInnerHtml = `${descBodyHtmlIntro}`;
   const introCardTopHtml = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
   const introCardBottomHtml = `<div class="mt-4 rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${introInnerHtml}</div>`;
@@ -2974,7 +2974,7 @@ function renderFileDetail() {
           <button type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 shadow-sm" data-action="toggle-file-md">${state.fileMarkdownExpanded ? "收起简介" : "展开全文"}</button>
         </div>
       </div>`
-    : `<p class="text-sm text-slate-400">该文件暂无简介orz</p>`;
+    : ``;
 
   const descCardNormal = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${descBodyWide}</div>`;
   const descCardWide = `<div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">${descBodyWide}</div>`;

@@ -2380,9 +2380,12 @@ async function syncSessionReceiptCode() {
               <div
                 :class="useWideDescriptionLayout
                   ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-none xl:border-slate-200 xl:pr-0 xl:py-0'
-                  : 'border-b border-slate-200 px-4 py-5 sm:px-6'"
+                  : 'border-b border-slate-200 px-0 py-0'"
               >
-                <div v-if="currentFolderDescriptionHTML" class="rounded-3xl border border-slate-200 bg-white px-4 py-4 rounded-none sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:rounded-none xl:mx-0 xl:mt-0 dark:border-slate-800 dark:bg-slate-900/40">
+                <div v-if="currentFolderDescriptionHTML" :class="useWideDescriptionLayout
+                ? 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:border-b xl:rounded-none xl:mx-0 xl:mt-0 dark:border-slate-800 dark:bg-slate-900/40'
+                : 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-6 sm:my-6 sm:px-5 sm:py-5 xl:border-b xl:mx-6 xl:my-6 dark:border-slate-800 dark:bg-slate-900/40'"
+                >
                   <div class="space-y-3">
                     <div class="relative">
                       <div
@@ -2409,7 +2412,6 @@ async function syncSessionReceiptCode() {
                     </div>
                   </div>
                 </div>
-                <p v-else class="text-sm text-slate-400">该文件夹暂无简介orz</p>
               </div>
             </template>
 
@@ -2643,7 +2645,7 @@ async function syncSessionReceiptCode() {
               class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border transition hover:shadow-sm"
               :class="[
                 row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5',
-                row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 hover:border-sky-300 hover:bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-100',
+                row.kind === 'folder' ? 'border-slate-200 bg-sky-50/50 hover:border-sky-500 hover:bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-100',
               ]"
               @click="onCardOpenClick(row)"
             >
