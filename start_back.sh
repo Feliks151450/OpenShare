@@ -14,12 +14,34 @@ FRONTEND_PORT=5173
 mkdir -p "$LOG_DIR"
 
 # 检测端口占用
-if ss -tlnp 2>/dev/null | grep -q ":${BACKEND_PORT} "; then
+check_port_in_use() {
+  local port=$1
+  # 优先使用 ss (Linux)
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -q ":${port} "
+    return $?
+  fi
+  # 其次使用 lsof (macOS / Linux)
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i :"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  # 最后尝试 netstat (fallback)
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -an 2>/dev/null | grep -q "LISTEN.*:${port}[[:space:]]"
+    return $?
+  fi
+  echo "警告：无法检测端口占用（缺少 ss/lsof/netstat），跳过检查"
+  return 1  # 失败时认为端口空闲，继续运行（风险由用户承担）
+}
+
+# 原占用检测替换为：
+if check_port_in_use $BACKEND_PORT; then
   echo "错误: 后端端口 ${BACKEND_PORT} 已被占用，请先释放该端口"
   exit 1
 fi
 
-if ss -tlnp 2>/dev/null | grep -q ":${FRONTEND_PORT} "; then
+if check_port_in_use $FRONTEND_PORT; then
   echo "错误: 前端端口 ${FRONTEND_PORT} 已被占用，请先释放该端口"
   exit 1
 fi

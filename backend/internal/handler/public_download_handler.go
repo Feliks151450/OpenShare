@@ -47,11 +47,18 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 		return
 	}
 
-	// 虚拟文件：302 跳转到 CDN 直链
+	// CDN 直链：302 跳转
 	if download.RedirectURL != "" {
 		ctx.Redirect(http.StatusFound, download.RedirectURL)
 		return
 	}
+
+	// 服务端代理模式：反向代理到上游 URL，透传 Range 头以支持断点续传和视频拖动
+	if download.ProxyURL != "" {
+		h.proxyDownload(ctx, download)
+		return
+	}
+
 	defer download.Content.Close()
 
 	if download.MimeType != "" {
@@ -80,6 +87,58 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 	}
 
 	http.ServeContent(ctx.Writer, ctx.Request, download.FileName, download.ModTime, download.Content)
+}
+
+// proxyDownload 反向代理上游 URL，透传 Range/If-Range 头，原样返回上游响应。
+func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *service.DownloadableFile) {
+	proxyReq, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodGet, download.ProxyURL, nil)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
+		return
+	}
+
+	// 透传 Range 头，支持断点续传和视频拖动进度条
+	if rangeHdr := ctx.GetHeader("Range"); rangeHdr != "" {
+		proxyReq.Header.Set("Range", rangeHdr)
+	}
+	if ifRange := ctx.GetHeader("If-Range"); ifRange != "" {
+		proxyReq.Header.Set("If-Range", ifRange)
+	}
+
+	client := &http.Client{Timeout: 0} // 无超时，支持大文件和长时间流式传输
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "upstream unreachable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	// 透传上游响应头（跳过 hop-by-hop 头）
+	hopByHop := map[string]bool{
+		"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
+		"Proxy-Authorization": true, "Te": true, "Trailer": true,
+		"Transfer-Encoding": true, "Upgrade": true,
+	}
+	upstreamHasContentDisp := false
+	for key, values := range resp.Header {
+		if hopByHop[key] {
+			continue
+		}
+		for _, v := range values {
+			ctx.Header(key, v)
+		}
+		if strings.EqualFold(key, "Content-Disposition") {
+			upstreamHasContentDisp = true
+		}
+	}
+
+	// 上游未设置 Content-Disposition 时补一个
+	if !upstreamHasContentDisp {
+		ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FileName))
+	}
+
+	ctx.Status(resp.StatusCode)
+	io.Copy(ctx.Writer, resp.Body)
 }
 
 func (h *PublicDownloadHandler) DownloadFolder(ctx *gin.Context) {

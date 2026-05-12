@@ -22,6 +22,7 @@ type updateManagedFileRequest struct {
 	Remark              string  `json:"remark"`
 	PlaybackURL         string  `json:"playback_url"`
 	PlaybackFallbackURL string  `json:"playback_fallback_url"`
+	ProxySourceURL      string  `json:"proxy_source_url"`
 	CoverURL            string  `json:"cover_url"`
 	DownloadPolicy      *string `json:"download_policy"`
 }
@@ -80,6 +81,7 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 		Remark:              req.Remark,
 		PlaybackURL:         req.PlaybackURL,
 		PlaybackFallbackURL: req.PlaybackFallbackURL,
+		ProxySourceURL:      req.ProxySourceURL,
 		CoverURL:            req.CoverURL,
 		DownloadPolicy:      req.DownloadPolicy,
 		OperatorID:          identity.AdminID,
@@ -331,11 +333,14 @@ func (h *ResourceManagementHandler) CreateVirtualFolder(ctx *gin.Context) {
 }
 
 type createVirtualFileRequest struct {
-	Name        string `json:"name"`
-	FolderID    string `json:"folder_id"`
-	PlaybackURL string `json:"playback_url"`
-	Description string `json:"description"`
-	Remark      string `json:"remark"`
+	Name                string `json:"name"`
+	FolderID            string `json:"folder_id"`
+	PlaybackURL         string `json:"playback_url"`
+	PlaybackFallbackURL string `json:"playback_fallback_url"`
+	ProxySourceURL      string `json:"proxy_source_url"`
+	ProxyDownload       bool   `json:"proxy_download"`
+	Description         string `json:"description"`
+	Remark              string `json:"remark"`
 }
 
 // CreateVirtualFile 在虚拟目录下创建虚拟文件。
@@ -353,13 +358,16 @@ func (h *ResourceManagementHandler) CreateVirtualFile(ctx *gin.Context) {
 	}
 
 	file, err := h.service.CreateVirtualFile(ctx.Request.Context(), service.CreateVirtualFileInput{
-		Name:        req.Name,
-		FolderID:    req.FolderID,
-		PlaybackURL: req.PlaybackURL,
-		Description: req.Description,
-		Remark:      req.Remark,
-		OperatorID:  adminIdentity.AdminID,
-		OperatorIP:  ctx.ClientIP(),
+		Name:                req.Name,
+		FolderID:            req.FolderID,
+		PlaybackURL:         req.PlaybackURL,
+		PlaybackFallbackURL: req.PlaybackFallbackURL,
+		ProxySourceURL:      req.ProxySourceURL,
+		ProxyDownload:       req.ProxyDownload,
+		Description:         req.Description,
+		Remark:              req.Remark,
+		OperatorID:          adminIdentity.AdminID,
+		OperatorIP:          ctx.ClientIP(),
 	})
 	if err != nil {
 		switch {
@@ -403,4 +411,32 @@ func (h *ResourceManagementHandler) PatchFolderCdnUrl(ctx *gin.Context) {
 		return
 	}
 	ctx.Status(http.StatusNoContent)
+}
+
+type probeURLResponse struct {
+	OK           bool   `json:"ok"`
+	Size         int64  `json:"size"`
+	ContentType  string `json:"content_type"`
+	FileName     string `json:"file_name"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// ProbeURL 由服务端发起 HEAD 请求检测 URL 可达性、文件大小和建议文件名。
+func (h *ResourceManagementHandler) ProbeURL(ctx *gin.Context) {
+	_, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.URL) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+
+	result := service.ProbeRemoteURL(ctx.Request.Context(), strings.TrimSpace(req.URL))
+	ctx.JSON(http.StatusOK, result)
 }

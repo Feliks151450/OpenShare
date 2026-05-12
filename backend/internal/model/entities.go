@@ -112,7 +112,11 @@ type File struct {
 	MimeType            string    `gorm:"column:mime_type;type:text;not null;default:''"`
 	PlaybackURL         string    `gorm:"column:playback_url;type:text;not null;default:''"`
 	PlaybackFallbackURL string    `gorm:"column:playback_fallback_url;type:text;not null;default:''"`
-	CoverURL            string    `gorm:"column:cover_url;type:text;not null;default:''"`
+	// ProxyDownload 为 true 时，下载请求由服务端代理拉取 ProxySourceURL 再流式返回（用于 LAN 内网链接等客户端无法直连的地址）。
+	ProxyDownload bool   `gorm:"column:proxy_download;not null;default:false"`
+	// ProxySourceURL 服务端代理拉取的目标地址（仅 proxy_download=true 时有效），客户端不直连此地址。
+	ProxySourceURL string `gorm:"column:proxy_source_url;type:text;not null;default:''"`
+	CoverURL        string `gorm:"column:cover_url;type:text;not null;default:''"`
 	// AllowDownload nil = 继承所在文件夹链；均未设置则默认允许下载
 	AllowDownload *bool     `gorm:"column:allow_download"`
 	Size          int64     `gorm:"column:size;type:integer;not null;default:0"`

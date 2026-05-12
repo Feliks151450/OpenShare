@@ -24,6 +24,7 @@ import {
   PanelRightOpen,
   Plus,
   Check,
+  Trash2,
   Upload,
 } from "lucide-vue-next";
 
@@ -335,15 +336,25 @@ async function submitCreateVirtualFolder() {
 
 // 虚拟文件添加
 const virtualFileModalOpen = ref(false);
+// 虚拟文件表单字段
 const virtualFileNameDraft = ref("");
-const virtualFileUrlDraft = ref("");
+const virtualFileUrlDraft = ref("");        // 前台 CDN 直链
+const virtualFileFallbackUrlDraft = ref(""); // 前台备用直链
+const virtualFileProxySourceDraft = ref(""); // 服务端代理拉取地址
+const virtualFileProxyDownload = ref(false);
 const virtualFileSaving = ref(false);
 const virtualFileError = ref("");
+const virtualFileDetectingLink = ref(false);
+const virtualFileDetectResult = ref("");
 
 function openAddVirtualFileModal() {
   virtualFileNameDraft.value = "";
   virtualFileUrlDraft.value = "";
+  virtualFileFallbackUrlDraft.value = "";
+  virtualFileProxySourceDraft.value = "";
+  virtualFileProxyDownload.value = false;
   virtualFileError.value = "";
+  virtualFileDetectResult.value = "";
   virtualFileModalOpen.value = true;
   syncBodyScrollLock();
 }
@@ -355,15 +366,58 @@ function closeAddVirtualFileModal() {
   syncBodyScrollLock();
 }
 
+/** 检测链接：优先检测代理源地址，否则检测前台直链 */
+async function detectVirtualFileLink() {
+  const url = (virtualFileProxySourceDraft.value || virtualFileUrlDraft.value).trim();
+  if (!url) {
+    virtualFileDetectResult.value = "请先输入链接地址。";
+    return;
+  }
+  virtualFileDetectingLink.value = true;
+  virtualFileDetectResult.value = "";
+  try {
+    const resp = await httpClient.post<{
+      ok: boolean;
+      size: number;
+      content_type: string;
+      file_name: string;
+      error_message?: string;
+    }>("/admin/probe-url", { url });
+    if (!resp.ok) {
+      virtualFileDetectResult.value = `链接检测失败：${resp.error_message || "未知错误"}`;
+      return;
+    }
+    let msg = `链接可达`;
+    if (resp.size > 0) msg += `，大小 ${formatSize(resp.size)}`;
+    if (resp.content_type) msg += `，类型 ${resp.content_type}`;
+    virtualFileDetectResult.value = msg;
+    // 文件名输入框为空时自动填入建议文件名
+    if (resp.file_name && !virtualFileNameDraft.value.trim()) {
+      virtualFileNameDraft.value = resp.file_name;
+    }
+  } catch (err: unknown) {
+    virtualFileDetectResult.value = readApiError(err, "链接检测失败。");
+  } finally {
+    virtualFileDetectingLink.value = false;
+  }
+}
+
 async function submitAddVirtualFile() {
   const name = virtualFileNameDraft.value.trim();
-  const url = virtualFileUrlDraft.value.trim();
+  const proxyDownload = virtualFileProxyDownload.value;
+  const proxySource = virtualFileProxySourceDraft.value.trim();
+  const playbackUrl = virtualFileUrlDraft.value.trim();
   if (!name) {
     virtualFileError.value = "请输入文件名称。";
     return;
   }
-  if (!url) {
-    virtualFileError.value = "请输入 CDN 直链地址。";
+  // 代理模式需要代理源地址，否则需要前台直链
+  if (proxyDownload && !proxySource) {
+    virtualFileError.value = "请输入服务端代理地址。";
+    return;
+  }
+  if (!proxyDownload && !playbackUrl) {
+    virtualFileError.value = "请输入前台 CDN 直链地址。";
     return;
   }
   if (!currentFolderDetail.value) return;
@@ -375,7 +429,10 @@ async function submitAddVirtualFile() {
       body: {
         name,
         folder_id: currentFolderDetail.value.id,
-        playback_url: url,
+        playback_url: playbackUrl,
+        playback_fallback_url: virtualFileFallbackUrlDraft.value.trim(),
+        proxy_source_url: proxySource,
+        proxy_download: proxyDownload,
       },
     });
     closeAddVirtualFileModal();
@@ -416,7 +473,7 @@ async function submitCreateFolder() {
 }
 const folderDescriptionSaving = ref(false);
 const folderDescriptionError = ref("");
-const deleteResourceTarget = ref<{ id: string; kind: "folder"; name: string } | null>(null);
+const deleteResourceTarget = ref<{ id: string; kind: "folder" | "file"; name: string } | null>(null);
 const deleteResourcePassword = ref("");
 const deleteResourceMoveToTrash = ref(true);
 const deleteResourceSubmitting = ref(false);
@@ -1727,6 +1784,19 @@ function openDeleteFolderDialog() {
   deleteResourceError.value = "";
 }
 
+/** 删除虚拟目录下的文件（仅管理员可用） */
+function openDeleteFileDialog(row: DirectoryRow) {
+  deleteResourceTarget.value = {
+    id: row.id,
+    kind: "file",
+    name: row.name,
+  };
+  deleteResourcePassword.value = "";
+  // 虚拟文件无磁盘文件，只能从 DB 移除
+  deleteResourceMoveToTrash.value = false;
+  deleteResourceError.value = "";
+}
+
 function closeDeleteResourceDialog() {
   deleteResourceTarget.value = null;
   deleteResourcePassword.value = "";
@@ -1746,31 +1816,44 @@ async function confirmDeleteResource() {
 
   deleteResourceSubmitting.value = true;
   deleteResourceError.value = "";
-  const movedToTrash = deleteResourceMoveToTrash.value;
-  const deletedName = currentFolderDetail.value?.name ?? "";
+  const target = deleteResourceTarget.value;
+  const isFile = target.kind === "file";
+  const movedToTrash = isFile ? false : deleteResourceMoveToTrash.value;
+  const deletedName = target.name;
   try {
-    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(deleteResourceTarget.value.id)}`, {
+    const apiPath = isFile
+      ? `/admin/resources/files/${encodeURIComponent(target.id)}`
+      : `/admin/resources/folders/${encodeURIComponent(target.id)}`;
+    await httpClient.request(apiPath, {
       method: "DELETE",
       body: { password: deleteResourcePassword.value, move_to_trash: movedToTrash },
     });
-    const parentID = currentFolderDetail.value?.parent_id ?? "";
-    invalidateDirectoryViewCacheAll();
-    closeDeleteResourceDialog();
-    if (isCurrentFolderVirtual.value) {
-      actionMessage.value = `虚拟目录 ${deletedName} 已从数据库中移除。`;
+    if (isFile) {
+      // 文件删除后刷新当前目录即可
+      invalidateDirectoryViewCacheFolder(currentFolderID.value);
+      closeDeleteResourceDialog();
+      actionMessage.value = `虚拟文件 ${deletedName} 已从数据库中移除。`;
+      await loadDirectory({ force: true });
     } else {
-      actionMessage.value = movedToTrash
-        ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
-        : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
-    }
-    clearSearchState();
-    if (parentID) {
-      await router.push({ name: "public-home", query: { folder: parentID } });
-    } else {
-      await router.push({ name: "public-home", query: { root: "1" } });
+      const parentID = currentFolderDetail.value?.parent_id ?? "";
+      invalidateDirectoryViewCacheAll();
+      closeDeleteResourceDialog();
+      if (isCurrentFolderVirtual.value) {
+        actionMessage.value = `虚拟目录 ${deletedName} 已从数据库中移除。`;
+      } else {
+        actionMessage.value = movedToTrash
+          ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
+          : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
+      }
+      clearSearchState();
+      if (parentID) {
+        await router.push({ name: "public-home", query: { folder: parentID } });
+      } else {
+        await router.push({ name: "public-home", query: { root: "1" } });
+      }
     }
   } catch (err: unknown) {
-    deleteResourceError.value = readApiError(err, "删除文件夹失败。");
+    deleteResourceError.value = readApiError(err, isFile ? "删除文件失败。" : "删除文件夹失败。");
   } finally {
     deleteResourceSubmitting.value = false;
   }
@@ -2872,6 +2955,16 @@ async function syncSessionReceiptCode() {
                       >
                         <Download class="h-4 w-4" />
                       </button>
+                      <!-- 虚拟目录下的文件删除按钮（仅管理员） -->
+                      <button
+                        v-if="canManageResourceDescriptions && isCurrentFolderVirtual && row.kind === 'file'"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white p-2.5 text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                        aria-label="删除文件"
+                        @click.stop="openDeleteFileDialog(row)"
+                      >
+                        <Trash2 class="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3403,10 +3496,16 @@ async function syncSessionReceiptCode() {
     <div v-if="deleteResourceTarget" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
       <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <div>
-          <h3 class="text-lg font-semibold text-slate-900">确认删除文件夹</h3>
+          <h3 class="text-lg font-semibold text-slate-900">
+            {{ deleteResourceTarget.kind === "file" ? "确认删除文件" : "确认删除文件夹" }}
+          </h3>
           <p class="mt-2 text-sm leading-6 text-slate-500">
-            <!-- 虚拟目录只有 DB 记录，直接提示彻底删除 -->
-            <template v-if="isCurrentFolderVirtual">
+            <!-- 虚拟文件：仅 DB 记录 -->
+            <template v-if="deleteResourceTarget.kind === 'file'">
+              该文件为虚拟文件（无磁盘数据），将<strong class="text-rose-700">从数据库中移除</strong>，无法恢复。
+            </template>
+            <!-- 虚拟目录只有 DB 记录 -->
+            <template v-else-if="isCurrentFolderVirtual">
               该目录为虚拟目录（无磁盘文件），将<strong class="text-rose-700">从数据库中移除</strong>，无法恢复。
             </template>
             <template v-else-if="deleteResourceMoveToTrash">
@@ -3421,8 +3520,8 @@ async function syncSessionReceiptCode() {
           </p>
         </div>
         <div class="mt-6 space-y-4">
-          <!-- 虚拟目录不显示垃圾桶选项 -->
-          <div v-if="!isCurrentFolderVirtual" class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+          <!-- 文件和虚拟目录不显示垃圾桶选项 -->
+          <div v-if="deleteResourceTarget.kind !== 'file' && !isCurrentFolderVirtual" class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
             <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
               <input v-model="deleteResourceMoveToTrash" type="radio" class="mt-1" :value="true" />
               <span>移动到垃圾桶（写入所在磁盘根目录的 <code class="rounded bg-white px-1 text-xs">trash</code>）</span>
@@ -3909,7 +4008,7 @@ async function syncSessionReceiptCode() {
           <div class="shrink-0 border-b border-slate-200 pb-4">
             <h3 class="text-lg font-semibold text-slate-900">添加虚拟文件</h3>
             <p class="mt-1 text-sm text-slate-500">
-              在虚拟目录「{{ currentFolderDetail?.name ?? "" }}」中添加文件（通过 CDN 直链提供下载，无需本地存储）。
+              在虚拟目录「{{ currentFolderDetail?.name ?? "" }}」中添加文件。
             </p>
           </div>
           <div class="py-5 space-y-4">
@@ -3922,16 +4021,61 @@ async function syncSessionReceiptCode() {
                 autocomplete="off"
               />
             </label>
+
+            <!-- 服务端代理开关 -->
+            <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-slate-700">
+              <input v-model="virtualFileProxyDownload" type="checkbox" class="mt-0.5" />
+              <span>
+                <span class="font-medium text-slate-900">服务端代理</span>
+                <span class="mt-1 block text-xs text-slate-500">由服务端从内网 / LAN 地址拉取文件再流式返回客户端，支持断点续传和视频拖动。</span>
+              </span>
+            </label>
+
+            <!-- 服务端代理地址（勾选代理时显示） -->
+            <label v-if="virtualFileProxyDownload" class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">服务端代理地址（必填）</span>
+              <input
+                v-model="virtualFileProxySourceDraft"
+                class="field"
+                placeholder="http://10.92.114.62:5244/dav/video.mp4"
+                autocomplete="off"
+              />
+            </label>
+
+            <!-- 前台 CDN 直链 -->
             <label class="space-y-2">
-              <span class="text-sm font-medium text-slate-700">CDN 直链地址</span>
+              <span class="text-sm font-medium text-slate-700">{{ virtualFileProxyDownload ? "前台 CDN 直链（可选，降低服务器压力）" : "前台直链地址（必填）" }}</span>
               <input
                 v-model="virtualFileUrlDraft"
                 class="field"
                 placeholder="https://cdn.example.com/files/report.pdf"
                 autocomplete="off"
-                @keyup.enter="submitAddVirtualFile"
               />
             </label>
+
+            <!-- 前台备用直链 -->
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">前台备用直链（可选）</span>
+              <input
+                v-model="virtualFileFallbackUrlDraft"
+                class="field"
+                placeholder="https://cdn2.example.com/files/report.pdf（主直链失效时使用）"
+                autocomplete="off"
+              />
+            </label>
+
+            <!-- 链接检测按钮 -->
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="btn-secondary text-sm"
+                :disabled="virtualFileDetectingLink || (!virtualFileProxySourceDraft.trim() && !virtualFileUrlDraft.trim())"
+                @click="detectVirtualFileLink"
+              >
+                {{ virtualFileDetectingLink ? "检测中…" : "检测链接" }}
+              </button>
+              <span v-if="virtualFileDetectResult" class="text-sm" :class="virtualFileDetectResult.startsWith('链接可达') ? 'text-emerald-600' : 'text-rose-600'">{{ virtualFileDetectResult }}</span>
+            </div>
             <p v-if="virtualFileError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ virtualFileError }}
             </p>

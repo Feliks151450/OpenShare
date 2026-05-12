@@ -31,6 +31,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	remark string,
 	playbackURL string,
 	playbackFallbackURL string,
+	proxySourceURL string,
 	coverURL string,
 	applyAllowDownload bool,
 	allowDownload *bool,
@@ -47,6 +48,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"remark":                remark,
 			"playback_url":          playbackURL,
 			"playback_fallback_url": playbackFallbackURL,
+		"proxy_source_url":      proxySourceURL,
 			"cover_url":             coverURL,
 			"updated_at":            now,
 		}

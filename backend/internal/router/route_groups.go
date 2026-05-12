@@ -168,6 +168,11 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.CreateVirtualFile,
 	)
+	adminProtected.POST(
+		"/probe-url",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.ProbeURL,
+	)
 	adminProtected.GET(
 		"/file-tags",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),

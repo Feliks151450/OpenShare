@@ -38,6 +38,8 @@ type SearchCandidate struct {
 	Remark        string
 	CoverURL      string
 	PlaybackURL   string
+	ProxyDownload  bool
+	ProxySourceURL string
 	Extension     string
 	Size          int64
 	DownloadCount int64
@@ -72,6 +74,8 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 			Remark:        file.Remark,
 			CoverURL:      strings.TrimSpace(file.CoverURL),
 			PlaybackURL:   strings.TrimSpace(file.PlaybackURL),
+			ProxyDownload: file.ProxyDownload,
+			ProxySourceURL: strings.TrimSpace(file.ProxySourceURL),
 			Extension:     file.Extension,
 			Size:          file.Size,
 			DownloadCount: file.DownloadCount,

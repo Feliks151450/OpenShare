@@ -27,6 +27,10 @@ export interface PublicFileItem {
   cover_url?: string;
   folder_direct_download_url?: string;
   playback_url?: string;
+  /** 服务端代理下载：为 true 时走 /api/public/files/.../download 由服务端代理拉取 proxy_source_url */
+  proxy_download?: boolean;
+  /** 服务端代理拉取的目标地址（仅 proxy_download=true 时有效） */
+  proxy_source_url?: string;
   download_allowed?: boolean;
   uploaded_at: string;
   download_count: number;

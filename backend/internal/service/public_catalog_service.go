@@ -54,6 +54,8 @@ type PublicFileItem struct {
 	Extension               string    `json:"extension"`
 	CoverURL                string    `json:"cover_url"`
 	PlaybackURL             string    `json:"playback_url"`
+	ProxyDownload           bool      `json:"proxy_download"`
+	ProxySourceURL          string    `json:"proxy_source_url"`
 	FolderDirectDownloadURL string    `json:"folder_direct_download_url"`
 	DownloadAllowed         bool      `json:"download_allowed"`
 	UploadedAt              time.Time `json:"uploaded_at"`
@@ -435,6 +437,8 @@ func (s *PublicCatalogService) mapPublicFileItems(ctx context.Context, files []m
 			Extension:               file.Extension,
 			CoverURL:                effectiveFileCoverURL(file.CoverURL, file.Extension, file.ID),
 			PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
+			ProxyDownload:           file.ProxyDownload,
+			ProxySourceURL:          strings.TrimSpace(file.ProxySourceURL),
 			FolderDirectDownloadURL: fd,
 			DownloadAllowed:         allowed,
 			UploadedAt:              file.CreatedAt,

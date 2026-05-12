@@ -1,4 +1,4 @@
-/** 文件下载/播放地址：单独配置的 playback_url > 文件夹直链前缀拼接 > 本站下载接口 */
+/** 文件下载/播放地址：playback_url（CDN/直链） > 文件夹直链前缀拼接 > 本站下载接口 */
 export function fileEffectiveDownloadHref(
   fileId: string,
   playbackUrl?: string | null,

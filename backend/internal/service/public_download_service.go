@@ -37,7 +37,10 @@ type DownloadableFile struct {
 	Size     int64
 	ModTime  time.Time
 	Content  *os.File
-	// RedirectURL 非空表示虚拟文件，应 302 跳转到 CDN 直链，不读本地磁盘。
+	// ProxyURL 非空表示需服务端代理拉取该 URL，再流式返回客户端（用于 LAN 内网等客户端无法直连的地址）。
+	// 非空时 Content/ModTime 无效，由 handler 做反向代理并透传 Range 头。
+	ProxyURL string
+	// RedirectURL 非空表示虚拟文件 CDN 直链，应 302 跳转。
 	RedirectURL string
 	// PlaybackInlineOnly 为 true 时表示策略禁止「下载」，但仍允许浏览器内嵌播放音/视频（inline），不计入下载次数。
 	PlaybackInlineOnly bool
@@ -55,6 +58,8 @@ type PublicFileDetail struct {
 	MimeType            string `json:"mime_type"`
 	PlaybackURL         string `json:"playback_url"`
 	PlaybackFallbackURL string `json:"playback_fallback_url"`
+	ProxyDownload       bool   `json:"proxy_download"`
+	ProxySourceURL      string `json:"proxy_source_url"`
 	CoverURL            string `json:"cover_url"`
 	// FolderDirectDownloadURL 由文件夹直链前缀 + 相对路径生成；不含 playback_url。前端优先使用 playback_url。
 	FolderDirectDownloadURL string `json:"folder_direct_download_url"`
@@ -266,20 +271,34 @@ func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID stri
 		return nil, ErrDownloadFileNotFound
 	}
 
-	// 虚拟目录下的文件：通过 CDN 直链（playback_url）302 跳转，不读本地磁盘
+	// 虚拟目录下的文件：根据 proxy_download 决定代理或直链
 	if file.FolderID != nil && strings.TrimSpace(*file.FolderID) != "" {
 		if virtual, checkErr := s.isFileInVirtualFolder(ctx, *file); checkErr == nil && virtual {
-			redirectURL := strings.TrimSpace(file.PlaybackURL)
-			if redirectURL == "" {
-				return nil, ErrDownloadFileUnavailable
+			// 服务端代理模式：通过 proxy_source_url 拉取再流式返回
+			if file.ProxyDownload {
+				proxySource := strings.TrimSpace(file.ProxySourceURL)
+				if proxySource == "" {
+					return nil, ErrDownloadFileUnavailable
+				}
+				return &DownloadableFile{
+					FileID:   file.ID,
+					FileName: file.Name,
+					MimeType: file.MimeType,
+					Size:     file.Size,
+					ProxyURL: proxySource,
+				}, nil
 			}
-			return &DownloadableFile{
-				FileID:      file.ID,
-				FileName:    file.Name,
-				MimeType:    file.MimeType,
-				Size:        file.Size,
-				RedirectURL: redirectURL,
-			}, nil
+			// CDN 直链：302 跳转（通常前端已直接用 playback_url，此处为兜底）
+			if cdnURL := strings.TrimSpace(file.PlaybackURL); cdnURL != "" {
+				return &DownloadableFile{
+					FileID:      file.ID,
+					FileName:    file.Name,
+					MimeType:    file.MimeType,
+					Size:        file.Size,
+					RedirectURL: cdnURL,
+				}, nil
+			}
+			return nil, ErrDownloadFileUnavailable
 		}
 	}
 
@@ -378,6 +397,8 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		MimeType:                file.MimeType,
 		PlaybackURL:             strings.TrimSpace(file.PlaybackURL),
 		PlaybackFallbackURL:     strings.TrimSpace(file.PlaybackFallbackURL),
+		ProxyDownload:           file.ProxyDownload,
+		ProxySourceURL:      file.ProxySourceURL,
 		CoverURL:                effectiveFileCoverURL(file.CoverURL, file.Extension, file.ID),
 		FolderDirectDownloadURL: s.FolderDirectDownloadURLForFile(ctx, *file),
 		DownloadAllowed:         dlAllowed,

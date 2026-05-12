@@ -51,4 +51,4 @@ PID文件: /home/llf/OpenShare/.localdata/frontend.pid , /home/llf/OpenShare/.lo
 
 服务已在后台运行，退出终端不会中断
 如需停止服务，请执行：
-  kill $(cat /home/llf/OpenShare/.localdata/frontend.pid) $(cat /home/llf/OpenShare/.localdata/backend.pid) 2>/dev/null
+  kill $(cat ~/OpenShare/.localdata/frontend.pid) $(cat ~/OpenShare/.localdata/backend.pid) 2>/dev/null

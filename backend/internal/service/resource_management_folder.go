@@ -284,13 +284,16 @@ func (s *ResourceManagementService) CreateVirtualFolder(ctx context.Context, inp
 
 // CreateVirtualFileInput 创建虚拟文件入参（仅用于虚拟目录下的文件）。
 type CreateVirtualFileInput struct {
-	Name        string
-	FolderID    string
-	PlaybackURL string
-	Description string
-	Remark      string
-	OperatorID  string
-	OperatorIP  string
+	Name              string
+	FolderID          string
+	PlaybackURL       string // CDN 前台直链（非代理时也可作为直链播放地址）
+	PlaybackFallbackURL string // CDN 前台备用直链
+	ProxySourceURL    string // 服务端代理拉取的目标地址（仅 proxy_download=true 时使用）
+	ProxyDownload     bool
+	Description       string
+	Remark            string
+	OperatorID        string
+	OperatorIP        string
 }
 
 // CreateVirtualFile 在虚拟目录下创建虚拟文件（通过 CDN 直链提供下载）。
@@ -298,15 +301,52 @@ func (s *ResourceManagementService) CreateVirtualFile(ctx context.Context, input
 	input.Name = strings.TrimSpace(input.Name)
 	input.FolderID = strings.TrimSpace(input.FolderID)
 	input.PlaybackURL = strings.TrimSpace(input.PlaybackURL)
+	input.PlaybackFallbackURL = strings.TrimSpace(input.PlaybackFallbackURL)
+	input.ProxySourceURL = strings.TrimSpace(input.ProxySourceURL)
 
 	if input.Name == "" || input.FolderID == "" {
 		return nil, ErrInvalidResourceEdit
 	}
 
-	// 校验 CDN 直链
-	candidate, err := normalizeOptionalHTTPURL(input.PlaybackURL)
-	if err != nil || candidate == "" {
-		return nil, ErrInvalidResourceEdit
+	// 代理模式下必须有代理源地址，否则必须有前台直链
+	if input.ProxyDownload {
+		if input.ProxySourceURL == "" {
+			return nil, ErrInvalidResourceEdit
+		}
+	} else {
+		if input.PlaybackURL == "" {
+			return nil, ErrInvalidResourceEdit
+		}
+	}
+
+	// 校验前台直链（可选）
+	playbackURL := input.PlaybackURL
+	if playbackURL != "" {
+		candidate, err := normalizeOptionalHTTPURL(playbackURL)
+		if err != nil {
+			return nil, ErrInvalidResourceEdit
+		}
+		playbackURL = candidate
+	}
+
+	// 校验前台备用直链（可选）
+	playbackFallbackURL := input.PlaybackFallbackURL
+	if playbackFallbackURL != "" {
+		candidate, err := normalizeOptionalHTTPURL(playbackFallbackURL)
+		if err != nil {
+			return nil, ErrInvalidResourceEdit
+		}
+		playbackFallbackURL = candidate
+	}
+
+	// 校验代理源地址（可选）
+	proxySourceURL := input.ProxySourceURL
+	if proxySourceURL != "" {
+		candidate, err := normalizeOptionalHTTPURL(proxySourceURL)
+		if err != nil {
+			return nil, ErrInvalidResourceEdit
+		}
+		proxySourceURL = candidate
 	}
 
 	// 确认父文件夹存在且为虚拟目录
@@ -330,14 +370,20 @@ func (s *ResourceManagementService) CreateVirtualFile(ctx context.Context, input
 		return nil, ErrManagedFileConflict
 	}
 
-	// HEAD 请求获取文件大小
+	// HEAD 请求获取文件大小：代理模式用代理源地址，否则用前台直链
+	headURL := proxySourceURL
+	if headURL == "" {
+		headURL = playbackURL
+	}
 	fileSize := int64(0)
-	client := &http.Client{Timeout: 10 * time.Second}
-	headResp, err := client.Head(input.PlaybackURL)
-	if err == nil && headResp != nil {
-		headResp.Body.Close()
-		if headResp.ContentLength > 0 {
-			fileSize = headResp.ContentLength
+	if headURL != "" {
+		client := &http.Client{Timeout: 10 * time.Second}
+		headResp, err := client.Head(headURL)
+		if err == nil && headResp != nil {
+			headResp.Body.Close()
+			if headResp.ContentLength > 0 {
+				fileSize = headResp.ContentLength
+			}
 		}
 	}
 
@@ -354,16 +400,19 @@ func (s *ResourceManagementService) CreateVirtualFile(ctx context.Context, input
 
 	now := s.nowFunc()
 	file := &model.File{
-		ID:          id,
-		FolderID:    &folder.ID,
-		Name:        name,
-		Description: strings.TrimSpace(input.Description),
-		Remark:      normalizeManagedRemark(input.Remark),
-		Extension:   extension,
-		PlaybackURL: candidate,
-		Size:        fileSize,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:                  id,
+		FolderID:            &folder.ID,
+		Name:                name,
+		Description:         strings.TrimSpace(input.Description),
+		Remark:              normalizeManagedRemark(input.Remark),
+		Extension:           extension,
+		PlaybackURL:         playbackURL,
+		PlaybackFallbackURL: playbackFallbackURL,
+		ProxySourceURL:      proxySourceURL,
+		ProxyDownload:       input.ProxyDownload,
+		Size:                fileSize,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 
 	if err := s.repo.CreateFile(ctx, file, input.OperatorID, input.OperatorIP, now); err != nil {

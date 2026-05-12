@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -40,6 +42,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 		return ErrInvalidResourceEdit
 	}
 	playbackFallbackURL, err := normalizeOptionalHTTPURL(input.PlaybackFallbackURL)
+	proxySourceURL := strings.TrimSpace(input.ProxySourceURL)
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}
@@ -90,7 +93,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFileNotFound
 		}
@@ -187,4 +190,77 @@ func normalizeManagedRemark(raw string) string {
 		return string(r[:maxManagedRemarkRunes])
 	}
 	return s
+}
+
+// ProbeURLResult 服务端 URL 探测结果。
+type ProbeURLResult struct {
+	OK           bool   `json:"ok"`
+	Size         int64  `json:"size"`
+	ContentType  string `json:"content_type"`
+	FileName     string `json:"file_name"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// ProbeRemoteURL 由服务端发起 HEAD 请求，检测 URL 可达性、文件大小和建议文件名。
+func ProbeRemoteURL(ctx context.Context, rawURL string) ProbeURLResult {
+	candidate, err := normalizeOptionalHTTPURL(rawURL)
+	if err != nil || candidate == "" {
+		return ProbeURLResult{ErrorMessage: "URL 格式无效"}
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Head(candidate)
+	if err != nil {
+		return ProbeURLResult{ErrorMessage: fmt.Sprintf("无法连接: %s", err.Error())}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return ProbeURLResult{ErrorMessage: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	}
+
+	fileName := extractSuggestedFileName(resp)
+	return ProbeURLResult{
+		OK:          true,
+		Size:        resp.ContentLength,
+		ContentType: resp.Header.Get("Content-Type"),
+		FileName:    fileName,
+	}
+}
+
+// extractSuggestedFileName 从 Content-Disposition 头或 URL 路径中提取建议文件名。
+func extractSuggestedFileName(resp *http.Response) string {
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		// 解析 attachment; filename="xxx" 或 inline; filename=xxx
+		for _, part := range strings.Split(cd, ";") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(strings.ToLower(part), "filename=") {
+				fn := strings.TrimPrefix(part, "filename=")
+				fn = strings.TrimPrefix(fn, `"`)
+				fn = strings.TrimSuffix(fn, `"`)
+				fn = strings.TrimPrefix(fn, `'`)
+				fn = strings.TrimSuffix(fn, `'`)
+				fn = strings.TrimSpace(fn)
+				if fn != "" {
+					return fn
+				}
+			}
+		}
+	}
+	// 从 URL 路径最后一段提取
+	u, err := url.Parse(resp.Request.URL.String())
+	if err == nil {
+		path := strings.TrimSpace(u.Path)
+		if idx := strings.LastIndex(path, "/"); idx >= 0 {
+			seg := strings.TrimSpace(path[idx+1:])
+			if seg != "" {
+				decoded, err := url.PathUnescape(seg)
+				if err == nil && decoded != "" {
+					return decoded
+				}
+				return seg
+			}
+		}
+	}
+	return ""
 }

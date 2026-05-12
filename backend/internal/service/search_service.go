@@ -83,6 +83,8 @@ type SearchResultItem struct {
 	Extension     string        `json:"extension,omitempty"`
 	CoverURL      string        `json:"cover_url,omitempty"`
 	PlaybackURL   string        `json:"playback_url,omitempty"`
+	ProxyDownload bool          `json:"proxy_download"`
+	ProxySourceURL string        `json:"proxy_source_url,omitempty"`
 	FolderDirectDownloadURL string `json:"folder_direct_download_url,omitempty"`
 	DownloadAllowed bool        `json:"download_allowed"`
 	Size          int64         `json:"size,omitempty"`
@@ -499,6 +501,8 @@ func (s *SearchService) candidateToResultItem(ctx context.Context, candidate rep
 			Extension:     candidate.Extension,
 			CoverURL:      effectiveFileCoverURL(candidate.CoverURL, candidate.Extension, candidate.ID),
 			PlaybackURL:   strings.TrimSpace(candidate.PlaybackURL),
+			ProxyDownload: candidate.ProxyDownload,
+			ProxySourceURL: strings.TrimSpace(candidate.ProxySourceURL),
 			FolderDirectDownloadURL: fd,
 			DownloadAllowed:         dl,
 			Size:                    candidate.Size,

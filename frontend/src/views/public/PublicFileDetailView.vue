@@ -80,6 +80,10 @@ interface FileDetailResponse {
   mime_type: string;
   /** 非空时使用该 http(s) 地址作为播放器与复制下载直链，而非本站下载接口 */
   playback_url?: string;
+  /** 服务端代理：为 true 时走 /api/public/files/.../download 由服务端代理拉取 */
+  proxy_download?: boolean;
+  /** 服务端代理拉取的目标地址（仅 proxy_download=true 时有效） */
+  proxy_source_url?: string;
   /** 非空时优先作为列表/详情封面，高于简介中 ![cover](...) */
   cover_url?: string;
   /** 由文件夹直链前缀生成，不含 playback_url；前端优先 playback */
@@ -119,6 +123,7 @@ const editDescription = ref("");
 const editRemark = ref("");
 const editPlaybackUrl = ref("");
 const editPlaybackFallbackUrl = ref("");
+const editProxySourceUrl = ref("");
 const editCoverUrl = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
@@ -527,12 +532,11 @@ function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisual
   return null;
 }
 
-/** 虚拟文件（有 playback_url 但无本地 storage_path）不支持内嵌预览 */
+/** 虚拟文件（无本地 storage_path）不支持内嵌预览 */
 const isVirtualDetailFile = computed(() => {
   if (!detail.value) return false;
-  const hasPlayback = (detail.value.playback_url ?? "").trim().length > 0;
   const hasStorage = (detail.value.storage_path ?? "").trim().length > 0;
-  return hasPlayback && !hasStorage;
+  return !hasStorage;
 });
 
 const previewVisualKind = computed((): DetailPreviewVisualKind | null => {
@@ -1171,6 +1175,7 @@ const editorDirty = computed(() => {
     editRemark.value.trim() !== (detail.value.remark ?? "").trim() ||
     editPlaybackUrl.value.trim() !== (detail.value.playback_url ?? "").trim() ||
     editPlaybackFallbackUrl.value.trim() !== (detail.value.playback_fallback_url ?? "").trim() ||
+    editProxySourceUrl.value.trim() !== (detail.value.proxy_source_url ?? "").trim() ||
     editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim() ||
     editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
@@ -1434,6 +1439,7 @@ function openDescriptionEditor() {
   editRemark.value = (detail.value?.remark ?? "").trim();
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
+      editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
@@ -1450,6 +1456,7 @@ function closeDescriptionEditor() {
   editRemark.value = (detail.value?.remark ?? "").trim();
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
+      editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
 }
@@ -1511,7 +1518,8 @@ async function saveFileTags() {
 function openDeleteDialog() {
   deletePassword.value = "";
   deleteError.value = "";
-  deleteMoveToTrash.value = true;
+  // 虚拟文件（有 playback_url 但无本地 storage_path）无磁盘文件，只能从 DB 移除
+  deleteMoveToTrash.value = !isVirtualDetailFile.value;
   deleteDialogOpen.value = true;
 }
 
@@ -1558,6 +1566,7 @@ async function saveDescription() {
         remark: editRemark.value.trim(),
         playback_url: editPlaybackUrl.value.trim(),
         playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
+	        proxy_source_url: editProxySourceUrl.value.trim(),
         cover_url: editCoverUrl.value.trim(),
         download_policy: editDownloadPolicy.value,
       },
@@ -2524,7 +2533,7 @@ function performDownloadFile() {
               <!-- /宽屏左右布局 -->
 
             <div
-              v-if="!showFileDescriptionAbovePreview && !(useWideDescriptionLayout && isWideScreen)"
+              v-if="!showFileDescriptionAbovePreview && !(useWideDescriptionLayout && isWideScreen) && descriptionHTML"
               class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
               <div v-if="descriptionHTML" class="space-y-3">
@@ -2566,7 +2575,11 @@ function performDownloadFile() {
           <div>
             <h3 class="text-lg font-semibold text-slate-900">确认删除文件</h3>
             <p class="mt-2 text-sm leading-6 text-slate-500">
-              <template v-if="deleteMoveToTrash">
+              <!-- 虚拟文件：无磁盘数据，仅 DB 记录 -->
+              <template v-if="isVirtualDetailFile">
+                该文件为虚拟文件（无磁盘数据），将<strong class="text-rose-700">从数据库中移除</strong>，无法恢复。
+              </template>
+              <template v-else-if="deleteMoveToTrash">
                 将移动到该文件所在磁盘根目录下的 <span class="font-medium text-slate-800">trash</span> 文件夹，可从文件系统中找回。
               </template>
               <template v-else>
@@ -2578,7 +2591,8 @@ function performDownloadFile() {
             </p>
           </div>
           <div class="mt-6 space-y-4">
-            <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+            <!-- 虚拟文件不显示垃圾桶选项 -->
+            <div v-if="!isVirtualDetailFile" class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
               <label class="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
                 <input v-model="deleteMoveToTrash" type="radio" class="mt-1" :value="true" />
                 <span>移动到垃圾桶（写入所在磁盘根目录的 <code class="rounded bg-white px-1 text-xs">trash</code>）</span>
@@ -2795,6 +2809,19 @@ function performDownloadFile() {
                 </p>
               </label>
 
+              <!-- 服务端代理地址（仅代理模式显示） -->
+              <label v-if="detail.proxy_download" class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">服务端代理地址（LAN / 内网 URL）</span>
+                <input
+                  v-model="editProxySourceUrl"
+                  type="url"
+                  class="field"
+                  placeholder="http://10.92.114.62:5244/dav/video.mp4"
+                  autocomplete="off"
+                />
+                <p class="text-xs leading-5 text-slate-500">服务端从此地址拉取文件再流式返回客户端，客户端不直连此地址。须以 http(s) 开头。</p>
+              </label>
+
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">播放 / 下载直链（可选）</span>
                 <input
@@ -2804,9 +2831,7 @@ function performDownloadFile() {
                   placeholder="https://cdn.example.com/path/video.mp4（留空则使用本站下载接口）"
                   autocomplete="off"
                 />
-                <p class="text-xs leading-5 text-slate-500">
-                  填写后，详情页播放器与「复制下载直链」均使用该地址；需以 http(s) 开头。清空并保存可恢复为默认。
-                </p>
+                <p class="text-xs leading-5 text-slate-500">填写后，详情页播放器与「复制下载直链」均使用该地址；需以 http(s) 开头。清空并保存可恢复为默认。</p>
               </label>
 
               <label class="space-y-2">

@@ -25,19 +25,22 @@ func (s *ResourceManagementService) DeleteFile(ctx context.Context, fileID strin
 	if err != nil {
 		return err
 	}
-	filePath := model.BuildManagedFilePath(folderSourcePath(folder), current.Name)
-	if filePath == "" {
-		return ErrManagedFileNotFound
-	}
-
-	if moveToTrash {
-		_, err = s.storage.MoveManagedFileToTrash(filePath)
-		if err != nil {
-			return fmt.Errorf("move managed file to trash: %w", err)
+	// 虚拟目录/文件：无磁盘文件，跳过磁盘操作，直接从 DB 删除
+	if folder == nil || !folder.IsVirtual {
+		filePath := model.BuildManagedFilePath(folderSourcePath(folder), current.Name)
+		if filePath == "" {
+			return ErrManagedFileNotFound
 		}
-	} else {
-		if err := s.storage.RemoveManagedFilePermanently(filePath); err != nil {
-			return fmt.Errorf("remove managed file: %w", err)
+
+		if moveToTrash {
+			_, err = s.storage.MoveManagedFileToTrash(filePath)
+			if err != nil {
+				return fmt.Errorf("move managed file to trash: %w", err)
+			}
+		} else {
+			if err := s.storage.RemoveManagedFilePermanently(filePath); err != nil {
+				return fmt.Errorf("remove managed file: %w", err)
+			}
 		}
 	}
 
