@@ -710,6 +710,7 @@ function parseHashRoute() {
       fileId,
       folder: "",
       root: "",
+      customPath: "",
       t: sp.get("t") || "",
     };
   }
@@ -718,6 +719,7 @@ function parseHashRoute() {
     fileId: "",
     folder: sp.get("folder")?.trim() ?? "",
     root: sp.get("root")?.trim() ?? "",
+    customPath: sp.get("custom_path")?.trim() ?? "",
     t: "",
   };
 }
@@ -730,6 +732,7 @@ function hashFragmentFromRoute(route) {
   const sp = new URLSearchParams();
   if (route.folder) sp.set("folder", route.folder);
   if (route.root === "1") sp.set("root", "1");
+  if (route.customPath) sp.set("custom_path", route.customPath);
   const qs = sp.toString();
   return qs ? `#/?${qs}` : "#/";
 }
@@ -772,6 +775,14 @@ function tryMarkdownHrefToReadonlyHashRoute(hrefRaw) {
   }
   if (u.pathname === "/upload" || u.pathname === "/upload/") {
     return null;
+  }
+  // 自定义文件夹路径（如 /doc、/doc/sub）：以字母开头、无查询参数
+  const cpm = u.pathname.match(/^\/([a-zA-Z][a-zA-Z0-9_\-/]*[a-zA-Z0-9_\-])$/);
+  if (cpm && !u.search) {
+    const customPath = decodeURIComponent(cpm[1] || "").trim();
+    if (customPath) {
+      return { view: "home", fileId: "", folder: "", root: "", customPath, t: "" };
+    }
   }
   const isHomePath = u.pathname === "/" || u.pathname === "";
   if (!isHomePath) {
@@ -1605,7 +1616,25 @@ async function loadLatestTitles(force) {
 }
 
 async function loadDirectory(force) {
-  const folderId = state.route.folder;
+  let folderId = state.route.folder;
+
+  // 自定义路径解析：将 customPath 解析为 folder UUID
+  if (!folderId && state.route.customPath) {
+    try {
+      const resolved = await apiRequest(
+        `/public/resolve-custom-path?path=${encodeURIComponent(state.route.customPath)}`,
+        { method: "GET" },
+      );
+      if (resolved && resolved.folder_id) {
+        folderId = resolved.folder_id;
+        // 同步更新 route，使 breadcrumb/goBackFromDetail 等逻辑一致
+        state.route.folder = folderId;
+      }
+    } catch {
+      // 解析失败时 folderId 为空，走根目录逻辑
+    }
+  }
+
   const cacheKey = folderId || "__root__";
 
   if (!force) {
@@ -3743,15 +3772,20 @@ window.OpenShare = {
     goHome(opts = {}) {
       const replace = Boolean(opts.replace);
       const folder = String(opts.folder ?? "").trim();
+      const customPath = String(opts.customPath ?? "").trim();
       if (folder) {
-        setHashRoute({ view: "home", folder, root: "", fileId: "", t: "" }, { replace });
+        setHashRoute({ view: "home", folder, root: "", customPath: "", fileId: "", t: "" }, { replace });
+        return Promise.resolve();
+      }
+      if (customPath) {
+        setHashRoute({ view: "home", folder: "", root: "", customPath, fileId: "", t: "" }, { replace });
         return Promise.resolve();
       }
       if (opts.root) {
-        setHashRoute({ view: "home", folder: "", root: "1", fileId: "", t: "" }, { replace });
+        setHashRoute({ view: "home", folder: "", root: "1", customPath: "", fileId: "", t: "" }, { replace });
         return Promise.resolve();
       }
-      setHashRoute({ view: "home", folder: "", root: "", fileId: "", t: "" }, { replace });
+      setHashRoute({ view: "home", folder: "", root: "", customPath: "", fileId: "", t: "" }, { replace });
       return Promise.resolve();
     },
     goFile(fileID, opts = {}) {
@@ -3788,6 +3822,13 @@ window.OpenShare = {
       }
       goBackFromDetail({ replace: Boolean(opts.replace) });
       return Promise.resolve(true);
+    },
+    resolveCustomPath(customPath) {
+      const trimmed = String(customPath ?? "").trim();
+      if (!trimmed) return Promise.resolve(null);
+      return apiRequest(`/public/resolve-custom-path?path=${encodeURIComponent(trimmed)}`, { method: "GET" })
+        .then((resp) => resp)
+        .catch(() => null);
     },
   },
   home: {

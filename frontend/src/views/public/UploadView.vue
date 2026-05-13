@@ -6,6 +6,7 @@ import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { clearStoredReceiptCode, ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
+import { toastError } from "../../lib/toast";
 
 interface SubmissionLookupResponse {
   receipt_code: string;
@@ -72,7 +73,7 @@ onMounted(() => {
 async function lookupReceipt() {
   const code = receiptCode.value.trim();
   if (!code) {
-    lookupError.value = "请输入回执码。";
+    toastError("请输入回执码。");
     submissionLookupResult.value = null;
     feedbackLookupResult.value = null;
     return;
@@ -96,7 +97,7 @@ async function lookupReceipt() {
     feedbackError instanceof HttpError ? feedbackError.status !== 404 : Boolean(feedbackError);
 
   if (fatalSubmissionError || fatalFeedbackError) {
-    lookupError.value = "查询回执失败。";
+    toastError("查询回执失败。");
     lookupLoading.value = false;
     return;
   }
@@ -111,7 +112,7 @@ async function lookupReceipt() {
   }
 
   if (!submissionLookupResult.value && !feedbackLookupResult.value) {
-    lookupError.value = "未找到对应信息。";
+    toastError("未找到对应信息。");
   }
   lookupLoading.value = false;
 }
@@ -213,10 +214,7 @@ function statusBadgeClass(status: string) {
         </div>
 
         <!-- 错误/加载提示 -->
-        <p v-if="lookupError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {{ lookupError }}
-        </p>
-        <p v-else-if="lookupLoading" class="mt-4 text-sm text-slate-500">正在查询…</p>
+<p v-if="lookupLoading" class="mt-4 text-sm text-slate-500">正在查询…</p>
 
         <!-- 查询结果列表：混合展示上传记录和反馈记录，按时间倒序 -->
         <div v-if="receiptRecords.length" class="mt-6 space-y-3">

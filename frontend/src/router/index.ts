@@ -33,6 +33,12 @@ const routes: RouteRecordRaw[] = [
         name: "public-file-detail",
         component: PublicFileDetailView,
       },
+      {
+        path: ":customPath(.*)",
+        name: "public-custom-folder",
+        component: HomeView,
+        meta: { customPath: true },
+      },
     ],
   },
   {

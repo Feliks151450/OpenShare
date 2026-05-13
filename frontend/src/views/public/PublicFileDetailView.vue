@@ -33,6 +33,7 @@ import {
   withBackendDownloadInlinePreviewParam,
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
+import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
 import { renderSimpleMarkdown } from "../../lib/markdown";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
@@ -94,6 +95,8 @@ interface FileDetailResponse {
   download_policy?: "inherit" | "allow" | "deny";
   /** 仅视频：主直链失效时依次尝试；需已配置主直链才有意义 */
   playback_fallback_url?: string;
+  /** 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件 */
+  custom_path?: string;
   size: number;
   uploaded_at: string;
   download_count: number;
@@ -124,6 +127,8 @@ const editRemark = ref("");
 const editPlaybackUrl = ref("");
 const editPlaybackFallbackUrl = ref("");
 const editProxySourceUrl = ref("");
+/* 自定义访问路径（仅管理员可编辑）：如 "doc/report" 对应 /doc/report 访问该文件 */
+const editCustomPath = ref("");
 const editCoverUrl = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
@@ -334,6 +339,11 @@ const absoluteDetailPageURL = computed(() => {
   if (typeof window === "undefined") {
     return "";
   }
+  // 若文件设置了自定义路径，优先使用自定义路径链接
+  const cp = (detail.value?.custom_path ?? "").trim();
+  if (cp) {
+    return `${window.location.origin}/${cp}`;
+  }
   const path = router.resolve({
     name: "public-file-detail",
     params: { fileID: fileID.value },
@@ -456,9 +466,6 @@ function onVideoLoadedMetadata() {
     setupVideoStageObserver();
   });
 }
-
-const linkCopyHint = ref("");
-let linkCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 与首页列表图标逻辑对齐，便于 mime 缺失时仍识别常见视频扩展名 */
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v", "ogv"]);
@@ -719,20 +726,20 @@ watch(
     try {
       const res = await fetch(fetchSrc, { credentials: "include", signal: ac.signal });
       if (!res.ok) {
-        pdfPreviewError.value = res.status === 403 ? "不允许访问该文件。" : "加载 PDF 失败。";
+        toastError(res.status === 403 ? "不允许访问该文件。" : "加载 PDF 失败。");
         return;
       }
       const cl = res.headers.get("content-length");
       if (cl != null) {
         const n = Number(cl);
         if (Number.isFinite(n) && n > PDF_PREVIEW_MAX_BYTES) {
-          pdfPreviewError.value = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+          toastError(`PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`);
           return;
         }
       }
       const buf = await res.arrayBuffer();
       if (buf.byteLength > PDF_PREVIEW_MAX_BYTES) {
-        pdfPreviewError.value = `PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`;
+        toastError(`PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`);
         return;
       }
       pdfBlobUrl.value = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
@@ -740,8 +747,7 @@ watch(
       if (e instanceof DOMException && e.name === "AbortError") {
         return;
       }
-      pdfPreviewError.value =
-        "无法加载 PDF 预览（网络或浏览器限制）。请尝试「在新标签页打开」或使用下载。";
+      toastError("无法加载 PDF 预览（网络或浏览器限制）。请尝试「在新标签页打开」或使用下载。");
     } finally {
       pdfPreviewLoading.value = false;
     }
@@ -814,14 +820,13 @@ watch(
             return;
           }
           if (e instanceof HttpError) {
-            previewTextError.value =
-              e.status === 403
+            toastError(e.status === 403
                 ? "不允许访问该文件。"
                 : e.status === 400
                   ? readApiError(e, "无法读取 NetCDF 摘要（可能不是有效的 .nc 文件）。")
-                  : "加载 NetCDF 摘要失败。";
+                  : "加载 NetCDF 摘要失败。");
           } else {
-            previewTextError.value = "加载 NetCDF 摘要失败。";
+            toastError("加载 NetCDF 摘要失败。");
           }
         }
       } finally {
@@ -834,7 +839,7 @@ watch(
       return;
     }
     if (!src) {
-      previewTextError.value = "无法解析预览地址。";
+      toastError("无法解析预览地址。");
       return;
     }
 
@@ -845,14 +850,14 @@ watch(
     try {
       const res = await fetch(src, { credentials: "include", signal: ac.signal });
       if (!res.ok) {
-        previewTextError.value = res.status === 403 ? "不允许访问该文件。" : "加载预览失败。";
+        toastError(res.status === 403 ? "不允许访问该文件。" : "加载预览失败。");
         return;
       }
       const cl = res.headers.get("content-length");
       if (cl != null) {
         const n = Number(cl);
         if (Number.isFinite(n) && n > PREVIEW_TEXT_MAX_BYTES) {
-          previewTextError.value = `文件超过预览上限（约 ${Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024)} KB），请下载后查看。`;
+          toastError(`文件超过预览上限（约 ${Math.floor(PREVIEW_TEXT_MAX_BYTES / 1024)} KB），请下载后查看。`);
           return;
         }
       }
@@ -864,8 +869,7 @@ watch(
       if (e instanceof DOMException && e.name === "AbortError") {
         return;
       }
-      previewTextError.value =
-        "预览加载失败。若文件为外链存储或未允许跨域，请使用下载或通过直链在新标签打开。";
+      toastError("预览加载失败。若文件为外链存储或未允许跨域，请使用下载或通过直链在新标签打开。");
     } finally {
       previewTextLoading.value = false;
     }
@@ -1177,6 +1181,7 @@ const editorDirty = computed(() => {
     editPlaybackFallbackUrl.value.trim() !== (detail.value.playback_fallback_url ?? "").trim() ||
     editProxySourceUrl.value.trim() !== (detail.value.proxy_source_url ?? "").trim() ||
     editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim() ||
+    editCustomPath.value.trim() !== (detail.value.custom_path ?? "").trim() ||
     editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
 });
@@ -1379,6 +1384,7 @@ async function loadDetail() {
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
+      editCustomPath.value = (detail.value.custom_path ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       const fid = detail.value.folder_id?.trim() ?? "";
       if (fid && !props.panelPresentation) {
@@ -1403,6 +1409,7 @@ async function loadDetail() {
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
       editCoverUrl.value = (detail.value.cover_url ?? "").trim();
+      editCustomPath.value = (detail.value.custom_path ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       // API 返回了 folder_id，按需加载对应目录的 CDN 数据供后续使用
       const fid = detail.value.folder_id?.trim() ?? "";
@@ -1420,9 +1427,9 @@ async function loadDetail() {
     }
   } catch (err: unknown) {
     if (err instanceof HttpError && err.status === 404) {
-      error.value = "文件不存在或未公开。";
+      toastError("文件不存在或未公开。");
     } else {
-      error.value = "加载文件详情失败。";
+      toastError("加载文件详情失败。");
     }
   } finally {
     loading.value = false;
@@ -1441,6 +1448,7 @@ function openDescriptionEditor() {
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
       editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
+  editCustomPath.value = (detail.value?.custom_path ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
   message.value = "";
@@ -1458,6 +1466,7 @@ function closeDescriptionEditor() {
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
       editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
   editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
+  editCustomPath.value = (detail.value?.custom_path ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
 }
 
@@ -1472,7 +1481,7 @@ async function openTagEditor() {
   try {
     tagCatalog.value = await fetchPublicFileTagDefinitions();
   } catch {
-    tagEditorError.value = "加载标签列表失败。";
+    toastError("加载标签列表失败。");
     tagCatalog.value = [];
   } finally {
     tagEditorLoading.value = false;
@@ -1505,11 +1514,11 @@ async function saveFileTags() {
       method: "PUT",
       body: { tag_ids: tagEditorSelected.value },
     });
-    message.value = "标签已更新。";
+    toastSuccess("标签已更新。");
     await loadDetail();
     closeTagEditor();
   } catch (err: unknown) {
-    tagEditorError.value = readApiError(err, "保存标签失败。");
+    toastError(readApiError(err, "保存标签失败。"));
   } finally {
     tagEditorSaving.value = false;
   }
@@ -1551,7 +1560,7 @@ async function saveDescription() {
   if (!detail.value || !editorDirty.value) return;
   const normalizedName = editFileName.value.trim();
   if (!normalizedName) {
-    saveError.value = "请输入有效的文件名。";
+    toastError("请输入有效的文件名。");
     return;
   }
   saving.value = true;
@@ -1568,14 +1577,15 @@ async function saveDescription() {
         playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
 	        proxy_source_url: editProxySourceUrl.value.trim(),
         cover_url: editCoverUrl.value.trim(),
+        custom_path: editCustomPath.value.trim(),
         download_policy: editDownloadPolicy.value,
       },
     });
-    message.value = "文件信息已更新。";
+    toastSuccess("文件信息已更新。");
     await loadDetail();
     descriptionEditorOpen.value = false;
   } catch (err: unknown) {
-    saveError.value = readApiError(err, "更新文件简介失败。");
+    toastError(readApiError(err, "更新文件简介失败。"));
   } finally {
     saving.value = false;
   }
@@ -1586,7 +1596,7 @@ async function confirmDeleteFile() {
     return;
   }
   if (!deletePassword.value.trim()) {
-    deleteError.value = "请输入当前管理员密码。";
+    toastError("请输入当前管理员密码。");
     return;
   }
 
@@ -1600,7 +1610,7 @@ async function confirmDeleteFile() {
     closeDeleteDialog();
     goBack();
   } catch (err: unknown) {
-    deleteError.value = readApiError(err, "删除文件失败。");
+    toastError(readApiError(err, "删除文件失败。"));
   } finally {
     deleteSubmitting.value = false;
   }
@@ -1620,18 +1630,18 @@ async function submitFeedback() {
       folder_id: "",
       description: feedbackDescription.value.trim(),
     });
-    feedbackMessage.value = `反馈已提交，请保存回执码 ${response.receipt_code}。`;
+    toastSuccess(`反馈已提交，请保存回执码 ${response.receipt_code}。`);
     currentReceiptCode.value = response.receipt_code;
     window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
     closeFeedbackModal();
     feedbackSuccessModalOpen.value = true;
   } catch (err: unknown) {
     if (err instanceof HttpError && err.status === 400) {
-      feedbackError.value = "请填写问题说明。";
+      toastError("请填写问题说明。");
     } else if (err instanceof HttpError && err.status === 404) {
-      feedbackError.value = "目标不存在或已删除。";
+      toastError("目标不存在或已删除。");
     } else {
-      feedbackError.value = "提交反馈失败。";
+      toastError("提交反馈失败。");
     }
   } finally {
     feedbackSubmitting.value = false;
@@ -1700,41 +1710,30 @@ function onPeerListNavigate(peerId: string) {
   void router.push({ name: "public-file-detail", params: { fileID: peerId } });
 }
 
-function showLinkCopyHint(text: string) {
-  if (linkCopyTimer) {
-    clearTimeout(linkCopyTimer);
-  }
-  linkCopyHint.value = text;
-  linkCopyTimer = setTimeout(() => {
-    linkCopyHint.value = "";
-    linkCopyTimer = null;
-  }, 2800);
-}
-
 async function copyLink(label: string, url: string) {
   if (!url) {
-    showLinkCopyHint("当前环境无法生成链接。");
+    toastWarning("当前环境无法生成链接。");
     return;
   }
   const ok = await copyPlainTextToClipboard(url);
   if (ok) {
-    showLinkCopyHint(`已复制${label}`);
+    toastSuccess(`已复制${label}`);
   } else {
-    showLinkCopyHint("复制失败，请手动长按或右键复制地址栏。");
+    toastWarning("复制失败，请手动长按或右键复制地址栏。");
   }
 }
 
 async function copyServerStoragePath() {
   const raw = (detail.value?.storage_path ?? "").trim();
   if (!raw) {
-    showLinkCopyHint("暂无服务器磁盘路径。");
+    toastWarning("暂无服务器磁盘路径。");
     return;
   }
   const ok = await copyPlainTextToClipboard(raw);
   if (ok) {
-    showLinkCopyHint("已复制服务器路径");
+    toastSuccess("已复制服务器路径");
   } else {
-    showLinkCopyHint("复制失败，请手动复制。");
+    toastWarning("复制失败，请手动复制。");
   }
 }
 
@@ -1750,22 +1749,22 @@ async function copyFetchedPreviewText() {
     text = netcdfStructureToMarkdown(previewNetcdfStructure.value);
   }
   if (!text) {
-    showLinkCopyHint("没有可复制的内容。");
+    toastWarning("没有可复制的内容。");
     return;
   }
   const ok = await copyPlainTextToClipboard(text);
   if (ok) {
     if (previewTextTruncated.value) {
-      showLinkCopyHint(
+      toastWarning(
         previewVisualKind.value === "netcdf"
           ? "已复制 NetCDF 摘要（可能已截断，完整结构请下载后用专业工具查看）"
           : "已复制预览内容（不含截断以外部分，请下载查看全文）",
       );
     } else {
-      showLinkCopyHint("已复制预览内容");
+      toastSuccess("已复制预览内容");
     }
   } else {
-    showLinkCopyHint("复制失败，请手动选中预览区文本后复制。");
+    toastWarning("复制失败，请手动选中预览区文本后复制。");
   }
 }
 
@@ -1834,13 +1833,6 @@ function performDownloadFile() {
         <template v-else-if="detail">
           <!-- 操作反馈消息 -->
           <p v-if="message" class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
-          <p
-            v-if="linkCopyHint"
-            class="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
-          >
-            {{ linkCopyHint }}
-          </p>
-
           <!-- 文件基本信息区 -->
           <section>
             <div class="space-y-4">
@@ -2603,10 +2595,7 @@ function performDownloadFile() {
               </label>
             </div>
             <input v-model="deletePassword" type="password" class="field" placeholder="输入当前管理员密码确认删除" />
-            <p v-if="deleteError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ deleteError }}
-            </p>
-            <div class="flex justify-end gap-3">
+<div class="flex justify-end gap-3">
               <button type="button" class="btn-secondary" @click="closeDeleteDialog">取消</button>
               <button
                 type="button"
@@ -2704,11 +2693,7 @@ function performDownloadFile() {
               <p v-if="feedbackMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
                 {{ feedbackMessage }}
               </p>
-              <p v-if="feedbackError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {{ feedbackError }}
-              </p>
-
-              <div class="flex justify-end gap-3 pt-1">
+<div class="flex justify-end gap-3 pt-1">
                 <button type="button" class="btn-secondary" @click="closeFeedbackModal">取消</button>
                 <button type="button" class="btn-primary" :disabled="feedbackSubmitDisabled" @click="submitFeedback">
                   {{ feedbackSubmitting ? "提交中…" : "提交反馈" }}
@@ -2809,6 +2794,21 @@ function performDownloadFile() {
                 </p>
               </label>
 
+              <!-- 自定义访问路径：设置后可通过 /doc/report 之类的短链接访问该文件 -->
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-slate-700">自定义访问路径（可选）</span>
+                <input
+                  v-model="editCustomPath"
+                  type="text"
+                  class="field"
+                  placeholder="例如 doc/report，设置后可通过 /doc/report 直接访问此文件"
+                  autocomplete="off"
+                />
+                <p class="text-xs leading-5 text-slate-500">
+                  必须以英文字母开头，可包含字母、数字、下划线、连字符和多级路径。不能与 upload/admin/files/api 等系统路径冲突。留空则取消自定义路径。
+                </p>
+              </label>
+
               <!-- 服务端代理地址（仅代理模式显示） -->
               <label v-if="detail.proxy_download" class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">服务端代理地址（LAN / 内网 URL）</span>
@@ -2859,11 +2859,7 @@ function performDownloadFile() {
                   仅用于内嵌播放器；复制下载仍使用上方主直链逻辑。需以 http(s) 开头；无单独配置主直链时不可填。
                 </p>
               </label>
-
-              <p v-if="saveError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {{ saveError }}
-              </p>
-              </div>
+</div>
             </div>
           </div>
         </div>
@@ -2913,10 +2909,7 @@ function performDownloadFile() {
                   </li>
                 </ul>
               </div>
-              <p v-if="tagEditorError" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {{ tagEditorError }}
-              </p>
-              <div class="mt-6 flex flex-wrap justify-end gap-3">
+<div class="mt-6 flex flex-wrap justify-end gap-3">
                 <button type="button" class="btn-secondary" @click="closeTagEditor">取消</button>
                 <button
                   type="button"

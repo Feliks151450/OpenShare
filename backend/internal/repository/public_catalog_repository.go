@@ -145,6 +145,71 @@ func (r *PublicCatalogRepository) ListPublicFolders(ctx context.Context, parentI
 	return rows, nil
 }
 
+// FindPublicFolderByCustomPath 通过自定义路径查找文件夹。path 为空或未找到时返回 nil。
+func (r *PublicCatalogRepository) FindPublicFolderByCustomPath(ctx context.Context, customPath string) (*model.Folder, error) {
+	var folder model.Folder
+	err := r.db.WithContext(ctx).
+		Where("custom_path = ?", customPath).
+		Take(&folder).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find public folder by custom path: %w", err)
+	}
+	return &folder, nil
+}
+
+// FindPublicFileByCustomPath 通过自定义路径查找文件。path 为空或未找到时返回 nil。
+func (r *PublicCatalogRepository) FindPublicFileByCustomPath(ctx context.Context, customPath string) (*model.File, error) {
+	var file model.File
+	err := r.db.WithContext(ctx).
+		Where("custom_path = ?", customPath).
+		Take(&file).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find public file by custom path: %w", err)
+	}
+	return &file, nil
+}
+
+// CustomPathExists 检查 custom_path 是否已被使用（同时检查 folders 和 files 表，可排除指定 ID）。
+func (r *PublicCatalogRepository) CustomPathExists(ctx context.Context, customPath string, excludeID string) (bool, error) {
+	if customPath == "" {
+		return false, nil
+	}
+	// 检查 folders 表
+	{
+		var count int64
+		query := r.db.WithContext(ctx).Model(&model.Folder{}).Where("custom_path = ?", customPath)
+		if excludeID != "" {
+			query = query.Where("id != ?", excludeID)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return false, fmt.Errorf("check custom path in folders: %w", err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	// 检查 files 表
+	{
+		var count int64
+		query := r.db.WithContext(ctx).Model(&model.File{}).Where("custom_path = ?", customPath)
+		if excludeID != "" {
+			query = query.Where("id != ?", excludeID)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return false, fmt.Errorf("check custom path in files: %w", err)
+		}
+		return count > 0, nil
+	}
+}
+
 func (r *PublicCatalogRepository) FindPublicFolderByID(ctx context.Context, folderID string) (*model.Folder, error) {
 	var folder model.Folder
 	err := r.db.WithContext(ctx).

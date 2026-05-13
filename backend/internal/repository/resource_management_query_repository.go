@@ -150,6 +150,39 @@ func (r *ResourceManagementRepository) FileNameExists(ctx context.Context, folde
 	return count > 0, nil
 }
 
+// CustomPathExists 检查 custom_path 是否已被使用（同时检查 folders 和 files 表，可排除指定 ID）。
+func (r *ResourceManagementRepository) CustomPathExists(ctx context.Context, customPath string, excludeID string) (bool, error) {
+	if customPath == "" {
+		return false, nil
+	}
+	// 检查 folders 表
+	{
+		var count int64
+		query := r.db.WithContext(ctx).Model(&model.Folder{}).Where("custom_path = ?", customPath)
+		if excludeID != "" {
+			query = query.Where("id != ?", excludeID)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return false, fmt.Errorf("check custom path in folders: %w", err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	// 检查 files 表
+	{
+		var count int64
+		query := r.db.WithContext(ctx).Model(&model.File{}).Where("custom_path = ?", customPath)
+		if excludeID != "" {
+			query = query.Where("id != ?", excludeID)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return false, fmt.Errorf("check custom path in files: %w", err)
+		}
+		return count > 0, nil
+	}
+}
+
 func (r *ResourceManagementRepository) ListFolderPaths(ctx context.Context) ([]ManagedFolderPathRow, error) {
 	var rows []ManagedFolderPathRow
 	if err := r.db.WithContext(ctx).

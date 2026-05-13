@@ -7,6 +7,7 @@ import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import type { FileTagDefinition } from "../../lib/publicFileTags";
 import { readableTextColorForPreset } from "../../lib/publicFileTags";
+import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
 const sessionStore = useSessionStore();
@@ -48,7 +49,7 @@ async function load() {
       };
     }
   } catch (err: unknown) {
-    error.value = readApiError(err, "加载标签失败。");
+    toastError(readApiError(err, "加载标签失败。"));
   } finally {
     loading.value = false;
   }
@@ -56,7 +57,7 @@ async function load() {
 
 async function submitCreate() {
   if (!createForm.name.trim()) {
-    error.value = "请输入标签名称。";
+    toastError("请输入标签名称。");
     return;
   }
   creating.value = true;
@@ -71,10 +72,10 @@ async function submitCreate() {
     createForm.name = "";
     createForm.color = "#64748b";
     createForm.sort_order = 0;
-    message.value = "已添加标签。";
+    toastSuccess("已添加标签。");
     await load();
   } catch (err: unknown) {
-    error.value = readApiError(err, "创建标签失败。");
+    toastError(readApiError(err, "创建标签失败。"));
   } finally {
     creating.value = false;
   }
@@ -83,7 +84,7 @@ async function submitCreate() {
 async function saveRow(id: string) {
   const d = rowDraft[id];
   if (!d || !d.name.trim()) {
-    error.value = "标签名称不能为空。";
+    toastError("标签名称不能为空。");
     return;
   }
   savingId.value = id;
@@ -98,10 +99,10 @@ async function saveRow(id: string) {
         sort_order: d.sort_order,
       },
     });
-    message.value = "已保存。";
+    toastSuccess("已保存。");
     await load();
   } catch (err: unknown) {
-    error.value = readApiError(err, "保存失败。");
+    toastError(readApiError(err, "保存失败。"));
   } finally {
     savingId.value = null;
   }
@@ -117,11 +118,11 @@ async function removeRow(id: string) {
     await httpClient.request(`/admin/file-tags/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
-    message.value = "已删除。";
+    toastSuccess("已删除。");
     delete rowDraft[id];
     await load();
   } catch (err: unknown) {
-    error.value = readApiError(err, "删除失败。");
+    toastError(readApiError(err, "删除失败。"));
   }
 }
 </script>
@@ -138,10 +139,7 @@ async function removeRow(id: string) {
 
     <template v-else>
       <!-- 操作结果反馈消息 -->
-      <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ message }}</p>
-      <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
-
-      <!-- 新建标签表单卡片 -->
+<!-- 新建标签表单卡片 -->
       <SurfaceCard class="space-y-4 p-5">
         <h2 class="text-sm font-semibold text-slate-900">新建标签</h2>
         <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">

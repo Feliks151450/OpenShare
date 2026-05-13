@@ -6,6 +6,7 @@ import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
 interface PendingSubmissionItem {
@@ -73,7 +74,7 @@ async function loadSubmissions() {
     const response = await httpClient.get<{ items: PendingSubmissionItem[] }>("/admin/submissions/pending");
     submissions.value = response.items ?? [];
   } catch (err: unknown) {
-    submissionsError.value = readApiError(err, "加载上传审核列表失败。");
+    toastError(readApiError(err, "加载上传审核列表失败。"));
   } finally {
     submissionsLoaded.value = true;
     submissionsLoading.value = false;
@@ -85,11 +86,11 @@ async function approveSubmission(item: PendingSubmissionItem) {
   submissionActionError.value = "";
   try {
     await httpClient.post(`/admin/submissions/${item.submission_id}/approve`);
-    submissionActionMessage.value = `《${item.name}》已审核通过。`;
+    toastSuccess(`《${item.name}》已审核通过。`);
     await loadSubmissions();
     notifyPendingAuditChanged();
   } catch (err: unknown) {
-    submissionActionError.value = readApiError(err, "审核通过失败。");
+    toastError(readApiError(err, "审核通过失败。"));
   }
 }
 
@@ -109,7 +110,7 @@ async function rejectSubmission() {
     return;
   }
   if (!submissionReviewReason.value.trim()) {
-    submissionActionError.value = "请输入驳回原因。";
+    toastError("请输入驳回原因。");
     return;
   }
   submissionActionMessage.value = "";
@@ -119,12 +120,12 @@ async function rejectSubmission() {
     await httpClient.post(`/admin/submissions/${submissionRejectTarget.value.submission_id}/reject`, {
       review_reason: submissionReviewReason.value.trim(),
     });
-    submissionActionMessage.value = `《${submissionRejectTarget.value.name}》已驳回。`;
+    toastSuccess(`《${submissionRejectTarget.value.name}》已驳回。`);
     await loadSubmissions();
     notifyPendingAuditChanged();
     closeRejectSubmissionDialog();
   } catch (err: unknown) {
-    submissionActionError.value = readApiError(err, "驳回失败。");
+    toastError(readApiError(err, "驳回失败。"));
   } finally {
     submissionRejectSubmitting.value = false;
   }
@@ -137,7 +138,7 @@ async function loadFeedback() {
     const response = await httpClient.get<{ items: FeedbackItem[] }>("/admin/feedback");
     feedbackItems.value = response.items ?? [];
   } catch (err: unknown) {
-    feedbackError.value = readApiError(err, "加载反馈列表失败。");
+    toastError(readApiError(err, "加载反馈列表失败。"));
   } finally {
     feedbackLoaded.value = true;
     feedbackLoading.value = false;
@@ -165,7 +166,7 @@ function closeFeedbackReviewDialog() {
 async function submitFeedbackReview() {
   if (!feedbackReviewTarget.value) return;
   if (feedbackReviewMode.value === "reject" && !feedbackReviewReason.value.trim()) {
-    feedbackActionError.value = "请输入驳回说明。";
+    toastError("请输入驳回说明。");
     return;
   }
 
@@ -177,12 +178,12 @@ async function submitFeedbackReview() {
       `/admin/feedback/${feedbackReviewTarget.value.id}/${feedbackReviewMode.value}`,
       { review_reason: feedbackReviewReason.value.trim() },
     );
-    feedbackActionMessage.value = feedbackReviewMode.value === "approve" ? "反馈已处理。" : "反馈已驳回。";
+    toastSuccess(feedbackReviewMode.value === "approve" ? "反馈已处理。" : "反馈已驳回。");
     await loadFeedback();
     notifyPendingAuditChanged();
     closeFeedbackReviewDialog();
   } catch (err: unknown) {
-    feedbackActionError.value = readApiError(err, "操作失败，请重试。");
+    toastError(readApiError(err, "操作失败，请重试。"));
   } finally {
     feedbackReviewSubmitting.value = false;
   }
@@ -225,11 +226,7 @@ function notifyPendingAuditChanged() {
         </div>
 
         <!-- 操作反馈消息 -->
-        <p v-if="submissionActionMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ submissionActionMessage }}</p>
-        <p v-if="submissionActionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ submissionActionError }}</p>
-        <p v-if="submissionsError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ submissionsError }}</p>
-
-        <div v-if="!sessionStore.hasPermission('submission_moderation')" class="text-sm text-slate-500">当前账号没有上传审核权限。</div>
+<div v-if="!sessionStore.hasPermission('submission_moderation')" class="text-sm text-slate-500">当前账号没有上传审核权限。</div>
         <div v-else-if="!submissionsLoaded && submissionsLoading" class="text-sm text-slate-500">加载中…</div>
         <div v-else class="space-y-4">
           <!-- 单条待审核项：展示文件名、类型、大小、回执码、描述，以及通过/驳回按钮 -->
@@ -263,12 +260,7 @@ function notifyPendingAuditChanged() {
           </div>
           <button v-if="sessionStore.hasPermission('resource_moderation')" class="btn-secondary" @click="loadFeedback">刷新</button>
         </div>
-
-        <p v-if="feedbackActionMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ feedbackActionMessage }}</p>
-        <p v-if="feedbackActionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ feedbackActionError }}</p>
-        <p v-if="feedbackError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ feedbackError }}</p>
-
-        <div v-if="!sessionStore.hasPermission('resource_moderation')" class="text-sm text-slate-500">当前账号没有资料管理权限。</div>
+<div v-if="!sessionStore.hasPermission('resource_moderation')" class="text-sm text-slate-500">当前账号没有资料管理权限。</div>
         <div v-else-if="!feedbackLoaded && feedbackLoading" class="text-sm text-slate-500">加载中…</div>
         <div v-else class="space-y-4">
           <!-- 单条反馈项：展示目标类型、名称、时间、回执码、IP、描述，以及已处理/驳回操作 -->

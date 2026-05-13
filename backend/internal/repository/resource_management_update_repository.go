@@ -33,6 +33,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	playbackFallbackURL string,
 	proxySourceURL string,
 	coverURL string,
+	customPath string,
 	applyAllowDownload bool,
 	allowDownload *bool,
 	operatorID string,
@@ -50,6 +51,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"playback_fallback_url": playbackFallbackURL,
 		"proxy_source_url":      proxySourceURL,
 			"cover_url":             coverURL,
+			"custom_path":           customPath,
 			"updated_at":            now,
 		}
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
@@ -73,6 +75,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	remark string,
 	coverURL string,
 	directLinkPrefix string,
+	customPath string,
 	applyAllowDownload bool,
 	allowDownload *bool,
 	operatorID string,
@@ -87,6 +90,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 			"remark":             remark,
 			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
+			"custom_path":        customPath,
 			"updated_at":         now,
 		}
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
@@ -141,6 +145,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	remark string,
 	coverURL string,
 	directLinkPrefix string,
+	customPath string,
 	applyAllowDownload bool,
 	allowDownload *bool,
 	folderSourcePaths map[string]string,
@@ -156,6 +161,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 			"remark":             remark,
 			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
+			"custom_path":        customPath,
 			"updated_at":         now,
 		}
 		appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)

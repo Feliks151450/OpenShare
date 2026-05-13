@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import SurfaceCard from "../ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { toastError, toastSuccess } from "../../lib/toast";
 
 interface SystemPolicy {
   upload: {
@@ -95,7 +96,7 @@ async function loadPolicy() {
     uploadSnapshot.value = serializeUploadState();
     downloadSnapshot.value = serializeDownloadState();
   } catch {
-    error.value = "加载系统设置失败。";
+    toastError("加载系统设置失败。");
   } finally {
     loaded.value = true;
     loading.value = false;
@@ -116,9 +117,9 @@ async function saveUploadPolicy() {
     });
     uploadSnapshot.value = serializeUploadState();
     downloadSnapshot.value = serializeDownloadState();
-    message.value = "系统策略已更新。";
+    toastSuccess("系统策略已更新。");
   } catch (err: unknown) {
-    error.value = readApiError(err, "更新系统策略失败。");
+    toastError(readApiError(err, "更新系统策略失败。"));
   } finally {
     uploadSaving.value = false;
   }
@@ -277,7 +278,7 @@ async function loadDirectories(path: string, options?: { silent?: boolean }) {
     }
   } catch (err: unknown) {
     if (!options?.silent) {
-      importError.value = readApiError(err, "加载目录浏览器失败。");
+      toastError(readApiError(err, "加载目录浏览器失败。"));
     }
   } finally {
     importLoading.value = false;
@@ -298,7 +299,7 @@ async function loadManagedFolders() {
     }));
   } catch (err: unknown) {
     managedFolders.value = [];
-    managedFoldersError.value = readApiError(err, "加载已托管目录失败。");
+    toastError(readApiError(err, "加载已托管目录失败。"));
   } finally {
     managedFoldersLoading.value = false;
   }
@@ -321,7 +322,7 @@ async function exportGlobalData() {
     const date = new Date().toISOString().slice(0, 10);
     downloadJsonBlob(data, `openshare-global-${date}.json`);
   } catch (err: unknown) {
-    rescanError.value = readApiError(err, "导出全局数据失败。");
+    toastError(readApiError(err, "导出全局数据失败。"));
   } finally {
     exportingGlobal.value = false;
   }
@@ -333,7 +334,7 @@ async function exportDirectoryData(folderId: string, folderName: string) {
     const data = await httpClient.get(`/admin/export/directory/${folderId}`);
     downloadJsonBlob(data, `${folderName}.json`);
   } catch (err: unknown) {
-    rescanError.value = readApiError(err, `导出 ${folderName} 失败。`);
+    toastError(readApiError(err, `导出 ${folderName} 失败。`));
   } finally {
     exportingFolderId.value = "";
   }
@@ -349,7 +350,7 @@ async function saveFolderCdnUrl(folderId: string, cdnUrl: string) {
       body: { cdn_url: cdnUrl.trim() },
     });
   } catch (err: unknown) {
-    rescanError.value = readApiError(err, "更新 CDN 地址失败。");
+    toastError(readApiError(err, "更新 CDN 地址失败。"));
   } finally {
     savingCdnUrlFolderId.value = "";
   }
@@ -409,11 +410,11 @@ function withTrailingSlash(value: string) {
 
 async function importDirectory() {
   if (!importPath.value.trim()) {
-    importError.value = "请先选择服务器目录。";
+    toastError("请先选择服务器目录。");
     return;
   }
   if (importPathConflict.value) {
-    importError.value = importPathConflict.value;
+    toastError(importPathConflict.value);
     return;
   }
   importLoading.value = true;
@@ -426,12 +427,12 @@ async function importDirectory() {
     }>("/admin/imports/local", {
       root_path: importPath.value.trim(),
     });
-    importMessage.value = `导入完成：${response.imported_folders} 个目录，${response.imported_files} 个文件。`;
+    toastSuccess(`导入完成：${response.imported_folders} 个目录，${response.imported_files} 个文件。`);
     confirmedImportPath.value = "";
     importPath.value = "";
     await loadManagedFolders();
   } catch (err: unknown) {
-    importError.value = readApiError(err, "导入目录失败。");
+    toastError(readApiError(err, "导入目录失败。"));
   } finally {
     importLoading.value = false;
   }
@@ -441,7 +442,7 @@ async function importDirectory() {
 async function createVirtualManagedRoot() {
   const name = virtualRootName.value.trim();
   if (!name) {
-    virtualRootError.value = "请输入目录名称。";
+    toastError("请输入目录名称。");
     return;
   }
   virtualRootCreating.value = true;
@@ -451,7 +452,7 @@ async function createVirtualManagedRoot() {
     virtualRootName.value = "";
     await loadManagedFolders();
   } catch (err: unknown) {
-    virtualRootError.value = readApiError(err, "创建虚拟托管目录失败。");
+    toastError(readApiError(err, "创建虚拟托管目录失败。"));
   } finally {
     virtualRootCreating.value = false;
   }
@@ -467,7 +468,7 @@ async function patchManagedRootCatalogVisibility(folderID: string, hide: boolean
     });
     await loadManagedFolders();
   } catch (err: unknown) {
-    managedFoldersError.value = readApiError(err, "更新访客首页可见性失败。");
+    toastError(readApiError(err, "更新访客首页可见性失败。"));
   } finally {
     catalogVisibilitySaving.value = "";
   }
@@ -486,13 +487,13 @@ async function rescanManagedFolder(folderID: string) {
       deleted_folders: number;
       deleted_files: number;
     }>(`/admin/imports/local/${encodeURIComponent(folderID)}/rescan`);
-    rescanMessage.value =
+    toastSuccess(
       `重新扫描完成：新增目录 ${response.added_folders} 个，新增文件 ${response.added_files} 个，` +
       `更新目录 ${response.updated_folders} 个，更新文件 ${response.updated_files} 个，` +
-      `删除目录 ${response.deleted_folders} 个，删除文件 ${response.deleted_files} 个。`;
+      `删除目录 ${response.deleted_folders} 个，删除文件 ${response.deleted_files} 个。`);
     await loadManagedFolders();
   } catch (err: unknown) {
-    rescanError.value = readApiError(err, "重新扫描托管目录失败。");
+    toastError(readApiError(err, "重新扫描托管目录失败。"));
   } finally {
     rescanningFolderID.value = "";
   }
@@ -512,7 +513,7 @@ function cancelUnmanageManagedFolder() {
 
 async function confirmUnmanageManagedFolder(folderID: string) {
   if (!unmanagePassword.value.trim()) {
-    unmanageError.value = "请输入超级管理员密码。";
+    toastError("请输入超级管理员密码。");
     return;
   }
 
@@ -523,12 +524,12 @@ async function confirmUnmanageManagedFolder(folderID: string) {
       method: "DELETE",
       body: { password: unmanagePassword.value },
     });
-    unmanageMessage.value = "已取消托管，并清理站内关联数据。";
+    toastSuccess("已取消托管，并清理站内关联数据。");
     unmanagingFolderID.value = "";
     unmanagePassword.value = "";
     await loadManagedFolders();
   } catch (err: unknown) {
-    unmanageError.value = readApiError(err, "取消托管目录失败。");
+    toastError(readApiError(err, "取消托管目录失败。"));
   }
 }
 
@@ -660,11 +661,8 @@ function isManagedRootClientChild(path: string, root: string) {
             </div>
           </div>
         </div>
-        <p v-if="rescanMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ rescanMessage }}</p>
-        <p v-if="rescanError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ rescanError }}</p>
-        <p v-if="unmanageMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ unmanageMessage }}</p>
-        <p v-if="unmanageError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ unmanageError }}</p>
-      </SurfaceCard>
+
+</SurfaceCard>
 
       <div class="grid gap-6 xl:grid-cols-2">
       <form class="panel space-y-6 p-6" @submit.prevent="saveUploadPolicy">
@@ -769,20 +767,13 @@ function isManagedRootClientChild(path: string, root: string) {
             <input v-model="virtualRootName" type="text" class="field" placeholder="输入虚拟托管根目录名称" @keyup.enter="createVirtualManagedRoot" />
           </label>
         </div>
-        <p v-if="virtualRootError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ virtualRootError }}</p>
-        <button type="button" class="btn-primary w-full" :disabled="virtualRootCreating || !virtualRootName.trim()" @click="createVirtualManagedRoot">
+<button type="button" class="btn-primary w-full" :disabled="virtualRootCreating || !virtualRootName.trim()" @click="createVirtualManagedRoot">
           {{ virtualRootCreating ? "创建中…" : "创建虚拟托管目录" }}
         </button>
       </SurfaceCard>
       </div>
     </div>
-
-    <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
-    <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
-    <p v-if="importMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ importMessage }}</p>
-    <p v-if="importError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ importError }}</p>
-
-    <Teleport to="body">
+<Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="directoryPickerOpen" class="fixed inset-0 z-[120] overflow-hidden bg-slate-950/40 backdrop-blur-sm">
       <div class="flex h-full items-start justify-center px-4 py-6">

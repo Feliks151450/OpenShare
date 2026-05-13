@@ -33,13 +33,15 @@ export type ConsoleNavOpts = {
 };
 
 export type OpenShareConsoleNavSpa = {
-  /** 当前路由摘要 */
+  /** 当前路由摘要。自定义路径路由（如 /doc）下额外包含 resolvedFolderId 字段。 */
   getRoute(): {
     name: string;
     path: string;
     fullPath: string;
     params: Record<string, string>;
     query: Record<string, string>;
+    /** 自定义路径路由下解析到的文件夹 ID（仅 public-custom-folder 路由有效） */
+    resolvedFolderId?: string;
   };
   /** 跳转首页：`folder` > `root`，二者均不传则回到无前缀首页 */
   goHome(opts?: { folder?: string; root?: boolean } & ConsoleNavOpts): Promise<void>;
@@ -55,6 +57,8 @@ export type OpenShareConsoleNavSpa = {
   leaveFileTowardFolder(opts?: ConsoleNavOpts): Promise<boolean>;
   /** `GET /api/public/files/:id`：名称、体积、上架时间、`effectiveDownloadHref`（与站内直链优先级一致）等 */
   getFileInfo(fileID: string): Promise<OpenSharePublicFileInfo>;
+  /** 根据自定义路径解析文件夹信息，未找到返回 null */
+  resolveCustomPath(customPath: string): Promise<{ folder_id: string; name: string } | null>;
 };
 
 export type OpenShareConsoleHomeSpa = {
@@ -99,13 +103,18 @@ export function mountOpenShareConsole(router: Router): void {
       Object.entries(r.params).forEach(([k, v]) => {
         pp[k] = Array.isArray(v) ? String(v[0] ?? "") : String(v ?? "");
       });
-      return {
+      const result: ReturnType<OpenShareConsoleNavSpa["getRoute"]> = {
         name: String(r.name ?? ""),
         path: r.path,
         fullPath: r.fullPath,
         params: pp,
         query: qp,
       };
+      // 自定义路径路由时，从 meta 读取解析后的文件夹 ID
+      if (r.name === "public-custom-folder" && r.meta?.resolvedFolderId) {
+        result.resolvedFolderId = String(r.meta.resolvedFolderId);
+      }
+      return result;
     },
     async goHome(opts = {}) {
       const replace = Boolean(opts.replace);
@@ -173,6 +182,18 @@ export function mountOpenShareConsole(router: Router): void {
       if (folderID) await navigate(router, { name: "public-home", query: { folder: folderID } }, { replace });
       else await navigate(router, { name: "public-home" }, { replace });
       return true;
+    },
+    async resolveCustomPath(customPath) {
+      const trimmed = String(customPath ?? "").trim();
+      if (!trimmed) return null;
+      try {
+        const resp = await httpClient.get<{ folder_id: string; name: string }>(
+          `/public/resolve-custom-path?path=${encodeURIComponent(trimmed)}`,
+        );
+        return resp;
+      } catch {
+        return null;
+      }
     },
   };
 

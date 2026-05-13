@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,7 +15,37 @@ import (
 var (
 	ErrInvalidPublicFileQuery = errors.New("invalid public file query")
 	ErrFolderNotFound         = errors.New("folder not found")
+	ErrCustomPathInvalid      = errors.New("custom path is invalid")
+	ErrCustomPathConflict     = errors.New("custom path is already in use")
 )
+
+// customPathPattern 自定义路径必须以英文字母开头，后续可包含字母、数字、下划线、连字符、斜杠。
+var customPathPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*(/[a-zA-Z][a-zA-Z0-9_-]*)*$`)
+
+// reservedPaths 与现有路由冲突的路径前缀。
+var reservedPaths = []string{"upload", "admin", "files", "api", "public", "healthz"}
+
+// ValidateCustomPath 校验 custom_path 格式并检查是否与保留路由冲突。
+func ValidateCustomPath(customPath string) error {
+	customPath = strings.TrimSpace(customPath)
+	if customPath == "" {
+		return nil // 空值表示未设置，合法
+	}
+	if !customPathPattern.MatchString(customPath) {
+		return ErrCustomPathInvalid
+	}
+	// 检查首段是否与保留路由冲突
+	firstSegment := customPath
+	if idx := strings.Index(customPath, "/"); idx != -1 {
+		firstSegment = customPath[:idx]
+	}
+	for _, reserved := range reservedPaths {
+		if firstSegment == reserved {
+			return ErrCustomPathInvalid
+		}
+	}
+	return nil
+}
 
 const (
 	defaultPublicFilePage     = 1
@@ -103,6 +134,8 @@ type PublicFolderDetail struct {
 	IsVirtual bool `json:"is_virtual"`
 	// HidePublicCatalog 仅托管根目录返回：访客首页根列表是否隐藏该托管树。
 	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
+	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。
+	CustomPath string `json:"custom_path"`
 }
 
 func NewPublicCatalogService(
@@ -292,12 +325,63 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		DownloadAllowed:  dlAllowed,
 		DownloadPolicy:   DownloadPolicyString(current.AllowDownload),
 		IsVirtual:        current.IsVirtual,
+		CustomPath:       strings.TrimSpace(current.CustomPath),
 	}
 	if current.ParentID == nil {
 		h := current.HidePublicCatalog
 		detail.HidePublicCatalog = &h
 	}
 	return &detail, nil
+}
+
+// ResolveCustomPath 根据自定义路径解析到文件夹。未找到时返回 nil, nil。
+func (s *PublicCatalogService) ResolveCustomPath(ctx context.Context, customPath string) (*model.Folder, error) {
+	customPath = strings.TrimSpace(customPath)
+	if customPath == "" {
+		return nil, nil
+	}
+	return s.repository.FindPublicFolderByCustomPath(ctx, customPath)
+}
+
+// CustomPathResolveResult 自定义路径解析结果，含类型和 ID。
+type CustomPathResolveResult struct {
+	Type     string `json:"type"` // "folder" 或 "file"
+	FolderID string `json:"folder_id,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	Name     string `json:"name"`
+}
+
+// ResolveCustomPathFull 同时查找文件夹和文件的自定义路径，返回完整解析结果。
+func (s *PublicCatalogService) ResolveCustomPathFull(ctx context.Context, customPath string) (*CustomPathResolveResult, error) {
+	customPath = strings.TrimSpace(customPath)
+	if customPath == "" {
+		return nil, nil
+	}
+	// 先查文件夹
+	folder, err := s.repository.FindPublicFolderByCustomPath(ctx, customPath)
+	if err != nil {
+		return nil, err
+	}
+	if folder != nil {
+		return &CustomPathResolveResult{
+			Type:     "folder",
+			FolderID: folder.ID,
+			Name:     folder.Name,
+		}, nil
+	}
+	// 再查文件
+	file, err := s.repository.FindPublicFileByCustomPath(ctx, customPath)
+	if err != nil {
+		return nil, err
+	}
+	if file != nil {
+		return &CustomPathResolveResult{
+			Type:   "file",
+			FileID: file.ID,
+			Name:   file.Name,
+		}, nil
+	}
+	return nil, nil
 }
 
 type normalizedPublicFolderFileListInput struct {

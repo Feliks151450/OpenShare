@@ -113,6 +113,32 @@ func (h *PublicCatalogHandler) ListPublicFolders(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, resp)
 }
 
+// ResolveCustomPath 根据自定义路径解析到文件夹或文件信息。
+func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
+	path := strings.TrimSpace(ctx.Query("path"))
+	if path == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+
+	result, err := h.service.ResolveCustomPathFull(ctx.Request.Context(), path)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve custom path"})
+		return
+	}
+	if result == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "custom path not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"type":      result.Type,
+		"folder_id": result.FolderID,
+		"file_id":   result.FileID,
+		"name":      result.Name,
+	})
+}
+
 func (h *PublicCatalogHandler) GetPublicFolderDetail(ctx *gin.Context) {
 	detail, err := h.service.GetPublicFolderDetail(ctx.Request.Context(), ctx.Param("folderID"))
 	if err != nil {

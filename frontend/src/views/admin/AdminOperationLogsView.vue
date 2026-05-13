@@ -6,6 +6,7 @@ import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { toastError } from "../../lib/toast";
 
 interface OperationLogItem {
   id: string;
@@ -46,7 +47,7 @@ async function loadItems() {
     items.value = response.items ?? [];
     total.value = response.total ?? 0;
   } catch (err: unknown) {
-    error.value = readApiError(err, "加载审计日志失败。");
+    toastError(readApiError(err, "加载审计日志失败。"));
   } finally {
     loaded.value = true;
     loading.value = false;
@@ -237,9 +238,7 @@ function detailSummary(item: OperationLogItem) {
       eyebrow="LOGS"
       title="操作记录"
     />
-
-    <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
-    <p v-else-if="!loaded && loading" class="text-sm text-slate-500">加载中…</p>
+<p v-if="!loaded && loading" class="text-sm text-slate-500">加载中…</p>
 
     <section class="space-y-1">
       <p v-if="loading && loaded" class="text-sm text-slate-500">正在刷新日志…</p>

@@ -87,6 +87,8 @@ type Folder struct {
 	IsVirtual bool `gorm:"column:is_virtual;not null;default:false"`
 	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。
 	HidePublicCatalog bool `gorm:"column:hide_public_catalog;not null;default:false"`
+	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。空字符串表示未设置。
+	CustomPath string `gorm:"column:custom_path;type:text;uniqueIndex:ux_folders_custom_path"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载
 	AllowDownload *bool     `gorm:"column:allow_download"`
 	FileCount     int64     `gorm:"column:file_count;type:integer;not null;default:0"`
@@ -117,6 +119,8 @@ type File struct {
 	// ProxySourceURL 服务端代理拉取的目标地址（仅 proxy_download=true 时有效），客户端不直连此地址。
 	ProxySourceURL string `gorm:"column:proxy_source_url;type:text;not null;default:''"`
 	CoverURL        string `gorm:"column:cover_url;type:text;not null;default:''"`
+	// CustomPath 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件。空字符串表示未设置。
+	CustomPath string `gorm:"column:custom_path;type:text;uniqueIndex:ux_files_custom_path"`
 	// AllowDownload nil = 继承所在文件夹链；均未设置则默认允许下载
 	AllowDownload *bool     `gorm:"column:allow_download"`
 	Size          int64     `gorm:"column:size;type:integer;not null;default:0"`

@@ -19,6 +19,7 @@ import {
   Folder,
   Home,
   LayoutGrid,
+  Link2,
   List,
   NotebookText,
   PanelRightOpen,
@@ -35,6 +36,8 @@ import { useNavActions } from "../../composables/useNavActions";
 import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { copyPlainTextToClipboard } from "../../lib/clipboard";
+import { toastError, toastSuccess, toastWarning } from "../../lib/toast";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import {
   fileCoverImageHrefFromFields,
@@ -204,10 +207,7 @@ function clearTagFilter() {
 const sortMenuOpen = ref(false);
 const viewMenuOpen = ref(false);
 const toolbarDropdownsRef = ref<HTMLElement | null>(null);
-const transientWarning = ref("");
-const transientWarningTimer = ref<number | null>(null);
 const downloadTimestamps = ref<number[]>([]);
-const transientWarningLeaving = ref(false);
 const uploadModalOpen = ref(false);
 const uploadSuccessModalOpen = ref(false);
 const uploadSubmitting = ref(false);
@@ -267,6 +267,8 @@ const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
 const folderCoverUrlDraft = ref("");
 const folderHidePublicCatalogDraft = ref(false);
+/* 自定义路径（仅管理员可编辑）：在文件夹编辑弹窗中设置，如 "doc" 对应 /doc 访问该文件夹 */
+const folderCustomPathDraft = ref("");
 
 const createFolderModalOpen = ref(false);
 const createFolderNameDraft = ref("");
@@ -310,7 +312,7 @@ function closeCreateVirtualFolderModal() {
 async function submitCreateVirtualFolder() {
   const name = virtualFolderNameDraft.value.trim();
   if (!name) {
-    virtualFolderError.value = "请输入文件夹名称。";
+    toastError("请输入文件夹名称。");
     return;
   }
   if (!currentFolderDetail.value) return;
@@ -328,7 +330,7 @@ async function submitCreateVirtualFolder() {
     invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
     await loadDirectory({ force: true });
   } catch (err: unknown) {
-    virtualFolderError.value = readApiError(err, "创建虚拟目录失败。");
+    toastError(readApiError(err, "创建虚拟目录失败。"));
   } finally {
     virtualFolderSaving.value = false;
   }
@@ -408,16 +410,16 @@ async function submitAddVirtualFile() {
   const proxySource = virtualFileProxySourceDraft.value.trim();
   const playbackUrl = virtualFileUrlDraft.value.trim();
   if (!name) {
-    virtualFileError.value = "请输入文件名称。";
+    toastError("请输入文件名称。");
     return;
   }
   // 代理模式需要代理源地址，否则需要前台直链
   if (proxyDownload && !proxySource) {
-    virtualFileError.value = "请输入服务端代理地址。";
+    toastError("请输入服务端代理地址。");
     return;
   }
   if (!proxyDownload && !playbackUrl) {
-    virtualFileError.value = "请输入前台 CDN 直链地址。";
+    toastError("请输入前台 CDN 直链地址。");
     return;
   }
   if (!currentFolderDetail.value) return;
@@ -439,7 +441,7 @@ async function submitAddVirtualFile() {
     invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
     await loadDirectory({ force: true });
   } catch (err: unknown) {
-    virtualFileError.value = readApiError(err, "添加虚拟文件失败。");
+    toastError(readApiError(err, "添加虚拟文件失败。"));
   } finally {
     virtualFileSaving.value = false;
   }
@@ -448,7 +450,7 @@ async function submitAddVirtualFile() {
 async function submitCreateFolder() {
   const name = createFolderNameDraft.value.trim();
   if (!name) {
-    createFolderError.value = "请输入文件夹名称。";
+    toastError("请输入文件夹名称。");
     return;
   }
   if (!currentFolderDetail.value) return;
@@ -466,7 +468,7 @@ async function submitCreateFolder() {
     invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
     await loadDirectory({ force: true });
   } catch (err: unknown) {
-    createFolderError.value = readApiError(err, "创建文件夹失败。");
+    toastError(readApiError(err, "创建文件夹失败。"));
   } finally {
     createFolderSaving.value = false;
   }
@@ -491,7 +493,13 @@ function folderIdFromRouteQuery(raw: unknown): string {
   }
   return "";
 }
-const currentFolderID = computed(() => folderIdFromRouteQuery(route.query.folder));
+/* 通过自定义路径（如 /doc）解析到的文件夹 UUID，空字符串表示未通过自定义路径访问 */
+const customPathResolvedFolderID = ref("");
+const currentFolderID = computed(() => {
+  const fromQuery = folderIdFromRouteQuery(route.query.folder);
+  if (fromQuery) return fromQuery;
+  return customPathResolvedFolderID.value;
+});
 const canUploadToCurrentFolder = computed(() => currentFolderID.value.length > 0 && !isCurrentFolderVirtual.value);
 /** 当前目录是否为虚拟目录（无物理磁盘路径，文件通过 CDN 直链提供） */
 const isCurrentFolderVirtual = computed(() => currentFolderDetail.value?.is_virtual === true);
@@ -769,6 +777,7 @@ const folderEditorMetaDirty = computed(() => {
     folderRemarkDraft.value.trim() !== (d.remark ?? "").trim() ||
     folderCoverUrlDraft.value.trim() !== (d.cover_url ?? "").trim() ||
     folderDirectPrefixDraft.value.trim() !== (d.direct_link_prefix ?? "").trim() ||
+    folderCustomPathDraft.value.trim() !== (d.custom_path ?? "").trim() ||
     folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit")
   );
 });
@@ -831,16 +840,16 @@ async function rescanCurrentManagedFolder() {
       deleted_folders: number;
       deleted_files: number;
     }>(`/admin/imports/local/${encodeURIComponent(d.id)}/rescan`);
-    actionMessage.value =
+    toastSuccess(
       `重新扫描完成：新增目录 ${response.added_folders} 个、文件 ${response.added_files} 个，` +
       `更新目录 ${response.updated_folders} 个、文件 ${response.updated_files} 个，` +
-      `移除目录 ${response.deleted_folders} 个、文件 ${response.deleted_files} 个。`;
+      `移除目录 ${response.deleted_folders} 个、文件 ${response.deleted_files} 个。`);
     invalidateDirectoryViewCacheAll();
     await loadDirectory({ force: true });
     void loadHotDownloads();
     void loadLatestTitles();
   } catch (err: unknown) {
-    actionError.value = readApiError(err, "重新扫描失败。");
+    toastError(readApiError(err, "重新扫描失败。"));
   } finally {
     rescanningManagedFolderID.value = "";
   }
@@ -857,11 +866,11 @@ function performDownloadResource(row: DirectoryRow) {
   actionMessage.value = "";
   actionError.value = "";
   if (!row.downloadAllowed) {
-    showTransientWarning("该资源不允许下载。");
+    toastWarning("该资源不允许下载。");
     return;
   }
   if (!allowDownloadRequest()) {
-    showTransientWarning("下载请求过于频繁，请稍后再试。");
+    toastWarning("下载请求过于频繁，请稍后再试。");
     return;
   }
 
@@ -881,7 +890,7 @@ function performDownloadResource(row: DirectoryRow) {
 
 function downloadResource(row: DirectoryRow) {
   if (!row.downloadAllowed) {
-    showTransientWarning("该资源不允许下载。");
+    toastWarning("该资源不允许下载。");
     return;
   }
   if (rowNeedsDownloadConfirm(row)) {
@@ -974,7 +983,7 @@ async function downloadSelectedResources() {
     return;
   }
   if (!selectedRowsDownloadAllowed.value) {
-    showTransientWarning("所选项目中包含不允许下载的项。");
+    toastWarning("所选项目中包含不允许下载的项。");
     return;
   }
 
@@ -992,14 +1001,14 @@ async function performBatchDownload() {
     return;
   }
   if (!selectedRowsDownloadAllowed.value) {
-    showTransientWarning("所选项目中包含不允许下载的项。");
+    toastWarning("所选项目中包含不允许下载的项。");
     return;
   }
 
   actionMessage.value = "";
   actionError.value = "";
   if (!allowDownloadRequest()) {
-    showTransientWarning("下载请求过于频繁，请稍后再试。");
+    toastWarning("下载请求过于频繁，请稍后再试。");
     return;
   }
 
@@ -1042,7 +1051,7 @@ async function performBatchDownload() {
     clearSelection();
     cardMultiSelectMode.value = false;
   } catch (err: unknown) {
-    actionError.value = readApiError(err, "批量下载失败。");
+    toastError(readApiError(err, "批量下载失败。"));
   } finally {
     batchDownloadSubmitting.value = false;
   }
@@ -1205,9 +1214,6 @@ onBeforeUnmount(() => {
   unregisterHomeConsoleHooks();
   document.removeEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
   folderMarkdownResizeObserver?.disconnect();
-  if (transientWarningTimer.value !== null) {
-    window.clearTimeout(transientWarningTimer.value);
-  }
   markdownCatalogNavigateHydrateGeneration += 1;
   markdownCatalogNavigateConfirmResolve?.(false);
   markdownCatalogNavigateConfirmResolve = null;
@@ -1225,6 +1231,45 @@ watch(currentFolderID, () => {
   clearSearchState();
   void loadDirectory();
 });
+
+// 监听自定义路径参数（如 /doc），通过 API 解析为文件夹或文件 UUID
+watch(
+  () => route.params.customPath as string | undefined,
+  async (customPath) => {
+    const trimmed = (customPath ?? "").trim();
+    if (!trimmed) {
+      customPathResolvedFolderID.value = "";
+      if (route.meta?.resolvedFolderId) {
+        route.meta.resolvedFolderId = undefined;
+      }
+      return;
+    }
+    try {
+      const resp = await httpClient.get<{
+        type: string;
+        folder_id: string;
+        file_id: string;
+        name: string;
+      }>(`/public/resolve-custom-path?path=${encodeURIComponent(trimmed)}`);
+      if (resp.type === "file" && resp.file_id) {
+        // 文件自定义路径 → 跳转到文件详情页
+        customPathResolvedFolderID.value = "";
+        router.replace({ name: "public-file-detail", params: { fileID: resp.file_id } });
+        return;
+      }
+      customPathResolvedFolderID.value = resp.folder_id ?? "";
+      if (resp.folder_id) {
+        route.meta.resolvedFolderId = resp.folder_id;
+      }
+    } catch {
+      customPathResolvedFolderID.value = "";
+      if (route.meta?.resolvedFolderId) {
+        route.meta.resolvedFolderId = undefined;
+      }
+    }
+  },
+  { immediate: true },
+);
 
 watch(fileDetailPanelFileId, (id, _prev, onCleanup) => {
   syncBodyScrollLock();
@@ -1442,6 +1487,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderRemarkDraft.value = (detail.remark ?? "").trim();
     folderCoverUrlDraft.value = (detail.cover_url ?? "").trim();
     folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
+    folderCustomPathDraft.value = (detail.custom_path ?? "").trim();
     folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
     breadcrumbs.value = detail.breadcrumbs ?? [];
   } else {
@@ -1451,6 +1497,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderRemarkDraft.value = "";
     folderCoverUrlDraft.value = "";
     folderDirectPrefixDraft.value = "";
+    folderCustomPathDraft.value = "";
     folderDownloadPolicyDraft.value = "inherit";
     breadcrumbs.value = [];
   }
@@ -1639,9 +1686,9 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       if (err instanceof HttpError && err.status === 404) {
-        error.value = "目录不存在或未公开。";
+        toastError("目录不存在或未公开。");
       } else {
-        error.value = "加载目录失败。";
+        toastError("加载目录失败。");
       }
     }
   } finally {
@@ -1746,7 +1793,7 @@ function downloadCurrentFolder() {
     return;
   }
   if (currentFolderDetail.value.download_allowed === false) {
-    showTransientWarning("该文件夹不允许下载。");
+    toastWarning("该文件夹不允许下载。");
     return;
   }
   downloadResource({
@@ -1810,7 +1857,7 @@ async function confirmDeleteResource() {
     return;
   }
   if (!deleteResourcePassword.value.trim()) {
-    deleteResourceError.value = "请输入当前管理员密码。";
+    toastError("请输入当前管理员密码。");
     return;
   }
 
@@ -1832,18 +1879,18 @@ async function confirmDeleteResource() {
       // 文件删除后刷新当前目录即可
       invalidateDirectoryViewCacheFolder(currentFolderID.value);
       closeDeleteResourceDialog();
-      actionMessage.value = `虚拟文件 ${deletedName} 已从数据库中移除。`;
+      toastSuccess(`虚拟文件 ${deletedName} 已从数据库中移除。`);
       await loadDirectory({ force: true });
     } else {
       const parentID = currentFolderDetail.value?.parent_id ?? "";
       invalidateDirectoryViewCacheAll();
       closeDeleteResourceDialog();
       if (isCurrentFolderVirtual.value) {
-        actionMessage.value = `虚拟目录 ${deletedName} 已从数据库中移除。`;
+        toastSuccess(`虚拟目录 ${deletedName} 已从数据库中移除。`);
       } else {
-        actionMessage.value = movedToTrash
+        toastSuccess(movedToTrash
           ? `文件夹 ${deletedName} 已移至所在磁盘根目录下的 trash 回收目录。`
-          : `文件夹 ${deletedName} 已从磁盘彻底删除。`;
+          : `文件夹 ${deletedName} 已从磁盘彻底删除。`);
       }
       clearSearchState();
       if (parentID) {
@@ -1853,7 +1900,7 @@ async function confirmDeleteResource() {
       }
     }
   } catch (err: unknown) {
-    deleteResourceError.value = readApiError(err, isFile ? "删除文件失败。" : "删除文件夹失败。");
+    toastError(readApiError(err, isFile ? "删除文件失败。" : "删除文件夹失败。"));
   } finally {
     deleteResourceSubmitting.value = false;
   }
@@ -1911,7 +1958,7 @@ async function runSearch(keyword: string) {
     });
   } catch (err: unknown) {
     searchRows.value = [];
-    searchError.value = readApiError(err, "搜索失败。");
+    toastError(readApiError(err, "搜索失败。"));
   } finally {
     searchLoading.value = false;
   }
@@ -1928,7 +1975,7 @@ function clearSearchState() {
 
 function openUpload() {
   if (!canUploadToCurrentFolder.value) {
-    showTransientWarning("请先进入一个目录后再上传。");
+    toastWarning("请先进入一个目录后再上传。");
     return;
   }
   uploadModalOpen.value = true;
@@ -1957,7 +2004,7 @@ function onUploadFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
   uploadForm.value.entries = normalizeFiles(Array.from(target.files ?? []).slice(0, 1));
   if (uploadForm.value.entries.length === 0 && (target.files?.length ?? 0) > 0) {
-    uploadError.value = "已自动忽略 .DS_Store，请重新选择可上传文件。";
+    toastError("已自动忽略 .DS_Store，请重新选择可上传文件。");
   }
 }
 
@@ -1993,10 +2040,10 @@ async function onUploadDrop(event: DragEvent) {
     const entries = await collectDroppedEntries(event);
     uploadForm.value.entries = entries;
     if (entries.length === 0 && (event.dataTransfer?.files.length ?? 0) > 0) {
-      uploadError.value = "检测到的内容仅包含 .DS_Store，已自动忽略。";
+      toastError("检测到的内容仅包含 .DS_Store，已自动忽略。");
     }
   } catch {
-    uploadError.value = "解析拖拽内容失败，请重试。";
+    toastError("解析拖拽内容失败，请重试。");
   } finally {
     uploadCollecting.value = false;
   }
@@ -2004,7 +2051,7 @@ async function onUploadDrop(event: DragEvent) {
 
 async function submitUpload() {
   if (uploadForm.value.entries.length === 0) {
-    uploadError.value = "请选择文件，或直接拖入多文件/文件夹。";
+    toastError("请选择文件，或直接拖入多文件/文件夹。");
     return;
   }
 
@@ -2022,9 +2069,9 @@ async function submitUpload() {
       formData.append("files", entry.file, entry.file.name);
     });
     const response = await httpClient.post<{ receipt_code: string; item_count: number; status: string }>("/public/submissions", formData);
-    uploadMessage.value = response.status === "approved"
+    toastSuccess(response.status === "approved"
       ? `已上传 ${response.item_count} 个文件，请保存回执码 ${response.receipt_code}。`
-      : `已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`;
+      : `已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`);
     window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
     currentReceiptCode.value = response.receipt_code;
     uploadForm.value.description = "";
@@ -2038,11 +2085,11 @@ async function submitUpload() {
     syncBodyScrollLock();
   } catch (err) {
     if (err instanceof HttpError && err.status === 400) {
-      uploadError.value = "上传参数无效。";
+      toastError("上传参数无效。");
     } else if (err instanceof HttpError && err.status === 409) {
-      uploadError.value = "提交上传失败，请检查名称或者联系管理员";
+      toastError("提交上传失败，请检查名称或者联系管理员");
     } else {
-      uploadError.value = "提交上传失败。";
+      toastError("提交上传失败。");
     }
   } finally {
     uploadSubmitting.value = false;
@@ -2089,20 +2136,17 @@ function allowDownloadRequest() {
   return true;
 }
 
-function showTransientWarning(message: string) {
-  transientWarning.value = message;
-  transientWarningLeaving.value = false;
-  if (transientWarningTimer.value !== null) {
-    window.clearTimeout(transientWarningTimer.value);
+/* 复制文件夹的自定义路径链接（如 https://share.linlifei.top/doc） */
+async function copyFolderCustomPathUrl() {
+  const customPath = (currentFolderDetail.value?.custom_path ?? "").trim();
+  if (!customPath) return;
+  const url = `${window.location.origin}/${customPath}`;
+  const ok = await copyPlainTextToClipboard(url);
+  if (ok) {
+    toastSuccess(`已复制自定义路径：/${customPath}`);
+  } else {
+    toastWarning("复制失败，请手动复制地址栏链接。");
   }
-  transientWarningTimer.value = window.setTimeout(() => {
-    transientWarningLeaving.value = true;
-    transientWarningTimer.value = window.setTimeout(() => {
-      transientWarning.value = "";
-      transientWarningLeaving.value = false;
-      transientWarningTimer.value = null;
-    }, 1200);
-  }, 400);
 }
 
 function setViewMode(mode: "cards" | "table") {
@@ -2190,6 +2234,7 @@ function openFolderDescriptionEditor() {
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
+  folderCustomPathDraft.value = (currentFolderDetail.value?.custom_path ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   folderDescriptionError.value = "";
@@ -2206,6 +2251,7 @@ function closeFolderDescriptionEditor() {
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
   folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
+  folderCustomPathDraft.value = (currentFolderDetail.value?.custom_path ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   syncBodyScrollLock();
@@ -2230,6 +2276,7 @@ async function saveFolderDescription() {
           remark: folderRemarkDraft.value.trim(),
           cover_url: folderCoverUrlDraft.value.trim(),
           direct_link_prefix: folderDirectPrefixDraft.value.trim(),
+          custom_path: folderCustomPathDraft.value.trim(),
           download_policy: folderDownloadPolicyDraft.value,
         },
       });
@@ -2251,6 +2298,7 @@ async function saveFolderDescription() {
       remark: folderRemarkDraft.value.trim(),
       cover_url: folderCoverUrlDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
+      custom_path: folderCustomPathDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
       hide_public_catalog: isRoot ? folderHidePublicCatalogDraft.value : d.hide_public_catalog,
     };
@@ -2267,7 +2315,7 @@ async function saveFolderDescription() {
     }
     await loadDirectory({ force: true });
   } catch (err: unknown) {
-    folderDescriptionError.value = readApiError(err, "更新文件夹信息失败。");
+    toastError(readApiError(err, "更新文件夹信息失败。"));
   } finally {
     folderDescriptionSaving.value = false;
   }
@@ -2278,7 +2326,7 @@ async function submitFeedback() {
     return;
   }
   if (!feedbackDescription.value.trim()) {
-    feedbackError.value = "请填写问题说明。";
+    toastError("请填写问题说明。");
     return;
   }
 
@@ -2291,7 +2339,7 @@ async function submitFeedback() {
       folder_id: feedbackTarget.value.type === "folder" ? feedbackTarget.value.id : "",
       description: feedbackDescription.value.trim(),
     });
-    feedbackMessage.value = `反馈已提交，请保存回执码 ${response.receipt_code}。`;
+    toastSuccess(`反馈已提交，请保存回执码 ${response.receipt_code}。`);
     window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
     currentReceiptCode.value = response.receipt_code;
     closeFeedbackModal();
@@ -2299,11 +2347,11 @@ async function submitFeedback() {
     syncBodyScrollLock();
   } catch (err: unknown) {
     if (err instanceof HttpError && err.status === 400) {
-      feedbackError.value = "请填写问题说明。";
+      toastError("请填写问题说明。");
     } else if (err instanceof HttpError && err.status === 404) {
-      feedbackError.value = "目标不存在或已删除。";
+      toastError("目标不存在或已删除。");
     } else {
-      feedbackError.value = "提交反馈失败。";
+      toastError("提交反馈失败。");
     }
   } finally {
     feedbackSubmitting.value = false;
@@ -2452,17 +2500,6 @@ async function syncSessionReceiptCode() {
 </script>
 
 <template>
-  <!-- 瞬时警告浮层（操作失败等错误提示，自动淡出消失） -->
-  <Teleport to="body">
-    <div v-if="transientWarning" class="fixed inset-0 z-[130] flex items-center justify-center px-4">
-      <div
-        class="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700 shadow-lg shadow-rose-100/70"
-        :class="transientWarningLeaving ? 'animate-[warning-fade-out_1.2s_ease_forwards]' : 'animate-[warning-fade-in_0.18s_ease-out_forwards]'"
-      >
-        {{ transientWarning }}
-      </div>
-    </div>
-  </Teleport>
   <!-- 主页/目录浏览页：面包屑导航 + 文件夹信息描述 + 文件卡片/表格/列表视图 + 搜索 + 公告 + 管理员功能入口 -->
   <main class="app-container py-0 px-0 sm:py-4 sm:px-4 lg:py-8 lg:px-8">
     <div class="space-y-6">
@@ -2574,6 +2611,17 @@ async function syncSessionReceiptCode() {
                   >
                     <Flag class="h-4 w-4" />
                   </button>
+                  <!-- 自定义路径复制按钮：仅当该文件夹设置了 custom_path 时显示 -->
+                  <button
+                    v-if="currentFolderDetail.custom_path"
+                    type="button"
+                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-sky-600 hover:shadow-sm hover:shadow-slate-950/[0.08]"
+                    :title="`复制自定义路径：/${currentFolderDetail.custom_path}`"
+                    aria-label="复制自定义路径链接"
+                    @click="copyFolderCustomPathUrl"
+                  >
+                    <Link2 class="h-4 w-4" />
+                  </button>
                   <button
                     v-if="currentFolderDetail.download_allowed !== false && !isCurrentFolderVirtual"
                     type="button"
@@ -2641,12 +2689,8 @@ async function syncSessionReceiptCode() {
               @clear="clearSearchState"
             />
           </div>
-
-          <p v-if="searchError" class="mx-5 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6">
-            {{ searchError }}
-          </p>
-          <div
-            v-else-if="searchKeyword"
+<div
+            v-if="searchKeyword"
             class="mx-5 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 sm:mx-6"
           >
             当前搜索：<span class="font-medium text-slate-900">{{ searchKeyword }}</span>
@@ -2841,9 +2885,7 @@ async function syncSessionReceiptCode() {
           </div>
 
           <p v-if="actionMessage" class="mx-4 mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-6">{{ actionMessage }}</p>
-          <p v-if="actionError" class="mx-4 mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6">{{ actionError }}</p>
-
-          <div v-if="loading" class="px-4 py-8 text-sm text-slate-500 sm:px-6">加载中…</div>
+<div v-if="loading" class="px-4 py-8 text-sm text-slate-500 sm:px-6">加载中…</div>
           <div v-else-if="error" class="px-4 py-8 text-sm text-rose-600 sm:px-6">{{ error }}</div>
           <div v-else-if="sortedRows.length === 0" class="px-4 py-8 text-sm text-slate-500 sm:px-6">
             {{ searchKeyword ? "没有找到匹配结果。" : "当前目录为空。" }}
@@ -3532,10 +3574,7 @@ async function syncSessionReceiptCode() {
             </label>
           </div>
           <input v-model="deleteResourcePassword" type="password" class="field" placeholder="输入当前管理员密码确认删除" />
-          <p v-if="deleteResourceError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {{ deleteResourceError }}
-          </p>
-          <div class="flex justify-end gap-3">
+<div class="flex justify-end gap-3">
             <button type="button" class="btn-secondary" @click="closeDeleteResourceDialog">取消</button>
             <button
               type="button"
@@ -3682,15 +3721,7 @@ async function syncSessionReceiptCode() {
                 <p v-else class="mt-2 text-sm text-slate-400">当前还没有选择任何文件。</p>
               </div>
             </div>
-
-            <p v-if="uploadMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {{ uploadMessage }}
-            </p>
-            <p v-if="uploadError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ uploadError }}
-            </p>
-
-              <div class="flex justify-end gap-3">
+<div class="flex justify-end gap-3">
                 <button type="button" class="btn-secondary" @click="closeUploadModal">取消</button>
                 <button type="submit" class="btn-primary" :disabled="uploadSubmitting || uploadCollecting || uploadForm.entries.length === 0">
                   {{ uploadSubmitting ? "提交中…" : "提交上传" }}
@@ -3763,9 +3794,7 @@ async function syncSessionReceiptCode() {
             </label>
 
             <p v-if="feedbackMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ feedbackMessage }}</p>
-            <p v-if="feedbackError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ feedbackError }}</p>
-
-            <div class="flex justify-end gap-3 pt-1">
+<div class="flex justify-end gap-3 pt-1">
               <button type="button" class="btn-secondary" @click="closeFeedbackModal">取消</button>
               <button type="button" class="btn-primary" :disabled="feedbackSubmitDisabled" @click="submitFeedback">
                 {{ feedbackSubmitting ? "提交中…" : "提交反馈" }}
@@ -3885,6 +3914,21 @@ async function syncSessionReceiptCode() {
               </p>
             </label>
 
+            <!-- 自定义访问路径：设置后可通过 /doc 之类的短链接访问该文件夹 -->
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">自定义访问路径（可选）</span>
+              <input
+                v-model="folderCustomPathDraft"
+                type="text"
+                class="field"
+                placeholder="例如 doc 或 doc/sub，设置后可通过 /doc 直接访问此文件夹"
+                autocomplete="off"
+              />
+              <p class="text-xs leading-5 text-slate-500">
+                必须以英文字母开头，可包含字母、数字、下划线、连字符和多级路径。不能与 upload/admin/files/api 等系统路径冲突。留空则取消自定义路径。
+              </p>
+            </label>
+
             <label class="space-y-2">
               <span class="text-sm font-medium text-slate-700">是否允许下载</span>
               <select v-model="folderDownloadPolicyDraft" class="field">
@@ -3909,11 +3953,7 @@ async function syncSessionReceiptCode() {
                 </span>
               </span>
             </label>
-
-            <p v-if="folderDescriptionError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ folderDescriptionError }}
-            </p>
-            </div>
+</div>
           </div>
         </div>
       </div>
@@ -3944,10 +3984,7 @@ async function syncSessionReceiptCode() {
                 @keyup.enter="submitCreateFolder"
               />
             </label>
-            <p v-if="createFolderError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ createFolderError }}
-            </p>
-          </div>
+</div>
           <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" class="btn-secondary" :disabled="createFolderSaving" @click="closeCreateFolderModal">取消</button>
             <button type="button" class="btn-primary" :disabled="createFolderSaving" @click="submitCreateFolder">
@@ -3983,10 +4020,7 @@ async function syncSessionReceiptCode() {
                 @keyup.enter="submitCreateVirtualFolder"
               />
             </label>
-            <p v-if="virtualFolderError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ virtualFolderError }}
-            </p>
-          </div>
+</div>
           <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" class="btn-secondary" :disabled="virtualFolderSaving" @click="closeCreateVirtualFolderModal">取消</button>
             <button type="button" class="btn-primary" :disabled="virtualFolderSaving" @click="submitCreateVirtualFolder">
@@ -4076,10 +4110,7 @@ async function syncSessionReceiptCode() {
               </button>
               <span v-if="virtualFileDetectResult" class="text-sm" :class="virtualFileDetectResult.startsWith('链接可达') ? 'text-emerald-600' : 'text-rose-600'">{{ virtualFileDetectResult }}</span>
             </div>
-            <p v-if="virtualFileError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {{ virtualFileError }}
-            </p>
-          </div>
+</div>
           <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" class="btn-secondary" :disabled="virtualFileSaving" @click="closeAddVirtualFileModal">取消</button>
             <button type="button" class="btn-primary" :disabled="virtualFileSaving" @click="submitAddVirtualFile">

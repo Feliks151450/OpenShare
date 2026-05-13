@@ -8,6 +8,7 @@ import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { renderSimpleMarkdown } from "../../lib/markdown";
+import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
 type AnnouncementStatus = "draft" | "published" | "hidden";
@@ -86,7 +87,7 @@ async function loadItems() {
     const response = await httpClient.get<{ items: AnnouncementItem[] }>("/admin/announcements");
     items.value = response.items ?? [];
   } catch (err: unknown) {
-    error.value = readApiError(err, "加载公告列表失败。");
+    toastError(readApiError(err, "加载公告列表失败。"));
   } finally {
     loaded.value = true;
     loading.value = false;
@@ -171,15 +172,15 @@ async function saveAnnouncement() {
         method: "PUT",
         body,
       });
-      message.value = "公告已更新。";
+      toastSuccess("公告已更新。");
     } else {
       await httpClient.post("/admin/announcements", body);
-      message.value = "公告已发布。";
+      toastSuccess("公告已发布。");
     }
     closeEditor();
     await loadItems();
   } catch (err: unknown) {
-    error.value = readApiError(err, editingItem.value ? "更新公告失败。" : "创建公告失败。");
+    toastError(readApiError(err, editingItem.value ? "更新公告失败。" : "创建公告失败。"));
   } finally {
     saving.value = false;
   }
@@ -203,11 +204,11 @@ async function confirmDelete() {
   message.value = "";
   try {
     await httpClient.request(`/admin/announcements/${deleteTarget.value.id}`, { method: "DELETE" });
-    message.value = "公告已删除。";
+    toastSuccess("公告已删除。");
     closeDeleteDialog();
     await loadItems();
   } catch (err: unknown) {
-    error.value = readApiError(err, "删除公告失败。");
+    toastError(readApiError(err, "删除公告失败。"));
   } finally {
     deleting.value = false;
   }
@@ -272,10 +273,7 @@ function pinLabel(item: AnnouncementItem) {
       </div>
 
       <!-- 操作反馈消息 -->
-      <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
-      <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
-
-      <div v-if="!canManageAnnouncements" class="text-sm text-slate-500">当前账号没有公告权限。</div>
+<div v-if="!canManageAnnouncements" class="text-sm text-slate-500">当前账号没有公告权限。</div>
       <div v-else-if="loading && !loaded" class="text-sm text-slate-500">加载中…</div>
       <div v-else class="space-y-4">
         <!-- 单条公告卡片：标题 + 状态/置顶标签 + 时间 + Markdown 内容预览（最多4行） + 编辑/删除按钮 -->

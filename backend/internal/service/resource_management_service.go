@@ -48,6 +48,7 @@ type UpdateManagedFileInput struct {
 	PlaybackFallbackURL string
 	ProxySourceURL      string
 	CoverURL            string
+	CustomPath          string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string
 	OperatorID     string
@@ -60,7 +61,8 @@ type UpdateManagedFolderDescriptionInput struct {
 	Remark           string
 	CoverURL         string
 	DirectLinkPrefix string
-	CdnURL         string
+	CdnURL           string
+	CustomPath       string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string
 	OperatorID     string

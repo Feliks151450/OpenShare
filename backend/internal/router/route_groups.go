@@ -27,6 +27,7 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.GET("/folders/:folderID/files", handlers.publicCatalog.ListPublicFolderFiles)
 	public.GET("/folders/:folderID", handlers.publicCatalog.GetPublicFolderDetail)
 	public.GET("/folders/:folderID/download", handlers.publicDownload.DownloadFolder)
+	public.GET("/resolve-custom-path", handlers.publicCatalog.ResolveCustomPath)
 	public.GET("/announcements", handlers.announcement.ListPublic)
 	public.GET("/download-policy", handlers.systemSetting.GetPublicDownloadPolicy)
 	public.GET("/receipt-code", handlers.publicReceipt.Ensure)

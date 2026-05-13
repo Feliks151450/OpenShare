@@ -59,6 +59,21 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 		return ErrInvalidResourceEdit
 	}
 
+	// 校验并处理 custom_path
+	customPath := strings.TrimSpace(input.CustomPath)
+	if err := ValidateCustomPath(customPath); err != nil {
+		return fmt.Errorf("%w: custom_path 必须以英文字母开头，且不能与保留路径冲突", ErrInvalidResourceEdit)
+	}
+
+	// 检查 custom_path 唯一性（同时检查 folders 和 files 表，排除当前文件自身）
+	cpConflict, err := s.repo.CustomPathExists(ctx, customPath, fileID)
+	if err != nil {
+		return fmt.Errorf("check custom path uniqueness: %w", err)
+	}
+	if cpConflict {
+		return fmt.Errorf("%w: custom_path %q 已被使用", ErrManagedFileConflict, customPath)
+	}
+
 	if current.Name != name {
 		fileConflict, err := s.repo.FileNameExists(ctx, current.FolderID, name, current.ID)
 		if err != nil {
@@ -93,7 +108,7 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, customPath, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFileNotFound
 		}

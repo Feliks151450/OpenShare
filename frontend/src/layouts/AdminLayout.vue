@@ -6,6 +6,7 @@ import { LayoutDashboard, Inbox, Megaphone, ScrollText, Shield, UserRound, Datab
 import AdminSidebar, { type AdminSidebarItem } from "../components/admin/AdminSidebar.vue";
 import { HttpError, httpClient } from "../lib/http/client";
 import { useSessionStore } from "../stores/session";
+import { toastError } from "../lib/toast";
 
 interface AdminMeResponse {
   admin: {
@@ -81,7 +82,7 @@ async function login() {
     await trackVisit();
     password.value = "";
   } catch (error: unknown) {
-    loginError.value = readApiError(error) ?? "登录失败，请重试。";
+    toastError(readApiError(error) ?? "登录失败，请重试。");
   } finally {
     loginLoading.value = false;
   }
@@ -180,12 +181,7 @@ async function trackVisit() {
               返回前台
             </RouterLink>
           </form>
-
-        <p v-if="loginError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {{ loginError }}
-        </p>
-
-      </section>
+</section>
     </div>
 
     <div v-else class="flex min-h-screen flex-col bg-[#fafafa] dark:bg-slate-950 lg:flex-row">

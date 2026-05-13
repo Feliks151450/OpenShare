@@ -7,6 +7,7 @@ import { useSidebar } from "../../composables/useSidebar";
 
 import { HttpError, httpClient } from "../../lib/http/client";
 import { useSessionStore } from "../../stores/session";
+import { toastError } from "../../lib/toast";
 
 export interface NavbarItem {
   label: string;
@@ -112,7 +113,7 @@ async function login() {
       panelOpen.value = false;
     }, 1100);
   } catch (error: unknown) {
-    loginError.value = readApiError(error) ?? "登录失败，请检查账号或密码。";
+    toastError(readApiError(error) ?? "登录失败，请检查账号或密码。");
   } finally {
     loginLoading.value = false;
   }

@@ -70,8 +70,23 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		return ErrInvalidResourceEdit
 	}
 
+	// 校验并处理 custom_path
+	customPath := strings.TrimSpace(input.CustomPath)
+	if err := ValidateCustomPath(customPath); err != nil {
+		return fmt.Errorf("%w: custom_path 必须以英文字母开头，且不能与 upload/admin/files/api/public 等保留路径冲突", ErrInvalidResourceEdit)
+	}
+
+	// 检查 custom_path 唯一性（排除当前文件夹自身）
+	cpConflict, err := s.repo.CustomPathExists(ctx, customPath, folderID)
+	if err != nil {
+		return fmt.Errorf("check custom path uniqueness: %w", err)
+	}
+	if cpConflict {
+		return fmt.Errorf("%w: custom_path %q 已被其他文件夹使用", ErrManagedFolderConflict, customPath)
+	}
+
 	if current.SourcePath == nil || strings.TrimSpace(*current.SourcePath) == "" || current.Name == name {
-		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, coverURL, prefix, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrManagedFolderNotFound
 			}
@@ -112,7 +127,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		folderSourcePaths[folder.ID] = filepath.Join(newRootPath, relative)
 	}
 
-	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, remark, coverURL, prefix, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFolderNotFound
 		}

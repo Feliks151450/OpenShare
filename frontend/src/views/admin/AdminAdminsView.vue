@@ -6,6 +6,7 @@ import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
 interface AdminItem {
@@ -112,7 +113,7 @@ async function loadItems() {
     });
     snapshots.value = nextSnapshots;
   } catch {
-    error.value = "加载管理员列表失败。";
+    toastError("加载管理员列表失败。");
   } finally {
     loaded.value = true;
     loading.value = false;
@@ -129,10 +130,10 @@ async function createAdmin() {
     });
     form.permissions = [];
     createdCredentials.value = response;
-    message.value = "管理员已创建。";
+    toastSuccess("管理员已创建。");
     await loadItems();
   } catch (err: unknown) {
-    error.value = readApiError(err, "创建管理员失败。");
+    toastError(readApiError(err, "创建管理员失败。"));
   } finally {
     creating.value = false;
   }
@@ -149,11 +150,11 @@ async function saveAdmin(item: AdminItem) {
         permissions: expandPermissions(item.permissions, snapshots.value[item.id]?.expandedPermissions ?? []),
       },
     });
-    message.value = `管理员 ${item.display_name} 已更新。`;
+    toastSuccess(`管理员 ${item.display_name} 已更新。`);
     await loadItems();
     return true;
   } catch (err: unknown) {
-    error.value = readApiError(err, "更新管理员失败。");
+    toastError(readApiError(err, "更新管理员失败。"));
     return false;
   }
 }
@@ -169,20 +170,20 @@ async function confirmResetPassword() {
   error.value = "";
   message.value = "";
   if (resetPasswordForm.password.length < 8) {
-    error.value = "新密码至少 8 位。";
+    toastError("新密码至少 8 位。");
     return;
   }
   if (resetPasswordForm.password !== resetPasswordForm.confirmPassword) {
-    error.value = "两次输入的密码不一致。";
+    toastError("两次输入的密码不一致。");
     return;
   }
   resetPasswordSaving.value = true;
   try {
     await httpClient.post(`/admin/admins/${resettingAdmin.value.id}/reset-password`, { new_password: resetPasswordForm.password });
-    message.value = `管理员 ${resettingAdmin.value.display_name} 的密码已重置。`;
+    toastSuccess(`管理员 ${resettingAdmin.value.display_name} 的密码已重置。`);
     resettingAdmin.value = null;
   } catch (err: unknown) {
-    error.value = readApiError(err, "重置密码失败。");
+    toastError(readApiError(err, "重置密码失败。"));
   } finally {
     resetPasswordSaving.value = false;
   }
@@ -198,7 +199,7 @@ async function confirmDeleteAdmin() {
   error.value = "";
   message.value = "";
   if (!deletePassword.value.trim()) {
-    error.value = "请输入当前超管密码。";
+    toastError("请输入当前超管密码。");
     return;
   }
   deleteSubmitting.value = true;
@@ -209,12 +210,12 @@ async function confirmDeleteAdmin() {
         password: deletePassword.value,
       },
     });
-    message.value = `管理员 ${deletingAdmin.value.display_name} 已删除。`;
+    toastSuccess(`管理员 ${deletingAdmin.value.display_name} 已删除。`);
     deletingAdmin.value = null;
     deletePassword.value = "";
     await loadItems();
   } catch (err: unknown) {
-    error.value = readApiError(err, "删除管理员失败。");
+    toastError(readApiError(err, "删除管理员失败。"));
   } finally {
     deleteSubmitting.value = false;
   }
@@ -408,10 +409,7 @@ function formatDate(value: string) {
     </section>
 
     <!-- 操作反馈消息 -->
-    <p v-if="message" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</p>
-    <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
-
-    <!-- 弹窗1：创建成功后显示初始凭证（标示ID、用户名、初始密码），关闭后不再显示 -->
+<!-- 弹窗1：创建成功后显示初始凭证（标示ID、用户名、初始密码），关闭后不再显示 -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="createdCredentials" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">

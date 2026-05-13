@@ -70,6 +70,8 @@ type PublicFileDetail struct {
 	UploadedAt     time.Time `json:"uploaded_at"`
 	DownloadCount  int64     `json:"download_count"`
 	Tags           []PublicFileTag `json:"tags"`
+	// CustomPath 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件。
+	CustomPath string `json:"custom_path"`
 }
 
 type BatchDownloadFile struct {
@@ -407,6 +409,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		UploadedAt:              file.CreatedAt,
 		DownloadCount:           file.DownloadCount,
 		Tags:                    tags,
+		CustomPath:              strings.TrimSpace(file.CustomPath),
 	}, nil
 }
 

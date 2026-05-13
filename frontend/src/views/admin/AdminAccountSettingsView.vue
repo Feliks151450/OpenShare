@@ -5,6 +5,7 @@ import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
 interface AdminProfileResponse {
@@ -73,7 +74,7 @@ async function onAvatarSelected(event: Event) {
   const file = input.files?.[0];
   if (!file) return;
   if (!file.type.startsWith("image/")) {
-    error.value = "头像必须是图片文件。";
+    toastError("头像必须是图片文件。");
     return;
   }
 
@@ -90,7 +91,7 @@ function applyAvatarUrl() {
   const url = avatarUrlInput.value.trim();
   if (!url) return;
   if (!/^https?:\/\//.test(url)) {
-    error.value = "图片直链需以 https:// 或 http:// 开头。";
+    toastError("图片直链需以 https:// 或 http:// 开头。");
     return;
   }
   profileForm.avatarUrl = url;
@@ -110,9 +111,9 @@ async function saveProfile() {
     });
     applySessionProfile(response.admin);
     resetProfileForm();
-    success.value = "账号资料已更新。";
+    toastSuccess("账号资料已更新。");
   } catch (err: unknown) {
-    error.value = readApiError(err, "更新账号资料失败。");
+    toastError(readApiError(err, "更新账号资料失败。"));
   } finally {
     profileSaving.value = false;
   }
@@ -120,7 +121,7 @@ async function saveProfile() {
 
 async function changePassword() {
   if (!passwordValid.value) {
-    error.value = passwordForm.newPassword !== passwordForm.confirmPassword ? "两次输入的新密码不一致。" : "请填写完整且有效的新密码。";
+    toastError(passwordForm.newPassword !== passwordForm.confirmPassword ? "两次输入的新密码不一致。" : "请填写完整且有效的新密码。");
     success.value = "";
     return;
   }
@@ -134,9 +135,9 @@ async function changePassword() {
     });
     passwordForm.newPassword = "";
     passwordForm.confirmPassword = "";
-    success.value = "密码已更新。";
+    toastSuccess("密码已更新。");
   } catch (err: unknown) {
-    error.value = readApiError(err, "修改密码失败。");
+    toastError(readApiError(err, "修改密码失败。"));
   } finally {
     passwordSaving.value = false;
   }
@@ -265,7 +266,5 @@ function readFileAsDataURL(file: File) {
     </section>
 
     <!-- 操作结果反馈 -->
-    <p v-if="success" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ success }}</p>
-    <p v-if="error" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
-  </section>
+</section>
 </template>

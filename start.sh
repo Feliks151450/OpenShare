@@ -38,11 +38,13 @@ check_port_in_use() {
 # 原占用检测替换为：
 if check_port_in_use $BACKEND_PORT; then
   echo "错误: 后端端口 ${BACKEND_PORT} 已被占用，请先释放该端口"
+  lsof -i :$BACKEND_PORT
   exit 1
 fi
 
 if check_port_in_use $FRONTEND_PORT; then
   echo "错误: 前端端口 ${FRONTEND_PORT} 已被占用，请先释放该端口"
+  lsof -i :$FRONTEND_PORT
   exit 1
 fi
 

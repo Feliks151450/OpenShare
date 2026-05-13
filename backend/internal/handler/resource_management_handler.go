@@ -24,6 +24,7 @@ type updateManagedFileRequest struct {
 	PlaybackFallbackURL string  `json:"playback_fallback_url"`
 	ProxySourceURL      string  `json:"proxy_source_url"`
 	CoverURL            string  `json:"cover_url"`
+	CustomPath          string  `json:"custom_path"`
 	DownloadPolicy      *string `json:"download_policy"`
 }
 
@@ -34,6 +35,7 @@ type updateManagedFolderDescriptionRequest struct {
 	CoverURL         string  `json:"cover_url"`
 	DirectLinkPrefix string  `json:"direct_link_prefix"`
 	CdnURL           string  `json:"cdn_url"`
+	CustomPath       string  `json:"custom_path"`
 	DownloadPolicy   *string `json:"download_policy"`
 }
 
@@ -83,6 +85,7 @@ func (h *ResourceManagementHandler) UpdateFile(ctx *gin.Context) {
 		PlaybackFallbackURL: req.PlaybackFallbackURL,
 		ProxySourceURL:      req.ProxySourceURL,
 		CoverURL:            req.CoverURL,
+		CustomPath:          req.CustomPath,
 		DownloadPolicy:      req.DownloadPolicy,
 		OperatorID:          identity.AdminID,
 		OperatorIP:          ctx.ClientIP(),
@@ -126,7 +129,8 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 		Remark:           req.Remark,
 		CoverURL:         req.CoverURL,
 		DirectLinkPrefix: req.DirectLinkPrefix,
-			CdnURL:           req.CdnURL,
+		CdnURL:           req.CdnURL,
+		CustomPath:       req.CustomPath,
 		DownloadPolicy:   req.DownloadPolicy,
 		OperatorID:       identity.AdminID,
 		OperatorIP:       ctx.ClientIP(),

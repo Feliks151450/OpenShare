@@ -27,6 +27,7 @@ function isSameDocumentOriginForMarkdownNav(resolved: URL): boolean {
  * - 首页：`/`、`/?folder=<id>`、`/?root=1`（不支持其它查询参数）
  * - 上传页：`/upload`
  * - 文件详情：`/files/<id>?t=` 可选
+ * - 自定义文件夹路径：`/doc`、`/doc/sub`（以字母开头、非已知路由）
  *
  * http(s) 外链、mailto、tel、锚点占位等返回 null，走浏览器默认行为。
  *
@@ -88,6 +89,16 @@ export function markdownHrefToVueRoute(
     return { name: "public-upload" };
   }
 
+  // 自定义文件夹路径（如 /doc、/doc/sub）：以字母开头、无查询参数、非已知路由
+  // 通过 public-custom-folder 路由走 SPA 内跳转，避免整页刷新
+  const customPathMatch = u.pathname.match(/^\/([a-zA-Z][a-zA-Z0-9_\-/]*[a-zA-Z0-9_\-])$/);
+  if (customPathMatch && !u.search) {
+    const customPath = decodeURIComponent(customPathMatch[1] ?? "").trim();
+    if (customPath) {
+      return { name: "public-custom-folder", params: { customPath } };
+    }
+  }
+
   const isHomePath = u.pathname === "/" || u.pathname === "";
   if (!isHomePath) {
     return null;
@@ -118,12 +129,12 @@ export function markdownHrefToVueRoute(
   return { name: "public-home" };
 }
 
-/** 站内 Markdown 导航解析结果是否为公开资料首页（目录/根目录视图） */
+/** 站内 Markdown 导航解析结果是否为公开资料首页（目录/根目录视图，含自定义路径） */
 export function markdownRouteIsCatalogHome(route: RouteLocationRaw): boolean {
   if (typeof route !== "object" || route === null) {
     return false;
   }
-  if ("name" in route && route.name === "public-home") {
+  if ("name" in route && (route.name === "public-home" || route.name === "public-custom-folder")) {
     return true;
   }
   return false;
@@ -150,7 +161,7 @@ export type MarkdownRouterNavOptions = {
   /** 返回 true 表示已由调用方处理，跳过 `router.push` */
   interceptPush?: (route: RouteLocationRaw) => boolean;
   /**
-   * Markdown 链解析为资料目录（`public-home`）时：先由页面弹窗确认，`true` 再 `router.push`。
+   * Markdown 链解析为资料目录（`public-home` 或 `public-custom-folder`）时：先由页面弹窗确认，`true` 再 `router.push`。
    */
   confirmBeforeMarkdownCatalogNavigate?: (route: RouteLocationRaw) => Promise<boolean>;
 };
