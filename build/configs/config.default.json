@@ -1,0 +1,58 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "database": {
+    "path": "/data/openshare/openshare.db",
+    "log_level": "warn",
+    "enable_wal": true,
+    "pragmas": [
+      {
+        "name": "foreign_keys",
+        "value": "ON"
+      },
+      {
+        "name": "busy_timeout",
+        "value": "5000"
+      }
+    ]
+  },
+  "storage": {
+    "root": "/data/openshare",
+    "staging": "staging",
+    "trash": "trash"
+  },
+  "upload": {
+    "max_upload_total_bytes": 5368709120,
+    "max_description_length": 4000,
+    "receipt_code_length": 12
+  },
+  "session": {
+    "name": "openshare_session",
+    "secret": "replace-this-in-local-config",
+    "path": "/",
+    "max_age_seconds": 604800,
+    "secure": false,
+    "http_only": true,
+    "same_site": "lax",
+    "renew_window_seconds": 604800
+  },
+  "rate_limit": {
+    "upload": {
+      "enabled": true,
+      "limit": 10,
+      "window_seconds": 60
+    },
+    "search": {
+      "enabled": true,
+      "limit": 60,
+      "window_seconds": 60
+    }
+  },
+  "cors": {
+    "allowed_origins": [
+      "https://qiniu.feliks.top"
+    ]
+  }
+}

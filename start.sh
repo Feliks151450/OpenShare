@@ -76,6 +76,9 @@ npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
 
 echo "==> 启动后端服务"
+# 确保 embed 所需的 dist/ 目录存在（至少包含 .gitkeep）
+mkdir -p "$ROOT_DIR/backend/web/dist"
+touch "$ROOT_DIR/backend/web/dist/.gitkeep"
 cd "$ROOT_DIR/backend"
 go run ./cmd/server > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!

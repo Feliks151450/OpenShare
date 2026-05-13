@@ -1,0 +1,15 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "database": {
+    "path": "/Users/linlifei/OpenShare/.production/openshare.db"
+  },
+  "storage": {
+    "root": "/Users/linlifei/OpenShare/.production"
+  },
+  "session": {
+    "secret": "9444415ac3e1559dac517603cb8cae4b10ad6824f7089d49a6ceede96110e53a"
+  }
+}

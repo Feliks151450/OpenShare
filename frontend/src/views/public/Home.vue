@@ -2875,7 +2875,6 @@ async function syncSessionReceiptCode() {
               :style="{
                 backgroundColor: tag.color,
                 color: readableTextColorForPreset(tag.color),
-                ringColor: tag.color,
               }"
               :title="tag.name"
               @click="toggleTagFilter(tag.id)"

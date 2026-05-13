@@ -1045,7 +1045,7 @@ function getFolderFilesFromStaticCache(folderID: string): FolderFileListItem[] |
   return (entry.files as unknown as FolderFileListItem[]);
 }
 
-async function loadFolderSameExtensionPeers(folderID: string, currentFileId: string, ext: string) {
+async function loadFolderSameExtensionPeers(folderID: string, _currentFileId: string, ext: string) {
   const want = ext.replace(/^\./, "").toLowerCase();
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
@@ -1079,7 +1079,7 @@ async function loadFolderSameExtensionPeers(folderID: string, currentFileId: str
   }
 }
 
-async function loadFolderVideoPeers(folderID: string, currentFileId: string) {
+async function loadFolderVideoPeers(folderID: string, _currentFileId: string) {
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
 
@@ -1394,7 +1394,6 @@ async function loadDetail() {
           loadFolderSameExtensionPeers(fid, fileID.value, detail.value.extension);
         }
       }
-      try { await requestFileTags(); } catch { /* ignore */ }
       loading.value = false;
       return;
     }
@@ -2810,7 +2809,7 @@ function performDownloadFile() {
               </label>
 
               <!-- 服务端代理地址（仅代理模式显示） -->
-              <label v-if="detail.proxy_download" class="space-y-2">
+              <label v-if="detail?.proxy_download" class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">服务端代理地址（LAN / 内网 URL）</span>
                 <input
                   v-model="editProxySourceUrl"

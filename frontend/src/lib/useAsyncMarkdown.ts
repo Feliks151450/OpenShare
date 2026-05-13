@@ -11,10 +11,10 @@ type WorkerInstance = {
 
 let shared: WorkerInstance | null = null;
 
-const sanitizeConfig: DOMPurify.Config = {
+const sanitizeConfig = {
 	ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open"],
 	ADD_TAGS: ["input", "details", "summary", "section", "header"],
-};
+} as DOMPurify.Config;
 
 function getWorker(): WorkerInstance | null {
 	if (shared) return shared;
@@ -33,7 +33,7 @@ function getWorker(): WorkerInstance | null {
 			const resolve = instance.pending.get(id);
 			if (resolve) {
 				instance.pending.delete(id);
-				resolve(DOMPurify.sanitize(html, sanitizeConfig));
+				resolve(DOMPurify.sanitize(html, sanitizeConfig as any) as unknown as string);
 			}
 		};
 		worker.onerror = () => {
