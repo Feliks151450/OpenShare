@@ -4,6 +4,7 @@
 .vscode/
 .gocache/
 .gomodcache/
+.production/**
 .out/
 .cache/
 .claude/
