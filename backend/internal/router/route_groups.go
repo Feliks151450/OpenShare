@@ -174,6 +174,11 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.ProbeURL,
 	)
+	adminProtected.POST(
+		"/resources/upload-cover",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.UploadCoverImage,
+	)
 	adminProtected.GET(
 		"/file-tags",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),

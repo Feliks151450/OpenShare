@@ -16,6 +16,7 @@ interface SystemPolicy {
     cdn_mode?: boolean;
     global_cdn_url?: string;
   };
+  cover_upload_dir?: string;
 }
 
 interface ManagedFolderNode {
@@ -77,6 +78,7 @@ const form = reactive<SystemPolicy>({
     cdn_mode: false,
     global_cdn_url: "",
   },
+  cover_upload_dir: "",
 });
 
 onMounted(() => {
@@ -91,6 +93,7 @@ async function loadPolicy() {
     const response = await httpClient.get<SystemPolicy>("/admin/system/settings");
     Object.assign(form.upload, response.upload);
     Object.assign(form.download, response.download ?? { large_download_confirm_bytes: 1024 * 1024 * 1024 });
+    form.cover_upload_dir = response.cover_upload_dir ?? "";
     applyUploadSizeFields(response.upload.max_upload_total_bytes);
     applyDownloadSizeFields(form.download.large_download_confirm_bytes);
     uploadSnapshot.value = serializeUploadState();
@@ -128,6 +131,7 @@ async function saveUploadPolicy() {
 function serializeUploadState() {
   return JSON.stringify({
     max_upload_total_bytes: toBytes(uploadSizeValue.value, uploadSizeUnit.value),
+    cover_upload_dir: (form.cover_upload_dir ?? "").trim(),
   });
 }
 
@@ -689,6 +693,16 @@ function isManagedRootClientChild(path: string, root: string) {
             </select>
           </div>
         </div>
+        <!-- 封面图片上传目录 -->
+        <div class="border-t border-slate-200 pt-5">
+          <h4 class="text-sm font-semibold text-slate-800">封面图片</h4>
+          <p class="mt-1 text-sm text-slate-500">管理员拖拽上传封面时，图片将存入此磁盘目录（绝对路径）。首次使用时自动创建为隐藏托管根目录。留空则禁用拖拽上传封面功能。</p>
+        </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">封面存储目录</label>
+          <input v-model="form.cover_upload_dir" class="field" placeholder="/data/openshare/cover-images" />
+        </div>
+
         <div class="border-t border-slate-200 pt-5">
           <h4 class="text-sm font-semibold text-slate-800">下载确认</h4>
           <p class="mt-1 text-sm text-slate-500">访客下载<strong class="text-slate-700">整个文件夹（ZIP）</strong>时始终弹出确认。单文件在达到下列大小时也会要求确认（默认 1 GB）。</p>

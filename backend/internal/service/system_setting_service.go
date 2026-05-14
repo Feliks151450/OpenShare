@@ -50,8 +50,9 @@ type DownloadPolicy struct {
 }
 
 type SystemPolicy struct {
-	Upload   UploadPolicy   `json:"upload"`
-	Download DownloadPolicy `json:"download"`
+	Upload         UploadPolicy   `json:"upload"`
+	Download       DownloadPolicy `json:"download"`
+	CoverUploadDir string         `json:"cover_upload_dir"`
 }
 
 type SystemSettingService struct {
@@ -60,21 +61,22 @@ type SystemSettingService struct {
 	nowFunc       func() time.Time
 }
 
-func defaultSystemPolicy(cfg config.UploadConfig) SystemPolicy {
+func defaultSystemPolicy(uploadCfg config.UploadConfig, coverUploadDir string) SystemPolicy {
 	return SystemPolicy{
 		Upload: UploadPolicy{
-			MaxUploadTotalBytes: cfg.MaxUploadTotalBytes,
+			MaxUploadTotalBytes: uploadCfg.MaxUploadTotalBytes,
 		},
 		Download: DownloadPolicy{
 			LargeDownloadConfirmBytes: DefaultLargeDownloadConfirmBytes,
 		},
+		CoverUploadDir: coverUploadDir,
 	}
 }
 
 func NewSystemSettingService(repo *repository.SystemSettingRepository, cfg config.Config) *SystemSettingService {
 	return &SystemSettingService{
 		repo:          repo,
-		defaultPolicy: defaultSystemPolicy(cfg.Upload),
+		defaultPolicy: defaultSystemPolicy(cfg.Upload, cfg.Storage.CoverUploadDir),
 		nowFunc:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -95,6 +97,9 @@ func (s *SystemSettingService) GetPolicy(ctx context.Context) (*SystemPolicy, er
 	}
 	if policy.Download.LargeDownloadConfirmBytes <= 0 {
 		policy.Download.LargeDownloadConfirmBytes = s.defaultPolicy.Download.LargeDownloadConfirmBytes
+	}
+	if policy.CoverUploadDir == "" {
+		policy.CoverUploadDir = s.defaultPolicy.CoverUploadDir
 	}
 	return &policy, nil
 }
@@ -126,6 +131,9 @@ func (s *SystemSettingService) SavePolicy(ctx context.Context, incoming SystemPo
 	policy.Download.WideLayoutExtensions = incoming.Download.WideLayoutExtensions
 	policy.Download.CdnMode = incoming.Download.CdnMode
 	policy.Download.GlobalCdnUrl = incoming.Download.GlobalCdnUrl
+	if incoming.CoverUploadDir != "" || policy.CoverUploadDir == "" {
+		policy.CoverUploadDir = incoming.CoverUploadDir
+	}
 
 	if policy.Upload.MaxUploadTotalBytes <= 0 {
 		return nil, ErrInvalidUploadInput

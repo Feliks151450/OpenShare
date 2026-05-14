@@ -91,7 +91,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		publicReceipt:      handler.NewPublicReceiptHandler(services.publicReceipt),
 		publicSubmission:   handler.NewPublicSubmissionHandler(services.publicSubmission),
 		publicUpload:       handler.NewPublicUploadHandler(services.publicUpload),
-		resourceManagement: handler.NewResourceManagementHandler(services.resourceManagement, services.adminAuth),
+		resourceManagement: handler.NewResourceManagementHandler(services.resourceManagement, services.adminAuth, services.systemSetting),
 		search:             handler.NewSearchHandler(services.search),
 		siteVisit:          handler.NewSiteVisitHandler(services.siteVisit),
 		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting, repos.imports),

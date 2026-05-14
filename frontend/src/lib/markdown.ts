@@ -144,6 +144,15 @@ marked.use({
       if (token.tokens?.length) {
         altPlain = this.parser.parseInline(token.tokens, this.parser.textRenderer);
       }
+      /* 支持图片宽度控制: ![描述|width=800](url) 或 ![描述|width=80%](url)，设置图片最大宽度 */
+      let maxWidthStyle = "";
+      const widthMatch = altPlain.match(/^(.*?)\|width=(\d+%?)\s*$/);
+      if (widthMatch) {
+        altPlain = widthMatch[1].trimEnd();
+        const widthVal = widthMatch[2];
+        const cssVal = widthVal.endsWith("%") ? widthVal : `${widthVal}px`;
+        maxWidthStyle = ` style="max-width:${cssVal}"`;
+      }
       const rawHref = String(token.href ?? "").trim();
       if (!isSafeImageUrlForSrc(rawHref)) {
         return escapeHtml(token.raw ?? altPlain);
@@ -155,7 +164,7 @@ marked.use({
         token.title != null && String(token.title).trim() !== ""
           ? ` title="${escapeHtml(String(token.title))}"`
           : "";
-      return `<img src="${src}" alt="${alt}" class="markdown-img" loading="lazy" decoding="async"${title} />`;
+      return `<img src="${src}" alt="${alt}" class="markdown-img" loading="lazy" decoding="async"${maxWidthStyle}${title} />`;
     },
     link(this: Renderer, token: Tokens.Link): string {
       const inner = this.parser.parseInline(token.tokens);
@@ -184,7 +193,7 @@ export function renderSimpleMarkdown(source: string): string {
   try {
     const html = marked.parse(normalized, { async: false }) as string;
     return DOMPurify.sanitize(html, {
-      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open"],
+      ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open", "style"],
       ADD_TAGS: ["input", "details", "summary", "section", "header"],
     });
   } catch {

@@ -12,7 +12,7 @@ type WorkerInstance = {
 let shared: WorkerInstance | null = null;
 
 const sanitizeConfig = {
-	ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open"],
+	ADD_ATTR: ["target", "rel", "loading", "decoding", "align", "start", "open", "style"],
 	ADD_TAGS: ["input", "details", "summary", "section", "header"],
 } as DOMPurify.Config;
 

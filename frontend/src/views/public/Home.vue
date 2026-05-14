@@ -50,6 +50,7 @@ import {
   type MarkdownCatalogConfirmPresentation,
 } from "../../lib/markdownCatalogNavigateDisplay";
 import { markdownRoutePublicFileDetailId, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
+import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 import {
@@ -260,12 +261,12 @@ const canManageAnnouncements = ref(false);
 const homeSessionAdminId = ref("");
 const homeSessionIsSuperAdmin = ref(false);
 const folderDescriptionEditorOpen = ref(false);
+const folderCoverPickerOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
-const folderCoverUrlDraft = ref("");
 const folderHidePublicCatalogDraft = ref(false);
 /* 自定义路径（仅管理员可编辑）：在文件夹编辑弹窗中设置，如 "doc" 对应 /doc 访问该文件夹 */
 const folderCustomPathDraft = ref("");
@@ -775,7 +776,6 @@ const folderEditorMetaDirty = computed(() => {
     folderNameDraft.value.trim() !== d.name ||
     folderDescriptionDraft.value.trim() !== (d.description ?? "") ||
     folderRemarkDraft.value.trim() !== (d.remark ?? "").trim() ||
-    folderCoverUrlDraft.value.trim() !== (d.cover_url ?? "").trim() ||
     folderDirectPrefixDraft.value.trim() !== (d.direct_link_prefix ?? "").trim() ||
     folderCustomPathDraft.value.trim() !== (d.custom_path ?? "").trim() ||
     folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit")
@@ -1484,9 +1484,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     currentFolderDetail.value = detail;
     folderNameDraft.value = detail.name;
     folderDescriptionDraft.value = detail.description ?? "";
-    folderRemarkDraft.value = (detail.remark ?? "").trim();
-    folderCoverUrlDraft.value = (detail.cover_url ?? "").trim();
-    folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
+    folderRemarkDraft.value = (detail.remark ?? "").trim();    folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
     folderCustomPathDraft.value = (detail.custom_path ?? "").trim();
     folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
     breadcrumbs.value = detail.breadcrumbs ?? [];
@@ -1494,9 +1492,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     currentFolderDetail.value = null;
     folderNameDraft.value = "";
     folderDescriptionDraft.value = "";
-    folderRemarkDraft.value = "";
-    folderCoverUrlDraft.value = "";
-    folderDirectPrefixDraft.value = "";
+    folderRemarkDraft.value = "";    folderDirectPrefixDraft.value = "";
     folderCustomPathDraft.value = "";
     folderDownloadPolicyDraft.value = "inherit";
     breadcrumbs.value = [];
@@ -1651,18 +1647,14 @@ async function loadDirectory(options?: { force?: boolean }) {
       currentFolderDetail.value = detail;
       folderNameDraft.value = detail.name;
       folderDescriptionDraft.value = detail.description ?? "";
-      folderRemarkDraft.value = (detail.remark ?? "").trim();
-      folderCoverUrlDraft.value = (detail.cover_url ?? "").trim();
-      folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
+      folderRemarkDraft.value = (detail.remark ?? "").trim();      folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
       folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
       breadcrumbs.value = detail.breadcrumbs ?? [];
     } else {
       currentFolderDetail.value = null;
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
-      folderRemarkDraft.value = "";
-      folderCoverUrlDraft.value = "";
-      folderDirectPrefixDraft.value = "";
+      folderRemarkDraft.value = "";      folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       breadcrumbs.value = [];
     }
@@ -1681,9 +1673,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       currentFolderDetail.value = null;
       folderNameDraft.value = "";
       folderDescriptionDraft.value = "";
-      folderRemarkDraft.value = "";
-      folderCoverUrlDraft.value = "";
-      folderDirectPrefixDraft.value = "";
+      folderRemarkDraft.value = "";      folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
       if (err instanceof HttpError && err.status === 404) {
         toastError("目录不存在或未公开。");
@@ -2232,7 +2222,6 @@ function openFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
-  folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderCustomPathDraft.value = (currentFolderDetail.value?.custom_path ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
@@ -2249,12 +2238,35 @@ function closeFolderDescriptionEditor() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
-  folderCoverUrlDraft.value = (currentFolderDetail.value?.cover_url ?? "").trim();
   folderDirectPrefixDraft.value = (currentFolderDetail.value?.direct_link_prefix ?? "").trim();
   folderCustomPathDraft.value = (currentFolderDetail.value?.custom_path ?? "").trim();
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   syncBodyScrollLock();
+}
+
+/* 封面选择器确认后，直接调用 API 更新文件夹的 cover_url */
+async function saveFolderCoverUrl(url: string) {
+  if (!currentFolderDetail.value) return;
+  const d = currentFolderDetail.value;
+  try {
+    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(d.id)}`, {
+      method: "PUT",
+      body: {
+        name: d.name,
+        description: d.description ?? "",
+        remark: (d.remark ?? "").trim(),
+        cover_url: url,
+        direct_link_prefix: (d.direct_link_prefix ?? "").trim(),
+        custom_path: (d.custom_path ?? "").trim(),
+        download_policy: d.download_policy ?? "inherit",
+      },
+    });
+    currentFolderDetail.value = { ...d, cover_url: url };
+    toastSuccess("封面已更新。");
+  } catch (err: unknown) {
+    toastError(readApiError(err, "更新封面失败。"));
+  }
 }
 
 async function saveFolderDescription() {
@@ -2274,7 +2286,6 @@ async function saveFolderDescription() {
           name: folderNameDraft.value.trim(),
           description: folderDescriptionDraft.value.trim(),
           remark: folderRemarkDraft.value.trim(),
-          cover_url: folderCoverUrlDraft.value.trim(),
           direct_link_prefix: folderDirectPrefixDraft.value.trim(),
           custom_path: folderCustomPathDraft.value.trim(),
           download_policy: folderDownloadPolicyDraft.value,
@@ -2296,7 +2307,6 @@ async function saveFolderDescription() {
       name: folderNameDraft.value.trim(),
       description: folderDescriptionDraft.value.trim(),
       remark: folderRemarkDraft.value.trim(),
-      cover_url: folderCoverUrlDraft.value.trim(),
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       custom_path: folderCustomPathDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
@@ -2558,6 +2568,15 @@ async function syncSessionReceiptCode() {
                     @click="openFolderDescriptionEditor"
                   >
                     编辑
+                  </button>
+                  <!-- 封面按钮：点击打开封面图片选择器（拖拽上传或输入 URL） -->
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary"
+                    @click="folderCoverPickerOpen = true"
+                  >
+                    封面
                   </button>
                   <button
                     v-if="canManageResourceDescriptions && !isCurrentFolderVirtual"
@@ -3855,20 +3874,6 @@ async function syncSessionReceiptCode() {
               />
             </label>
 
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-slate-700">封面图地址（可选）</span>
-              <input
-                v-model="folderCoverUrlDraft"
-                type="url"
-                class="field"
-                placeholder="https://cdn.example.com/cover.jpg（留空则使用简介中 ![cover](...)）"
-                autocomplete="off"
-              />
-              <p class="text-xs leading-5 text-slate-500">
-                填写后优先作为首页列表与详情顶部封面；需以 http(s) 开头。清空并保存则回退到简介内封面语法。
-              </p>
-            </label>
-
             <div
               class="grid min-h-0 grid-cols-1 gap-6 lg:min-h-[28rem] lg:grid-cols-2 lg:grid-rows-[auto_minmax(17rem,1fr)]"
             >
@@ -4121,6 +4126,14 @@ async function syncSessionReceiptCode() {
     </div>
     </Transition>
   </Teleport>
+
+  <!-- 封面图片选择器（管理员拖拽上传或输入 URL） -->
+  <CoverImagePicker
+    :open="folderCoverPickerOpen"
+    :model-value="currentFolderDetail?.cover_url ?? ''"
+    @update:open="folderCoverPickerOpen = $event"
+    @confirm="saveFolderCoverUrl"
+  />
 </template>
 
 <style scoped>

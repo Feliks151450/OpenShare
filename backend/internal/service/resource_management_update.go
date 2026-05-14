@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -278,4 +282,134 @@ func extractSuggestedFileName(resp *http.Response) string {
 		}
 	}
 	return ""
+}
+
+// 封面图片上传限制：最大 10 MB，仅允许常见图片格式。
+const maxCoverImageBytes = 10 << 20
+
+var coverImageExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".jfif": true,
+	".gif": true, ".webp": true, ".svg": true, ".bmp": true,
+}
+
+// UploadCoverImage 将上传的封面图片保存到封面存储目录，并创建为托管文件返回站内链接。
+func (s *ResourceManagementService) UploadCoverImage(ctx context.Context, reader io.Reader, originalName string, coverUploadDir string, operatorID string, operatorIP string) (string, error) {
+	coverUploadDir = filepath.Clean(strings.TrimSpace(coverUploadDir))
+	if coverUploadDir == "" || coverUploadDir == "." || coverUploadDir == "/" {
+		return "", fmt.Errorf("%w: 封面存储目录未配置或无效", ErrInvalidResourceEdit)
+	}
+
+	ext := strings.ToLower(filepath.Ext(originalName))
+	if !coverImageExtensions[ext] {
+		return "", fmt.Errorf("%w: 不支持的图片格式: %s", ErrInvalidResourceEdit, ext)
+	}
+
+	// 确保封面目录在磁盘上存在。
+	if err := s.storage.EnsureManagedDirectory(coverUploadDir); err != nil {
+		return "", fmt.Errorf("ensure cover upload directory: %w", err)
+	}
+
+	// 查找或创建隐藏托管根目录。
+	folderID, err := s.ensureCoverManagedRoot(ctx, coverUploadDir, operatorID, operatorIP, s.nowFunc())
+	if err != nil {
+		return "", fmt.Errorf("ensure cover managed root: %w", err)
+	}
+
+	// 生成文件 ID 并保存到磁盘。
+	fileID, err := identity.NewID()
+	if err != nil {
+		return "", fmt.Errorf("generate cover file id: %w", err)
+	}
+	storedName := fileID + ext
+	destPath := filepath.Join(coverUploadDir, storedName)
+
+	srcFile, err := os.CreateTemp("", "openshare-cover-*")
+	if err != nil {
+		return "", fmt.Errorf("create cover temp file: %w", err)
+	}
+	tmpPath := srcFile.Name()
+	defer os.Remove(tmpPath)
+
+	written, err := io.Copy(srcFile, io.LimitReader(reader, maxCoverImageBytes+1))
+	if err != nil {
+		srcFile.Close()
+		return "", fmt.Errorf("write cover temp file: %w", err)
+	}
+	if written == 0 {
+		srcFile.Close()
+		return "", fmt.Errorf("%w: 封面图片为空", ErrInvalidResourceEdit)
+	}
+	if written > maxCoverImageBytes {
+		srcFile.Close()
+		return "", fmt.Errorf("%w: 封面图片超过 10 MB 限制", ErrInvalidResourceEdit)
+	}
+	if err := srcFile.Close(); err != nil {
+		return "", fmt.Errorf("close cover temp file: %w", err)
+	}
+
+	if err := storage.MoveRegularFile(tmpPath, destPath); err != nil {
+		return "", fmt.Errorf("move cover file to destination: %w", err)
+	}
+
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	// 磁盘文件名为 <fileID><ext>，DB name 必须与之匹配才能正确构建下载路径。
+	// CustomPath 列有唯一索引，空字符串不能重复，封面文件无需短链接访问，用文件 ID 占位。
+	now := s.nowFunc()
+	coverCustomPath := "cover_" + fileID
+	file := &model.File{
+		ID:         fileID,
+		FolderID:   &folderID,
+		Name:       storedName,
+		Extension:  ext,
+		MimeType:   mimeType,
+		Size:       written,
+		CustomPath: coverCustomPath,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.repo.CreateFile(ctx, file, operatorID, operatorIP, now); err != nil {
+		// 清理已保存的磁盘文件。
+		_ = os.Remove(destPath)
+		return "", fmt.Errorf("create cover file record: %w", err)
+	}
+
+	return "/files/" + fileID, nil
+}
+
+// ensureCoverManagedRoot 查找或创建一个隐藏的托管根目录用于存储封面图片。
+func (s *ResourceManagementService) ensureCoverManagedRoot(ctx context.Context, sourcePath string, operatorID string, operatorIP string, now time.Time) (string, error) {
+	folder, err := s.repo.FindFolderBySourcePath(ctx, sourcePath)
+	if err != nil {
+		return "", err
+	}
+	if folder != nil {
+		return folder.ID, nil
+	}
+
+	folderID, err := identity.NewID()
+	if err != nil {
+		return "", fmt.Errorf("generate cover folder id: %w", err)
+	}
+	dirName := filepath.Base(sourcePath)
+	sourcePathCopy := sourcePath
+	// CustomPath 有唯一索引，空串不能重复。封面托管根目录不需要短链接，用 folder ID 占位。
+	folderCustomPath := "cover_root_" + folderID
+	newFolder := &model.Folder{
+		ID:                folderID,
+		ParentID:          nil,
+		SourcePath:        &sourcePathCopy,
+		Name:              dirName,
+		HidePublicCatalog: true,
+		CustomPath:        folderCustomPath,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := s.repo.CreateFolder(ctx, newFolder, operatorID, operatorIP, now); err != nil {
+		return "", fmt.Errorf("create cover managed root folder: %w", err)
+	}
+	return folderID, nil
 }

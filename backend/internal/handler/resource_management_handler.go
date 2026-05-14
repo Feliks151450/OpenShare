@@ -12,8 +12,9 @@ import (
 )
 
 type ResourceManagementHandler struct {
-	service     *service.ResourceManagementService
-	authService *service.AdminAuthService
+	service              *service.ResourceManagementService
+	authService          *service.AdminAuthService
+	systemSettingService *service.SystemSettingService
 }
 
 type updateManagedFileRequest struct {
@@ -49,8 +50,8 @@ type deleteManagedResourceRequest struct {
 	MoveToTrash *bool  `json:"move_to_trash"`
 }
 
-func NewResourceManagementHandler(service *service.ResourceManagementService, authService *service.AdminAuthService) *ResourceManagementHandler {
-	return &ResourceManagementHandler{service: service, authService: authService}
+func NewResourceManagementHandler(service *service.ResourceManagementService, authService *service.AdminAuthService, systemSettingService *service.SystemSettingService) *ResourceManagementHandler {
+	return &ResourceManagementHandler{service: service, authService: authService, systemSettingService: systemSettingService}
 }
 
 func (h *ResourceManagementHandler) ListFiles(ctx *gin.Context) {
@@ -443,4 +444,50 @@ func (h *ResourceManagementHandler) ProbeURL(ctx *gin.Context) {
 
 	result := service.ProbeRemoteURL(ctx.Request.Context(), strings.TrimSpace(req.URL))
 	ctx.JSON(http.StatusOK, result)
+}
+
+// UploadCoverImage 上传封面图片到封面存储目录，返回站内链接 /files/<uuid>。
+func (h *ResourceManagementHandler) UploadCoverImage(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	policy, err := h.systemSettingService.GetPolicy(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get system policy"})
+		return
+	}
+	if policy.CoverUploadDir == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "封面存储目录未配置，请先在管理后台系统设置中配置"})
+		return
+	}
+
+	file, header, err := ctx.Request.FormFile("file")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "请选择要上传的图片文件"})
+		return
+	}
+	defer file.Close()
+
+	url, err := h.service.UploadCoverImage(
+		ctx.Request.Context(),
+		file,
+		header.Filename,
+		policy.CoverUploadDir,
+		identity.AdminID,
+		ctx.ClientIP(),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "上传封面图片失败"})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"url": url})
 }

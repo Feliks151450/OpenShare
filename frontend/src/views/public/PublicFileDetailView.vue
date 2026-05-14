@@ -35,6 +35,7 @@ import {
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
 import { renderSimpleMarkdown } from "../../lib/markdown";
+import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
@@ -129,9 +130,9 @@ const editPlaybackFallbackUrl = ref("");
 const editProxySourceUrl = ref("");
 /* 自定义访问路径（仅管理员可编辑）：如 "doc/report" 对应 /doc/report 访问该文件 */
 const editCustomPath = ref("");
-const editCoverUrl = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
+const coverPickerOpen = ref(false);
 const tagEditorOpen = ref(false);
 const tagCatalog = ref<FileTagDefinition[]>([]);
 const tagEditorSelected = ref<string[]>([]);
@@ -1180,7 +1181,6 @@ const editorDirty = computed(() => {
     editPlaybackUrl.value.trim() !== (detail.value.playback_url ?? "").trim() ||
     editPlaybackFallbackUrl.value.trim() !== (detail.value.playback_fallback_url ?? "").trim() ||
     editProxySourceUrl.value.trim() !== (detail.value.proxy_source_url ?? "").trim() ||
-    editCoverUrl.value.trim() !== (detail.value.cover_url ?? "").trim() ||
     editCustomPath.value.trim() !== (detail.value.custom_path ?? "").trim() ||
     editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
@@ -1383,7 +1383,6 @@ async function loadDetail() {
       editRemark.value = (detail.value.remark ?? "").trim();
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
-      editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       editCustomPath.value = (detail.value.custom_path ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       const fid = detail.value.folder_id?.trim() ?? "";
@@ -1407,7 +1406,6 @@ async function loadDetail() {
       editRemark.value = (detail.value.remark ?? "").trim();
       editPlaybackUrl.value = (detail.value.playback_url ?? "").trim();
       editPlaybackFallbackUrl.value = (detail.value.playback_fallback_url ?? "").trim();
-      editCoverUrl.value = (detail.value.cover_url ?? "").trim();
       editCustomPath.value = (detail.value.custom_path ?? "").trim();
       editDownloadPolicy.value = detail.value.download_policy ?? "inherit";
       // API 返回了 folder_id，按需加载对应目录的 CDN 数据供后续使用
@@ -1446,7 +1444,6 @@ function openDescriptionEditor() {
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
       editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
-  editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   editCustomPath.value = (detail.value?.custom_path ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
@@ -1464,9 +1461,33 @@ function closeDescriptionEditor() {
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
       editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
-  editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   editCustomPath.value = (detail.value?.custom_path ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
+}
+
+/* 封面选择器确认后，直接调用 API 更新文件的 cover_url */
+async function saveCoverUrl(url: string) {
+  if (!detail.value) return;
+  try {
+    await httpClient.request(`/admin/resources/files/${encodeURIComponent(detail.value.id)}`, {
+      method: "PUT",
+      body: {
+        name: detail.value.name,
+        description: detail.value.description ?? "",
+        remark: (detail.value.remark ?? "").trim(),
+        playback_url: (detail.value.playback_url ?? "").trim(),
+        playback_fallback_url: (detail.value.playback_fallback_url ?? "").trim(),
+        proxy_source_url: (detail.value.proxy_source_url ?? "").trim(),
+        cover_url: url,
+        custom_path: (detail.value.custom_path ?? "").trim(),
+        download_policy: detail.value.download_policy ?? "inherit",
+      },
+    });
+    toastSuccess("封面已更新。");
+    await loadDetail();
+  } catch (err: unknown) {
+    toastError(readApiError(err, "更新封面失败。"));
+  }
 }
 
 async function openTagEditor() {
@@ -1575,7 +1596,6 @@ async function saveDescription() {
         playback_url: editPlaybackUrl.value.trim(),
         playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
 	        proxy_source_url: editProxySourceUrl.value.trim(),
-        cover_url: editCoverUrl.value.trim(),
         custom_path: editCustomPath.value.trim(),
         download_policy: editDownloadPolicy.value,
       },
@@ -1909,6 +1929,15 @@ function performDownloadFile() {
                     @click="openDescriptionEditor"
                   >
                     编辑
+                  </button>
+                  <!-- 封面按钮：点击打开封面图片选择器（拖拽上传或输入 URL） -->
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="btn-secondary shrink-0 whitespace-nowrap"
+                    @click="coverPickerOpen = true"
+                  >
+                    封面
                   </button>
                   <button
                     v-if="canManageResourceDescriptions"
@@ -2779,20 +2808,6 @@ function performDownloadFile() {
                 </div>
               </div>
 
-              <label class="space-y-2">
-                <span class="text-sm font-medium text-slate-700">封面图地址（可选）</span>
-                <input
-                  v-model="editCoverUrl"
-                  type="url"
-                  class="field"
-                  placeholder="https://cdn.example.com/cover.jpg（留空则使用简介中 ![cover](...)）"
-                  autocomplete="off"
-                />
-                <p class="text-xs leading-5 text-slate-500">
-                  填写后优先作为首页列表与详情顶部封面；需以 http(s) 开头。清空并保存则回退到简介内封面语法。
-                </p>
-              </label>
-
               <!-- 自定义访问路径：设置后可通过 /doc/report 之类的短链接访问该文件 -->
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">自定义访问路径（可选）</span>
@@ -3084,4 +3099,12 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
   </section>
+
+  <!-- 封面图片选择器（管理员拖拽上传或输入 URL） -->
+  <CoverImagePicker
+    :open="coverPickerOpen"
+    :model-value="detail?.cover_url ?? ''"
+    @update:open="coverPickerOpen = $event"
+    @confirm="saveCoverUrl"
+  />
 </template>

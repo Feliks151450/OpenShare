@@ -70,6 +70,18 @@ func (r *ResourceManagementRepository) ListFiles(ctx context.Context, query stri
 	return rows, nil
 }
 
+func (r *ResourceManagementRepository) FindFolderBySourcePath(ctx context.Context, sourcePath string) (*model.Folder, error) {
+	var folder model.Folder
+	err := r.db.WithContext(ctx).Where("source_path = ?", sourcePath).Take(&folder).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find folder by source path: %w", err)
+	}
+	return &folder, nil
+}
+
 func (r *ResourceManagementRepository) FindFileByID(ctx context.Context, fileID string) (*model.File, error) {
 	var file model.File
 	err := r.db.WithContext(ctx).Where("id = ?", fileID).Take(&file).Error

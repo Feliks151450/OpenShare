@@ -44,6 +44,8 @@ type StorageConfig struct {
 	Staging string `json:"staging"`
 	// Trash is the folder name under each volume/mount root (e.g. /data/trash), not under Root.
 	Trash string `json:"trash"`
+	// CoverUploadDir 封面图片上传存储目录（磁盘绝对路径），首次使用将自动创建为隐藏托管根目录。
+	CoverUploadDir string `json:"cover_upload_dir"`
 }
 
 type UploadConfig struct {
@@ -210,6 +212,7 @@ func applyEnv(cfg *Config) error {
 	overrideString("OPENSHARE_STORAGE_ROOT", &cfg.Storage.Root)
 	overrideString("OPENSHARE_STORAGE_STAGING", &cfg.Storage.Staging)
 	overrideString("OPENSHARE_STORAGE_TRASH", &cfg.Storage.Trash)
+	overrideString("OPENSHARE_STORAGE_COVER_UPLOAD_DIR", &cfg.Storage.CoverUploadDir)
 	overrideInt64("OPENSHARE_UPLOAD_MAX_FILE_SIZE_BYTES", &cfg.Upload.MaxUploadTotalBytes, &errs)
 	overrideInt64("OPENSHARE_UPLOAD_MAX_UPLOAD_TOTAL_BYTES", &cfg.Upload.MaxUploadTotalBytes, &errs)
 	overrideInt("OPENSHARE_UPLOAD_MAX_DESCRIPTION_LENGTH", &cfg.Upload.MaxDescriptionLength, &errs)
@@ -328,6 +331,7 @@ func (c *Config) normalize() {
 	c.Storage.Root = strings.TrimSpace(c.Storage.Root)
 	c.Storage.Staging = strings.TrimSpace(c.Storage.Staging)
 	c.Storage.Trash = strings.TrimSpace(c.Storage.Trash)
+	c.Storage.CoverUploadDir = strings.TrimSpace(c.Storage.CoverUploadDir)
 
 	c.CORS.AllowedOrigins = normalizeCORSOrigins(c.CORS.AllowedOrigins)
 }

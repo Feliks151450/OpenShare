@@ -151,9 +151,9 @@ func isCrossDeviceRenameErr(err error) bool {
 	return strings.Contains(msg, "cross-device") || strings.Contains(msg, "different disk")
 }
 
-// moveRegularFile tries os.Rename; if source and destination are on different
+// MoveRegularFile tries os.Rename; if source and destination are on different
 // filesystems, it copies via a temp file in the destination directory then removes the source.
-func moveRegularFile(srcPath, dstPath string) error {
+func MoveRegularFile(srcPath, dstPath string) error {
 	if err := os.Rename(srcPath, dstPath); err == nil {
 		return nil
 	} else if !isCrossDeviceRenameErr(err) {
@@ -222,7 +222,7 @@ func moveDirTreeCrossDevice(srcRoot, dstRoot string) error {
 		return fmt.Errorf("stat source directory: %w", err)
 	}
 	if !info.IsDir() {
-		return moveRegularFile(srcRoot, dstRoot)
+		return MoveRegularFile(srcRoot, dstRoot)
 	}
 
 	if err := os.MkdirAll(dstRoot, info.Mode().Perm()); err != nil {
@@ -270,7 +270,7 @@ func moveDirTreeCrossDevice(srcRoot, dstRoot string) error {
 				continue
 			}
 
-			if err := moveRegularFile(srcPath, dstPath); err != nil {
+			if err := MoveRegularFile(srcPath, dstPath); err != nil {
 				return err
 			}
 		}
@@ -323,7 +323,7 @@ func (s *Service) MoveStagedFileToFolder(stagedPath, targetDir, originalName str
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", "", fmt.Errorf("inspect target: %w", err)
 		}
-		if err := moveRegularFile(stagedPath, destPath); err != nil {
+		if err := MoveRegularFile(stagedPath, destPath); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
@@ -339,7 +339,7 @@ func (s *Service) MoveFileBackToStaging(diskPath, stagingPath string) (string, e
 	if !s.isWithinDir(stagingPath, s.stagingDir) {
 		return "", fmt.Errorf("target staging path is outside staging directory")
 	}
-	if err := moveRegularFile(diskPath, stagingPath); err != nil {
+	if err := MoveRegularFile(diskPath, stagingPath); err != nil {
 		return "", fmt.Errorf("move file back to staging: %w", err)
 	}
 	return stagingPath, nil
@@ -409,7 +409,7 @@ func (s *Service) MoveManagedFileToTrash(diskPath string) (string, error) {
 			return "", fmt.Errorf("inspect trash target: %w", err)
 		}
 
-		if err := moveRegularFile(diskPath, target); err != nil {
+		if err := MoveRegularFile(diskPath, target); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
