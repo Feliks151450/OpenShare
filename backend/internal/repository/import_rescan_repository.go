@@ -74,7 +74,11 @@ func (r *ImportRepository) ApplyRescanSync(ctx context.Context, input RescanSync
 		}
 
 		for _, folder := range input.AddedFolders {
-			if err := tx.Create(folder).Error; err != nil {
+			cs := tx
+			if folder.CustomPath == "" {
+				cs = tx.Omit("custom_path")
+			}
+			if err := cs.Create(folder).Error; err != nil {
 				return fmt.Errorf("create rescanned folder %s: %w", folder.ID, err)
 			}
 		}
@@ -96,7 +100,11 @@ func (r *ImportRepository) ApplyRescanSync(ctx context.Context, input RescanSync
 		}
 
 		for _, file := range input.AddedFiles {
-			if err := tx.Create(file).Error; err != nil {
+			cs := tx
+			if file.CustomPath == "" {
+				cs = tx.Omit("custom_path")
+			}
+			if err := cs.Create(file).Error; err != nil {
 				return fmt.Errorf("create rescanned file %s: %w", file.ID, err)
 			}
 		}

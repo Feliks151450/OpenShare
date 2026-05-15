@@ -138,7 +138,11 @@ func (r *ModerationRepository) ApproveSubmission(
 			CreatedAt:     submission.CreatedAt,
 			UpdatedAt:     reviewedAt,
 		}
-		if err := tx.Create(file).Error; err != nil {
+		cs := tx
+		if file.CustomPath == "" {
+			cs = tx.Omit("custom_path")
+		}
+		if err := cs.Create(file).Error; err != nil {
 			return fmt.Errorf("create approved file: %w", err)
 		}
 
