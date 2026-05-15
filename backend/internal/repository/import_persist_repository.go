@@ -76,9 +76,17 @@ func (r *ImportRepository) FileNameExists(ctx context.Context, folderID *string,
 }
 
 func (r *ImportRepository) CreateFolder(ctx context.Context, folder *model.Folder) error {
-	return r.db.WithContext(ctx).Create(folder).Error
+	createSQL := r.db.WithContext(ctx)
+	if folder.CustomPath == "" {
+		createSQL = createSQL.Omit("custom_path")
+	}
+	return createSQL.Create(folder).Error
 }
 
 func (r *ImportRepository) CreateFile(ctx context.Context, file *model.File) error {
-	return r.db.WithContext(ctx).Create(file).Error
+	createSQL := r.db.WithContext(ctx)
+	if file.CustomPath == "" {
+		createSQL = createSQL.Omit("custom_path")
+	}
+	return createSQL.Create(file).Error
 }

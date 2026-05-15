@@ -22,6 +22,15 @@ func appendAllowDownloadUpdate(updates map[string]any, apply bool, allowPtr *boo
 	}
 }
 
+// appendCustomPathUpdate 将 custom_path 写入更新 map。空字符串时写 NULL 避免 UNIQUE 约束冲突。
+func appendCustomPathUpdate(updates map[string]any, customPath string) {
+	if customPath == "" {
+		updates["custom_path"] = gorm.Expr("NULL")
+	} else {
+		updates["custom_path"] = customPath
+	}
+}
+
 func (r *ResourceManagementRepository) UpdateFileMetadata(
 	ctx context.Context,
 	fileID string,
@@ -51,9 +60,9 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"playback_fallback_url": playbackFallbackURL,
 		"proxy_source_url":      proxySourceURL,
 			"cover_url":             coverURL,
-			"custom_path":           customPath,
 			"updated_at":            now,
 		}
+		appendCustomPathUpdate(updates, customPath)
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
 		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates)
 		if result.Error != nil {
@@ -90,9 +99,9 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 			"remark":             remark,
 			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
-			"custom_path":        customPath,
 			"updated_at":         now,
 		}
+		appendCustomPathUpdate(updates, customPath)
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
 		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(updates)
 		if result.Error != nil {
@@ -161,9 +170,9 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 			"remark":             remark,
 			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
-			"custom_path":        customPath,
 			"updated_at":         now,
 		}
+		appendCustomPathUpdate(rootUpdates, customPath)
 		appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)
 		if sourcePath, ok := folderSourcePaths[folderID]; ok {
 			rootUpdates["source_path"] = sourcePath
@@ -195,7 +204,12 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 
 func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder *model.Folder, operatorID, operatorIP string, now time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(folder).Error; err != nil {
+		// 空 custom_path 跳过插入，避免 UNIQUE 约束冲突
+		createSQL := tx
+		if folder.CustomPath == "" {
+			createSQL = tx.Omit("custom_path")
+		}
+		if err := createSQL.Create(folder).Error; err != nil {
 			return fmt.Errorf("create folder: %w", err)
 		}
 		logID, err := identity.NewID()
@@ -208,7 +222,12 @@ func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder 
 
 func (r *ResourceManagementRepository) CreateFile(ctx context.Context, file *model.File, operatorID string, operatorIP string, now time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(file).Error; err != nil {
+		// 空 custom_path 跳过插入，避免 UNIQUE 约束冲突
+		createSQL := tx
+		if file.CustomPath == "" {
+			createSQL = tx.Omit("custom_path")
+		}
+		if err := createSQL.Create(file).Error; err != nil {
 			return fmt.Errorf("create file: %w", err)
 		}
 		logID, err := identity.NewID()
