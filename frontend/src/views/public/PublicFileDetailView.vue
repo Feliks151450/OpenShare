@@ -1835,7 +1835,7 @@ function performDownloadFile() {
 
 <template>
   <!-- 文件详情页：展示文件元信息、封面图、简介（Markdown）、预览/播放、下载操作，管理员可编辑/删除，访客可反馈 -->
-  <section :class="panelPresentation ? 'px-3 py-3 sm:px-4 sm:py-4' : 'app-container py-2 px-2 sm:py-2 lg:py-2 xl:py-8'">
+  <section :class="panelPresentation ? 'px-3 py-3 sm:px-4 sm:py-4' : 'app-container py-0 px-0 sm:py-2 sm:px-2 lg:py-2 xl:py-2'">
     <div class="mx-auto w-full space-y-6" :class="detailInnerMaxWidthClass">
       <SurfaceCard>
         <!-- 加载状态 -->
