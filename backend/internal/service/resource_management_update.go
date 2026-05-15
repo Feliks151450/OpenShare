@@ -53,9 +53,13 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 	if playbackFallbackURL != "" && playbackURL == "" {
 		return ErrInvalidResourceEdit
 	}
-	coverURL, err := normalizeOptionalCoverURL(input.CoverURL)
-	if err != nil {
-		return ErrInvalidResourceEdit
+	var coverURL *string
+	if input.CoverURL != nil {
+		normalized, err := normalizeOptionalCoverURL(*input.CoverURL)
+		if err != nil {
+			return ErrInvalidResourceEdit
+		}
+		coverURL = &normalized
 	}
 
 	applyDl, allowDl, err := parseDownloadPolicy(input.DownloadPolicy)

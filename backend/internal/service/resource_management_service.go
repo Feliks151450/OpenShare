@@ -47,7 +47,7 @@ type UpdateManagedFileInput struct {
 	PlaybackURL         string
 	PlaybackFallbackURL string
 	ProxySourceURL      string
-	CoverURL            string
+	CoverURL            *string
 	CustomPath          string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string

@@ -41,7 +41,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	playbackURL string,
 	playbackFallbackURL string,
 	proxySourceURL string,
-	coverURL string,
+	coverURL *string,
 	customPath string,
 	applyAllowDownload bool,
 	allowDownload *bool,
@@ -59,8 +59,10 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 			"playback_url":          playbackURL,
 			"playback_fallback_url": playbackFallbackURL,
 		"proxy_source_url":      proxySourceURL,
-			"cover_url":             coverURL,
 			"updated_at":            now,
+		}
+		if coverURL != nil {
+			updates["cover_url"] = *coverURL
 		}
 		appendCustomPathUpdate(updates, customPath)
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)

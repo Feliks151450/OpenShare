@@ -24,7 +24,7 @@ type updateManagedFileRequest struct {
 	PlaybackURL         string  `json:"playback_url"`
 	PlaybackFallbackURL string  `json:"playback_fallback_url"`
 	ProxySourceURL      string  `json:"proxy_source_url"`
-	CoverURL            string  `json:"cover_url"`
+	CoverURL            *string `json:"cover_url"`
 	CustomPath          string  `json:"custom_path"`
 	DownloadPolicy      *string `json:"download_policy"`
 }
