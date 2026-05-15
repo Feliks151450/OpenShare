@@ -17,7 +17,7 @@ const notyf = new Notyf({
   position: { x: "center", y: "top" },
   duration: 3200,
   dismissible: false,
-  ripple: true,
+  ripple: false,
   types: [
     {
       type: "success",

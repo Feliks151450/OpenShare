@@ -1598,6 +1598,7 @@ async function saveDescription() {
         playback_url: editPlaybackUrl.value.trim(),
         playback_fallback_url: editPlaybackUrl.value.trim() ? editPlaybackFallbackUrl.value.trim() : "",
 	        proxy_source_url: editProxySourceUrl.value.trim(),
+        cover_url: editCoverUrl.value.trim(),
         custom_path: editCustomPath.value.trim(),
         download_policy: editDownloadPolicy.value,
       },
