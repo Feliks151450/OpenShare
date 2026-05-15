@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import SurfaceCard from "../ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
@@ -27,6 +28,8 @@ interface ManagedFolderNode {
   cdn_url?: string;
   folders: ManagedFolderNode[];
 }
+
+const router = useRouter();
 
 const loading = ref(false);
 const loaded = ref(false);
@@ -462,6 +465,12 @@ async function createVirtualManagedRoot() {
   }
 }
 
+/* 在新标签页中打开托管目录，方便查看隐藏目录的内容 */
+function goToFolder(folderID: string) {
+  const url = router.resolve({ name: "public-home", query: { folder: folderID } }).href;
+  window.open(url, "_blank");
+}
+
 async function patchManagedRootCatalogVisibility(folderID: string, hide: boolean) {
   catalogVisibilitySaving.value = folderID;
   managedFoldersError.value = "";
@@ -644,6 +653,16 @@ function isManagedRootClientChild(path: string, root: string) {
                   @click="exportDirectoryData(folder.id, folder.name)"
                 >
                   {{ exportingFolderId === folder.id ? "导出中…" : "导出数据" }}
+                </button>
+                <!-- 隐藏目录显示打开按钮，方便直接访问内容 -->
+                <button
+                  v-if="folder.hidePublicCatalog"
+                  type="button"
+                  class="inline-flex h-11 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-4 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="managedFoldersLoading"
+                  @click="goToFolder(folder.id)"
+                >
+                  打开目录
                 </button>
                 <button
                   type="button"
