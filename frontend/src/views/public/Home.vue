@@ -2544,7 +2544,7 @@ async function syncSessionReceiptCode() {
           <!-- 当前文件夹详情头部：名称、统计信息、操作按钮（编辑/创建文件夹/删除/重新扫描/反馈/下载） -->
           <div v-if="currentFolderDetail" class="border-b border-slate-200 px-4 py-5 sm:px-6 dark:border-slate-800">
             <section>
-              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div class="flex flex-col gap-4 sm:flex-col sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1 space-y-3">
                   <p class="break-words text-2xl font-semibold leading-snug tracking-tight text-sky-700 sm:text-2xl dark:text-sky-400">
                     {{ currentFolderDetail.name }}

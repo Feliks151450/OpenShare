@@ -128,6 +128,7 @@ const editRemark = ref("");
 const editPlaybackUrl = ref("");
 const editPlaybackFallbackUrl = ref("");
 const editProxySourceUrl = ref("");
+const editCoverUrl = ref("");
 /* 自定义访问路径（仅管理员可编辑）：如 "doc/report" 对应 /doc/report 访问该文件 */
 const editCustomPath = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
@@ -1443,7 +1444,8 @@ function openDescriptionEditor() {
   editRemark.value = (detail.value?.remark ?? "").trim();
   editPlaybackUrl.value = (detail.value?.playback_url ?? "").trim();
   editPlaybackFallbackUrl.value = (detail.value?.playback_fallback_url ?? "").trim();
-      editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
+  editProxySourceUrl.value = (detail.value?.proxy_source_url ?? "").trim();
+  editCoverUrl.value = (detail.value?.cover_url ?? "").trim();
   editCustomPath.value = (detail.value?.custom_path ?? "").trim();
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
