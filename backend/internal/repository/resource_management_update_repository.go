@@ -84,7 +84,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	name string,
 	description string,
 	remark string,
-	coverURL string,
+	coverURL *string,
 	directLinkPrefix string,
 	customPath string,
 	applyAllowDownload bool,
@@ -99,9 +99,11 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 			"name":               name,
 			"description":        description,
 			"remark":             remark,
-			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
+		}
+		if coverURL != nil {
+			updates["cover_url"] = *coverURL
 		}
 		appendCustomPathUpdate(updates, customPath)
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
@@ -154,7 +156,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	name string,
 	description string,
 	remark string,
-	coverURL string,
+	coverURL *string,
 	directLinkPrefix string,
 	customPath string,
 	applyAllowDownload bool,
@@ -170,9 +172,11 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 			"name":               name,
 			"description":        description,
 			"remark":             remark,
-			"cover_url":          coverURL,
 			"direct_link_prefix": directLinkPrefix,
 			"updated_at":         now,
+		}
+		if coverURL != nil {
+			rootUpdates["cover_url"] = *coverURL
 		}
 		appendCustomPathUpdate(rootUpdates, customPath)
 		appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)

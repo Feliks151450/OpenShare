@@ -59,7 +59,7 @@ type UpdateManagedFolderDescriptionInput struct {
 	Name             string
 	Description      string
 	Remark           string
-	CoverURL         string
+	CoverURL         *string
 	DirectLinkPrefix string
 	CdnURL           string
 	CustomPath       string

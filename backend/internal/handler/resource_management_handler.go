@@ -33,7 +33,7 @@ type updateManagedFolderDescriptionRequest struct {
 	Name             string  `json:"name"`
 	Description      string  `json:"description"`
 	Remark           string  `json:"remark"`
-	CoverURL         string  `json:"cover_url"`
+	CoverURL         *string `json:"cover_url"`
 	DirectLinkPrefix string  `json:"direct_link_prefix"`
 	CdnURL           string  `json:"cdn_url"`
 	CustomPath       string  `json:"custom_path"`
