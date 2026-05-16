@@ -411,6 +411,50 @@ function videoSetPlaybackRate(rate: number) {
   if (!el) return;
   el.playbackRate = rate;
   videoPlaybackRate.value = rate;
+  // 修改倍速时若处于暂停状态，自动开始播放
+  if (el.paused) { void el.play(); videoPlaying.value = true; }
+}
+/* 长按倍速：按住超过 200ms 后临时切换到对应倍速，松开回到 1x。
+   通过定时器区分短按（点击）和长按，避免互相干扰。 */
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+const videoLongPressing = ref(false); // 响应式，模板需要感知长按状态
+const videoLongPressRate = ref<number | null>(null); // 当前长按的倍速值，用于 UI 高亮
+function videoLongPressRateStart(rate: number) {
+  const el = videoRef.value;
+  if (!el) return;
+  // 启动定时器，200ms 后仍未松开则视为长按
+  longPressTimer = setTimeout(() => {
+    videoLongPressing.value = true;
+    videoLongPressRate.value = rate;
+    videoSetPlaybackRate(rate);
+  }, 200);
+}
+function videoLongPressRateEnd() {
+  // 定时器未触发说明是短按，取消定时器
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  // 长按状态下恢复 1x
+  if (videoLongPressing.value) {
+    const el = videoRef.value;
+    if (el) {
+      el.playbackRate = 1;
+      videoPlaybackRate.value = 1;
+    }
+    videoLongPressRate.value = null;
+    // 延迟重置标志，确保后续 click 事件能看到此次是长按并跳过
+    setTimeout(() => { videoLongPressing.value = false; }, 0);
+  }
+}
+/* 点击倍速：已是当前倍速则回到 1x，否则切换到目标倍速。长按松开后跳过 */
+function videoClickPlaybackRate(rate: number) {
+  if (videoLongPressing.value) return;
+  if (videoPlaybackRate.value === rate) {
+    videoSetPlaybackRate(1);
+  } else {
+    videoSetPlaybackRate(rate);
+  }
 }
 function videoTogglePlay() {
   const el = videoRef.value;
@@ -422,6 +466,39 @@ function videoAdjustVolume(delta: number) {
   const el = videoRef.value;
   if (!el) return;
   el.volume = Math.max(0, Math.min(1, el.volume + delta));
+  videoVolume.value = el.volume;
+  videoMuted.value = el.muted;
+}
+/* 音量滑块 */
+const videoVolume = ref(1);
+const videoMuted = ref(false);
+const videoVolumeBeforeMute = ref(1);
+function videoSetVolume(value: number) {
+  const el = videoRef.value;
+  if (!el) return;
+  el.volume = value;
+  videoVolume.value = value;
+  videoMuted.value = el.muted;
+}
+function videoToggleMute() {
+  const el = videoRef.value;
+  if (!el) return;
+  if (el.muted) {
+    el.muted = false;
+    el.volume = videoVolumeBeforeMute.value || 1;
+    videoVolume.value = el.volume;
+    videoMuted.value = false;
+  } else {
+    videoVolumeBeforeMute.value = el.volume || 1;
+    el.muted = true;
+    videoMuted.value = true;
+  }
+}
+function onVideoVolumeChange() {
+  const el = videoRef.value;
+  if (!el) return;
+  videoVolume.value = el.volume;
+  videoMuted.value = el.muted;
 }
 function onVideoPlay() { videoPlaying.value = true; }
 function onVideoPause() { videoPlaying.value = false; }
@@ -2226,6 +2303,7 @@ function performDownloadFile() {
                     @play="onVideoPlay"
                     @pause="onVideoPause"
                     @ratechange="onVideoRateChange"
+                    @volumechange="onVideoVolumeChange"
                   >
                     您的浏览器不支持内嵌视频播放，请使用上方下载按钮获取文件。
                   </video>
@@ -2251,19 +2329,42 @@ function performDownloadFile() {
                   {{ videoPlaying ? "⏸ 暂停" : "▶ 播放" }}
                 </button>
                 <span class="mx-1 h-5 w-px bg-slate-200" />
+                <!-- 倍速按钮：点击切换倍速，长按临时触发后松开回到 1x -->
                 <button
                   v-for="rate in [0.5, 1.25, 1.5, 2]"
                   :key="rate"
                   type="button"
-                  class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0"
-                  :class="videoPlaybackRate === rate ? 'bg-sky-100 text-sky-700' : ''"
-                  @click="videoSetPlaybackRate(rate)"
+                  class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 shrink-0"
+                  :class="{
+                    'bg-sky-100 text-sky-700': videoPlaybackRate === rate && !videoLongPressing
+                  }"
+                  :style="videoLongPressing && videoLongPressRate === rate ? { backgroundColor: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5' } : {}"
+                  @click="videoClickPlaybackRate(rate)"
+                  @mousedown="videoLongPressRateStart(rate)"
+                  @mouseup="videoLongPressRateEnd"
+                  @mouseleave="videoLongPressRateEnd"
+                  @touchstart="videoLongPressRateStart(rate)"
+                  @touchend="videoLongPressRateEnd"
                 >
                   {{ rate }}x
                 </button>
                 <span class="mx-1 h-5 w-px bg-slate-200" />
-                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" title="减小音量" @click="videoAdjustVolume(-0.1)">🔉−</button>
-                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" title="增大音量" @click="videoAdjustVolume(0.1)">🔊+</button>
+                <!-- 音量滑块 + 静音切换 -->
+                <div class="flex items-center gap-1 shrink-0">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    :value="videoVolume"
+                    class="h-7 w-30 cursor-pointer accent-sky-500"
+                    title="音量"
+                    @input="videoSetVolume(($event.target as HTMLInputElement).valueAsNumber)"
+                  >
+                  <button type="button" class="inline-flex h-9 w-10 items-center justify-center rounded-lg bg-white text-xl transition hover:bg-slate-50 shrink-0" :title="videoMuted ? '取消静音' : '静音'" @click="videoToggleMute">
+                    {{ videoMuted ? '🔇' : '🔊' }}
+                  </button>
+                </div>
               </div>
                 </div>
 
