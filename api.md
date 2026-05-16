@@ -478,3 +478,546 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 | 简介／预览区 Markdown 站内链（左键） | `publicMarkdownLinks` → **`router.push`** | `tryMarkdownHrefToReadonlyHashRoute` → **`setHashRoute`**；`/upload` 不拦截 |
 
 若你在扩展更多控制台能力，请同时更新 **`frontend/src/lib/openShareConsole.ts`**、**`frontend/src/lib/openSharePublicFileInfo.ts`** 与 **`frontend/standalone-readonly/readonly.js`**，并同步本文档。
+
+---
+
+## 公开 API
+
+所有公开接口无需登录，`credentials: include`（SPA）或 `credentials: omit`（只读静态页）。
+
+### 目录与文件
+
+#### `GET /api/public/folders`
+
+列出根目录或指定父目录下的子文件夹。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `parent_id` | `string` | 可选，父文件夹 ID。为空时列根目录 |
+
+**响应**：
+```json
+{
+  "items": [{
+    "id": "uuid",
+    "name": "文件夹名",
+    "description": "...",
+    "remark": "...",
+    "cover_url": "...",
+    "is_virtual": false,
+    "updated_at": "ISO8601",
+    "file_count": 42,
+    "download_count": 100,
+    "total_size": 123456
+  }],
+  "download_policy": { ... }
+}
+```
+
+#### `GET /api/public/folders/:folderID`
+
+获取文件夹详情（含面包屑导航、下载策略等）。
+
+**响应**：
+```json
+{
+  "id": "uuid",
+  "name": "...",
+  "description": "...",
+  "remark": "...",
+  "cover_url": "...",
+  "parent_id": "uuid|null",
+  "file_count": 42,
+  "download_count": 100,
+  "total_size": 123456,
+  "updated_at": "ISO8601",
+  "direct_link_prefix": "...",
+  "download_allowed": true,
+  "download_policy": "allow|deny|inherit",
+  "is_virtual": false,
+  "hide_public_catalog": true,
+  "custom_path": "doc",
+  "breadcrumbs": [{ "id": "uuid", "name": "..." }]
+}
+```
+
+#### `GET /api/public/folders/:folderID/files`
+
+列出文件夹内的文件（分页）。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `page` | `int` | 1 | 页码 |
+| `page_size` | `int` | 20 | 每页条数（上限 **100**） |
+| `sort` | `string` | `created_at_desc` | `name_asc` / `download_count_desc` / `created_at_desc` |
+
+**响应**：
+```json
+{
+  "items": [{
+    "id": "uuid",
+    "name": "文件名",
+    "description": "...",
+    "remark": "...",
+    "extension": ".pdf",
+    "cover_url": "...",
+    "playback_url": "...",
+    "proxy_download": false,
+    "proxy_source_url": "...",
+    "folder_direct_download_url": "...",
+    "download_allowed": true,
+    "uploaded_at": "ISO8601",
+    "download_count": 10,
+    "size": 123456,
+    "tags": [{ "id": "uuid", "name": "教材", "color": "#..." }]
+  }],
+  "page": 1,
+  "page_size": 20,
+  "total": 42
+}
+```
+
+#### `GET /api/public/files/:fileID`
+
+获取文件详情。
+
+**响应**：
+```json
+{
+  "id": "uuid",
+  "name": "文件名",
+  "extension": ".pdf",
+  "folder_id": "uuid",
+  "path": "目录/子目录",
+  "description": "...",
+  "remark": "...",
+  "mime_type": "application/pdf",
+  "playback_url": "...",
+  "playback_fallback_url": "...",
+  "proxy_download": false,
+  "proxy_source_url": "...",
+  "cover_url": "...",
+  "folder_direct_download_url": "...",
+  "download_allowed": true,
+  "download_policy": "inherit|allow|deny",
+  "custom_path": "doc/report",
+  "size": 123456,
+  "uploaded_at": "ISO8601",
+  "download_count": 10,
+  "tags": [...]
+}
+```
+
+#### `GET /api/public/files/:fileID/download`
+
+下载文件（302 重定向到直链或流式返回）。视频类文件可加 `?inline=1` 内嵌预览。
+
+#### `GET /api/public/folders/:folderID/download`
+
+打包下载整个文件夹（ZIP），返回流式响应。
+
+#### `GET /api/public/files/hot`
+
+热门下载排行（近七天），可选 `?limit=N`（默认 20）。
+
+#### `GET /api/public/files/latest`
+
+最新上传文件，可选 `?limit=N`（默认 20）。
+
+#### `POST /api/public/files/batch-download`
+
+批量下载，请求体为 `{ "file_ids": ["uuid1", "uuid2"] }`。
+
+#### `POST /api/public/resources/batch-download`
+
+批量下载（含文件夹），请求体为 `{ "file_ids": [...], "folder_ids": [...] }`。
+
+### 搜索
+
+#### `GET /api/public/search`
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `q` | `string` | 搜索关键词 |
+| `page` | `int` | 页码（默认 1） |
+| `page_size` | `int` | 每页条数 |
+
+**响应**：`{ "files": [...], "folders": [...], "total_files": N, "total_folders": N }`
+
+### 自定义路径
+
+#### `GET /api/public/resolve-custom-path?path=xxx`
+
+根据自定义路径解析到文件夹或文件。
+
+**响应**：
+```json
+{
+  "type": "folder|file",
+  "folder_id": "uuid",
+  "file_id": "uuid",
+  "name": "..."
+}
+```
+
+404：未找到对应路径。
+
+### 公告
+
+#### `GET /api/public/announcements`
+
+获取已发布公告列表。响应：`{ "items": [...] }`
+
+### 文件标签
+
+#### `GET /api/public/file-tags`
+
+获取所有预设文件标签定义。响应：`[{ "id": "uuid", "name": "教材", "color": "#..." }]`
+
+### 下载策略
+
+#### `GET /api/public/download-policy`
+
+返回大文件确认阈值和宽布局扩展名。响应：
+```json
+{
+  "large_download_confirm_bytes": 1073741824,
+  "wide_layout_extensions": "md,markdown",
+  "cdn_mode": false
+}
+```
+
+### 上传与反馈
+
+#### `POST /api/public/submissions`
+
+用户上传资料。请求体为 `multipart/form-data`，字段：`files`（文件）、`folder_id`（目标目录）、`description`（说明）。
+
+**响应**：`{ "receipt_code": "ABCD-1234" }`
+
+#### `GET /api/public/submissions/:receiptCode`
+
+通过回执码查询上传处理状态。响应：`{ "status": "pending|approved|rejected", "reason": "..." }`
+
+#### `POST /api/public/feedback`
+
+提交反馈。请求体：`{ "file_id": "...", "folder_id": "...", "description": "问题说明" }`
+
+**响应**：`{ "receipt_code": "ABCD-1234" }`
+
+#### `GET /api/public/feedback/:receiptCode`
+
+查询反馈处理状态。
+
+#### `GET /api/public/receipt-code`
+
+获取或创建当前会话的回执码。
+
+---
+
+## 管理端 API
+
+所有管理端接口需 **admin 登录态**（Cookie / Session），部分接口需特定权限。
+
+### 认证与会话
+
+#### `POST /api/admin/session/login`
+
+请求体：`{ "username": "...", "password": "..." }`
+
+**响应**：`{ "admin": { "id": "...", "username": "...", "display_name": "...", "role": "super_admin|admin", "permissions": [...] } }`
+
+#### `POST /api/admin/session/logout`
+
+#### `GET /api/admin/me`
+
+获取当前管理员信息。
+
+#### `POST /api/admin/session/change-password`
+
+请求体：`{ "old_password": "...", "new_password": "..." }`
+
+#### `PATCH /api/admin/account/profile`
+
+更新账号资料。请求体：`{ "display_name": "...", "avatar_url": "..." }`
+
+### 资源管理（文件/文件夹）
+
+以下接口需要 `resource_moderation` 权限，部分需要 `manage_system` 或超管权限。
+
+#### `GET /api/admin/resources/files`
+
+列出所有托管文件（支持搜索）。参数：`?q=关键词`
+
+#### `PUT /api/admin/resources/files/:fileID`
+
+更新文件元数据。请求体：
+```json
+{
+  "name": "文件名",
+  "description": "简介（Markdown）",
+  "remark": "备注（单行）",
+  "playback_url": "https://...",
+  "playback_fallback_url": "https://...",
+  "proxy_source_url": "https://...",
+  "cover_url": "https://... 或留空",
+  "custom_path": "doc/report",
+  "download_policy": "inherit|allow|deny"
+}
+```
+> `cover_url` 为 `*string` 类型，不传或传空不覆盖数据库已有值；其余字段必传。
+
+#### `DELETE /api/admin/resources/files/:fileID`
+
+删除文件。请求体：`{ "password": "...", "move_to_trash": true }`
+
+#### `POST /api/admin/resources/folders`
+
+创建子文件夹。请求体：
+```json
+{
+  "parent_id": "uuid",
+  "name": "文件夹名",
+  "custom_path": "optional-path"
+}
+```
+
+#### `PUT /api/admin/resources/folders/:folderID`
+
+更新文件夹元数据。请求体：
+```json
+{
+  "name": "名称",
+  "description": "简介（Markdown）",
+  "remark": "备注（单行）",
+  "cover_url": "https://... 或留空",
+  "direct_link_prefix": "https://cdn.example.com/",
+  "custom_path": "doc",
+  "download_policy": "inherit|allow|deny"
+}
+```
+> `cover_url` 为 `*string` 类型，不传不覆盖已有值。
+
+#### `DELETE /api/admin/resources/folders/:folderID`
+
+删除文件夹（含子文件和子目录）。请求体：`{ "password": "...", "move_to_trash": true }`
+
+#### `PUT /api/admin/resources/folders/:folderID/catalog-visibility`
+
+设置托管根目录在公开列表中的可见性。请求体：`{ "hide_public_catalog": true }`
+
+#### `PATCH /api/admin/resources/folders/:folderID/cdn-url`
+
+更新目录的 CDN 直链地址。请求体：`{ "cdn_url": "https://..." }`
+
+#### `PUT /api/admin/resources/folders/:folderID/file-order`
+
+自定义文件排序。请求体：
+```json
+{
+  "orders": [
+    { "file_id": "uuid1", "sort_order": 1 },
+    { "file_id": "uuid2", "sort_order": 2 }
+  ]
+}
+```
+> `sort_order` 为 1-based 连续序号。保存时先清空该目录下所有文件的排序，再写入新的。
+
+#### `POST /api/admin/resources/virtual-folders`
+
+创建虚拟目录（无物理磁盘路径）。请求体同 `POST /api/admin/resources/folders`。
+
+#### `POST /api/admin/resources/virtual-files`
+
+在虚拟目录下添加虚拟文件。请求体：
+```json
+{
+  "folder_id": "uuid",
+  "name": "文件名",
+  "description": "...",
+  "remark": "...",
+  "playback_url": "https://cdn.example.com/file.mp4",
+  "proxy_source_url": "https://lan-ip/file.mp4",
+  "cover_url": "...",
+  "custom_path": "...",
+  "size": 123456
+}
+```
+
+#### `POST /api/admin/probe-url`
+
+探测远程 URL 的可达性和文件大小。请求体：`{ "url": "https://..." }`
+
+**响应**：`{ "ok": true, "size": 123456, "content_type": "video/mp4", "file_name": "video.mp4" }`
+
+#### `POST /api/admin/resources/upload-cover`
+
+上传封面图片（multipart）。字段：`file`（图片文件，格式 PNG/JPG/GIF/WebP/SVG/BMP，最大 10 MB）。
+
+**响应**：`{ "url": "/files/cover-uuid" }`
+
+### 文件标签
+
+#### `GET /api/admin/file-tags`
+
+获取所有预设标签定义。
+
+#### `POST /api/admin/file-tags`
+
+创建标签。请求体：`{ "name": "教材", "color": "#3b82f6" }`
+
+#### `PATCH /api/admin/file-tags/:tagID`
+
+更新标签。请求体形同创建。
+
+#### `DELETE /api/admin/file-tags/:tagID`
+
+删除标签。
+
+#### `PUT /api/admin/resources/files/:fileID/tags`
+
+替换文件的标签。请求体：`{ "tag_ids": ["uuid1", "uuid2"] }`
+
+### 公告管理
+
+需要 `announcements` 权限。
+
+#### `GET /api/admin/announcements`
+
+列表（含草稿和隐藏）。
+
+#### `POST /api/admin/announcements`
+
+创建。请求体：`{ "title": "...", "content_md": "...", "status": "draft|published|hidden", "pinned": false }`
+
+#### `PUT /api/admin/announcements/:announcementID`
+
+更新。
+
+#### `DELETE /api/admin/announcements/:announcementID`
+
+删除。
+
+### 审核管理
+
+#### `GET /api/admin/submissions/pending`
+
+待审核的提交列表（需要 `submission_moderation` 权限）。
+
+#### `POST /api/admin/submissions/:submissionID/approve`
+
+通过提交。请求体：`{ "target_folder_id": "uuid" }`（目标文件夹）
+
+#### `POST /api/admin/submissions/:submissionID/reject`
+
+驳回提交。请求体：`{ "reason": "驳回原因" }`
+
+#### `GET /api/admin/feedback`
+
+反馈列表（需要 `resource_moderation` 权限）。
+
+#### `POST /api/admin/feedback/:feedbackID/approve`
+
+处理反馈（标记已处理）。
+
+#### `POST /api/admin/feedback/:feedbackID/reject`
+
+驳回反馈。请求体：`{ "reason": "驳回说明" }`
+
+### 目录导入
+
+需要 `manage_system` 权限，取消托管需要超管权限。
+
+#### `POST /api/admin/imports/local`
+
+导入本地目录。请求体：`{ "path": "/data/documents" }`
+
+#### `GET /api/admin/imports/directories`
+
+列出已托管目录列表。
+
+#### `DELETE /api/admin/imports/local/:folderID`
+
+取消托管目录。请求体：`{ "password": "超管密码" }`
+
+#### `POST /api/admin/imports/local/:folderID/rescan`
+
+重新扫描托管目录，同步磁盘变更。需要 `resource_moderation` 权限。
+
+#### `GET /api/admin/folders/tree`
+
+获取全部文件夹树结构（用于目录选择器）。
+
+### 系统配置
+
+需要超管权限。
+
+#### `GET /api/admin/system/settings`
+
+获取系统策略配置（上传限制、下载阈值、CDN 模式等）。
+
+**响应**：
+```json
+{
+  "upload": { "max_upload_total_bytes": 5368709120 },
+  "download": {
+    "large_download_confirm_bytes": 1073741824,
+    "wide_layout_extensions": "md,markdown",
+    "cdn_mode": false,
+    "global_cdn_url": "",
+    "directory_cdn_urls": { "folder-id": "https://cdn.example.com/dir.json" }
+  }
+}
+```
+
+#### `PUT /api/admin/system/settings`
+
+更新系统策略配置。请求体形同 GET 响应。
+
+### 导出
+
+需要 admin 登录态。`global` 无需额外权限，`directory` 为 admin 可用。
+
+#### `GET /api/admin/export/global`
+
+导出全局公开数据（公告/热门/最新/标签/策略），详情见上文"管理端导出接口"章节。
+
+#### `GET /api/admin/export/directory/:folderID`
+
+导出指定托管目录完整数据，详情见上文。
+
+### 管理员管理
+
+需要 `manage_admins` 权限。
+
+#### `GET /api/admin/admins`
+
+管理员列表。
+
+#### `POST /api/admin/admins`
+
+创建管理员。请求体：`{ "username": "...", "password": "...", "display_name": "...", "role": "admin", "permissions": [...] }`
+
+#### `PUT /api/admin/admins/:adminID`
+
+更新管理员信息（角色、权限、状态）。
+
+#### `POST /api/admin/admins/:adminID/reset-password`
+
+重置管理员密码。请求体：`{ "new_password": "..." }`
+
+#### `DELETE /api/admin/admins/:adminID`
+
+删除管理员。
+
+### 操作日志
+
+#### `GET /api/admin/operation-logs`
+
+操作日志列表。支持 `?page=&page_size=&q=` 分页和搜索。
+
+### 控制台
+
+#### `GET /api/admin/dashboard/stats`
+
+控制台统计数据。响应：`{ "pending_audit_count": 3 }`

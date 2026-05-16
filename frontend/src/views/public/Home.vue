@@ -2,8 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Database,
   Download,
   FileArchive,
@@ -183,7 +185,7 @@ const markdownCatalogNavigatePresentation = ref<MarkdownCatalogConfirmPresentati
 let markdownCatalogNavigateHydrateGeneration = 0;
 
 const viewMode = ref<"cards" | "table">("cards");
-const sortMode = ref<"name" | "download" | "format" | "modified">("name");
+const sortMode = ref<"smart" | "name" | "download" | "format" | "modified">("smart");
 const sortDirection = ref<"asc" | "desc">("desc");
 /** 卡片视图：先按是否有封面分组，组内仍沿用当前排序方式 */
 const cardCoverFirst = ref(true);
@@ -270,6 +272,16 @@ const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
 const folderHidePublicCatalogDraft = ref(false);
 /* 自定义路径（仅管理员可编辑）：在文件夹编辑弹窗中设置，如 "doc" 对应 /doc 访问该文件夹 */
 const folderCustomPathDraft = ref("");
+
+/* 自定义文件排序 */
+const fileOrderEditorOpen = ref(false);
+const fileOrderItems = ref<{ id: string; name: string }[]>([]);
+const fileOrderSaving = ref(false);
+const fileOrderError = ref("");
+/* 拖拽状态：源索引、悬停目标索引、插入位置（above=目标上方, below=目标下方） */
+const fileOrderDragSrc = ref(-1);
+const fileOrderDragOver = ref(-1);
+const fileOrderDragPos = ref<"above" | "below">("below");
 
 const createFolderModalOpen = ref(false);
 const createFolderNameDraft = ref("");
@@ -1148,7 +1160,7 @@ onMounted(async () => {
     viewMode.value = storedViewMode;
   }
   const storedSortMode = window.localStorage.getItem("public-home-sort-mode");
-  if (storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format" || storedSortMode === "modified") {
+  if (storedSortMode === "smart" || storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format" || storedSortMode === "modified") {
     sortMode.value = storedSortMode;
   }
   const storedSortDirection = window.localStorage.getItem("public-home-sort-direction");
@@ -1896,6 +1908,122 @@ async function confirmDeleteResource() {
   }
 }
 
+/* 自定义文件排序：打开编辑弹窗，拉取文件夹内全部文件（最多 100 条，足够绝大多数目录） */
+async function openFileOrderEditor() {
+  if (!currentFolderID.value) return;
+  fileOrderError.value = "";
+  try {
+    const fid = encodeURIComponent(currentFolderID.value);
+    const fileCount = currentFolderDetail.value?.file_count ?? 0;
+    // 一次拉取全部文件（上限 100，受后端 page_size 限制），按名称排序
+    const resp = await httpClient.get<{ items: { id: string; name: string }[] }>(
+      `/public/folders/${fid}/files?page=1&page_size=${Math.min(fileCount || 1, 100)}&sort=name_asc`,
+    );
+    fileOrderItems.value = resp.items ?? [];
+  } catch {
+    toastError("加载文件列表失败。");
+    return;
+  }
+  fileOrderEditorOpen.value = true;
+}
+
+/* 关闭自定义排序弹窗 */
+function closeFileOrderEditor() {
+  fileOrderEditorOpen.value = false;
+  fileOrderError.value = "";
+}
+
+/* 文件上移 */
+function moveFileOrderUp(index: number) {
+  if (index <= 0) return;
+  const items = fileOrderItems.value;
+  [items[index - 1], items[index]] = [items[index], items[index - 1]];
+}
+
+/* 文件下移 */
+function moveFileOrderDown(index: number) {
+  const items = fileOrderItems.value;
+  if (index >= items.length - 1) return;
+  [items[index], items[index + 1]] = [items[index + 1], items[index]];
+}
+
+/* 拖拽排序处理 */
+function onFileOrderDragStart(e: DragEvent, index: number) {
+  fileOrderDragSrc.value = index;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+  }
+}
+function onFileOrderDragOver(e: DragEvent, index: number) {
+  e.preventDefault();
+  if (!e.dataTransfer) return;
+  e.dataTransfer.dropEffect = "move";
+
+  // 根据鼠标在目标元素中的位置判断插入上方还是下方
+  const el = e.currentTarget as HTMLElement;
+  const rect = el.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  fileOrderDragOver.value = index;
+  fileOrderDragPos.value = y < rect.height / 2 ? "above" : "below";
+}
+function onFileOrderDragLeave() {
+  fileOrderDragOver.value = -1;
+}
+function onFileOrderDrop(e: DragEvent, targetIndex: number) {
+  e.preventDefault();
+  const srcIndex = Number(e.dataTransfer?.getData("text/plain") ?? -1);
+  if (srcIndex < 0) return;
+
+  // 根据悬停位置计算实际插入索引
+  const pos = fileOrderDragPos.value === "above" ? targetIndex : targetIndex + 1;
+  // 如果源在目标之前，移除源后索引需要调整
+  const adjustedPos = srcIndex < pos ? pos - 1 : pos;
+  if (srcIndex === adjustedPos) {
+    fileOrderDragSrc.value = -1;
+    fileOrderDragOver.value = -1;
+    return;
+  }
+
+  const items = fileOrderItems.value;
+  const [moved] = items.splice(srcIndex, 1);
+  items.splice(adjustedPos, 0, moved);
+
+  fileOrderDragSrc.value = -1;
+  fileOrderDragOver.value = -1;
+}
+
+/* 拖拽结束（无论是否成功放置），清除拖拽状态 */
+function onFileOrderDragEnd() {
+  fileOrderDragSrc.value = -1;
+  fileOrderDragOver.value = -1;
+}
+
+/* 保存自定义排序到后端 */
+async function saveFileOrder() {
+  if (!currentFolderID.value) return;
+  fileOrderSaving.value = true;
+  fileOrderError.value = "";
+  const orders = fileOrderItems.value.map((item, i) => ({
+    file_id: item.id,
+    sort_order: i + 1,
+  }));
+  try {
+    await httpClient.request(
+      `/admin/resources/folders/${encodeURIComponent(currentFolderID.value)}/file-order`,
+      { method: "PUT", body: { orders } },
+    );
+    toastSuccess("文件排序已保存。");
+    closeFileOrderEditor();
+    invalidateDirectoryViewCacheFolder(currentFolderID.value);
+    await loadDirectory({ force: true });
+  } catch (err: unknown) {
+    toastError(readApiError(err, "保存排序失败。"));
+  } finally {
+    fileOrderSaving.value = false;
+  }
+}
+
 async function runSearch(keyword: string) {
   const normalizedKeyword = keyword.trim();
   if (!normalizedKeyword) {
@@ -2165,7 +2293,7 @@ watch(viewMode, (mode) => {
   }
 });
 
-function setSortMode(mode: "name" | "download" | "format" | "modified") {
+function setSortMode(mode: "smart" | "name" | "download" | "format" | "modified") {
   sortMode.value = mode;
   window.localStorage.setItem("public-home-sort-mode", mode);
 }
@@ -2176,8 +2304,10 @@ function setSortDirection(direction: "asc" | "desc") {
   window.localStorage.setItem("public-home-sort-direction", direction);
 }
 
-function sortModeLabel(mode: "name" | "download" | "format" | "modified") {
+function sortModeLabel(mode: "smart" | "name" | "download" | "format" | "modified") {
   switch (mode) {
+    case "smart":
+      return "智能排序";
     case "download":
       return "下载量排序";
     case "format":
@@ -2450,9 +2580,12 @@ function fileIconComponent(extension: string) {
 function compareRows(
   left: DirectoryRow,
   right: DirectoryRow,
-  mode: "name" | "download" | "format" | "modified",
+  mode: "smart" | "name" | "download" | "format" | "modified",
   direction: "asc" | "desc",
 ) {
+  // 智能排序：信任服务器返回的顺序（sort_order ASC 已在后端处理），不做客户端重排
+  if (mode === "smart") return 0;
+
   let result = 0;
 
   if (mode === "download") {
@@ -2602,6 +2735,15 @@ async function syncSessionReceiptCode() {
                     @click="openAddVirtualFileModal"
                   >
                     添加虚拟文件
+                  </button>
+                  <!-- 自定义文件排序按钮：仅管理员可见，非虚拟目录且有子文件时可用 -->
+                  <button
+                    v-if="canManageResourceDescriptions && !isCurrentFolderVirtual"
+                    type="button"
+                    class="btn-secondary"
+                    @click="openFileOrderEditor"
+                  >
+                    自定义文件排序
                   </button>
                   <button
                     v-if="canManageResourceDescriptions"
@@ -2775,6 +2917,15 @@ async function syncSessionReceiptCode() {
                   <ChevronRight class="h-4 w-4 rotate-90" />
                 </button>
                 <div v-if="sortMenuOpen" class="absolute left-0 top-full z-20 mt-2 min-w-[176px] rounded-2xl border border-slate-200 bg-white p-1 shadow-lg">
+                  <!-- 智能排序：信任服务器返回的自定义文件顺序（sort_order ASC） -->
+                  <button
+                    type="button"
+                    class="block w-full rounded-xl px-3 py-2 text-left text-sm transition"
+                    :class="sortMode === 'smart' ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'"
+                    @click="setSortMode('smart')"
+                  >
+                    智能排序
+                  </button>
                   <button
                     type="button"
                     class="block w-full rounded-xl px-3 py-2 text-left text-sm transition"
@@ -2910,7 +3061,7 @@ async function syncSessionReceiptCode() {
           </div>
           <div
             v-else-if="viewMode === 'cards'"
-            class="space-y-8 px-4 py-3 sm:px-5"
+            class="space-y-8 px-4 pt-3 pb-5 sm:px-5"
           >
             <div v-for="block in cardDisplayBlocks" :key="block.key">
               <!-- 卡片视图：大图封面卡片布局，有封面的排前面 -->
@@ -4134,6 +4285,95 @@ async function syncSessionReceiptCode() {
     @update:open="folderCoverPickerOpen = $event"
     @confirm="saveFolderCoverUrl"
   />
+
+  <!-- 弹窗：管理员自定义文件排序（拖拽 / 上移下移） -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+      <div v-if="fileOrderEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+          <div class="modal-card panel relative my-auto w-full max-w-lg max-h-[min(85dvh,calc(100dvh-2.5rem))] min-h-0 flex flex-col overflow-hidden p-6">
+            <div class="shrink-0 border-b border-slate-200 pb-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold text-slate-900">自定义文件排序</h3>
+                <div class="flex shrink-0 flex-wrap justify-end gap-3">
+                  <button type="button" class="btn-secondary" @click="closeFileOrderEditor">取消</button>
+                  <button type="button" class="btn-primary" :disabled="fileOrderSaving" @click="saveFileOrder">
+                    {{ fileOrderSaving ? "保存中…" : "保存排序" }}
+                  </button>
+                </div>
+              </div>
+              <p class="mt-2 text-xs text-slate-500">拖拽文件或点击箭头调整顺序。设置后「智能排序」将作为默认排序方式。</p>
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4 [-webkit-overflow-scrolling:touch]">
+              <p v-if="fileOrderError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 mb-4">{{ fileOrderError }}</p>
+              <p v-if="fileOrderItems.length === 0" class="py-8 text-center text-sm text-slate-400">该目录下暂无文件。</p>
+              <ul v-else class="space-y-2">
+                <li
+                  v-for="(item, index) in fileOrderItems"
+                  :key="item.id"
+                  draggable="true"
+                  @dragstart="onFileOrderDragStart($event, index)"
+                  @dragover="onFileOrderDragOver($event, index)"
+                  @dragleave="onFileOrderDragLeave"
+                  @drop="onFileOrderDrop($event, index)"
+                  @dragend="onFileOrderDragEnd"
+                >
+                  <!-- 插入间隙指示线：拖拽悬停在上方时显示 -->
+                  <div
+                    v-if="fileOrderDragOver === index && fileOrderDragPos === 'above'"
+                    class="mx-3 h-0.5 rounded-full bg-sky-500 transition-all"
+                  />
+                  <!-- 文件行 -->
+                  <div
+                    class="flex items-center gap-3 rounded-xl border px-3 py-2.5 transition"
+                    :class="[
+                      fileOrderDragSrc === index ? 'border-sky-300 bg-sky-50/50 opacity-40' : 'border-slate-200 bg-white hover:border-slate-300',
+                    ]"
+                  >
+                    <!-- 拖拽手柄 -->
+                    <span class="cursor-grab text-slate-300 select-none active:cursor-grabbing" title="拖拽排序">⋮⋮</span>
+                    <!-- 序号 -->
+                    <span class="w-6 shrink-0 text-center text-xs font-medium text-slate-400">{{ index + 1 }}</span>
+                    <!-- 文件名 -->
+                    <span class="min-w-0 flex-1 truncate text-sm text-slate-900">{{ item.name }}</span>
+                    <!-- 上移/下移按钮 -->
+                    <div class="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 transition hover:border-slate-300 hover:text-slate-600 disabled:opacity-30"
+                        :disabled="index === 0"
+                        title="上移"
+                        @click="moveFileOrderUp(index)"
+                      >
+                        <ChevronUp class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 transition hover:border-slate-300 hover:text-slate-600 disabled:opacity-30"
+                        :disabled="index === fileOrderItems.length - 1"
+                        title="下移"
+                        @click="moveFileOrderDown(index)"
+                      >
+                        <ChevronDown class="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <!-- 插入间隙指示线：拖拽悬停或最后一个的下方时显示 -->
+                  <div
+                    v-if="
+                      (fileOrderDragOver === index && fileOrderDragPos === 'below') ||
+                      (index === fileOrderItems.length - 1 && fileOrderDragOver === index)
+                    "
+                    class="mx-3 h-0.5 rounded-full bg-sky-500 transition-all"
+                  />
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>

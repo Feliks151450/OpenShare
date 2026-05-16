@@ -16,6 +16,7 @@ import {
   PanelRightOpen,
   Server,
   Share2,
+  Upload,
 } from "lucide-vue-next";
 
 import type { FileTagDefinition, PublicFileTag } from "../../lib/publicFileTags";
@@ -151,6 +152,13 @@ const deletePassword = ref("");
 const deleteMoveToTrash = ref(true);
 const deleteSubmitting = ref(false);
 const deleteError = ref("");
+/* 替换文件：管理员上传新版本覆盖原始文件 */
+const replaceFileModalOpen = ref(false);
+const replaceFileUploading = ref(false);
+const replaceFileMessage = ref("");
+const replaceFileError = ref("");
+const replaceFileDragActive = ref(false);
+const replaceFileInputRef = ref<HTMLInputElement | null>(null);
 const feedbackModalOpen = ref(false);
 const DEFAULT_LARGE_DOWNLOAD_CONFIRM = 1024 * 1024 * 1024;
 const largeDownloadConfirmBytes = ref(DEFAULT_LARGE_DOWNLOAD_CONFIRM);
@@ -389,6 +397,38 @@ function buildAbsoluteDetailPageURL(query?: Record<string, string>): string {
 const videoRef = ref<HTMLVideoElement | null>(null);
 /** 视频播放用：主直链 → 备用 → 文件夹前缀 → 本站；与复制下载的 mediaSourceURL 独立 */
 const videoPlaybackStep = ref(0);
+/* 视频控制工具栏 */
+const videoPlaybackRate = ref(1);
+const videoPlaying = ref(false);
+
+function videoSkip(seconds: number) {
+  const el = videoRef.value;
+  if (!el) return;
+  el.currentTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + seconds));
+}
+function videoSetPlaybackRate(rate: number) {
+  const el = videoRef.value;
+  if (!el) return;
+  el.playbackRate = rate;
+  videoPlaybackRate.value = rate;
+}
+function videoTogglePlay() {
+  const el = videoRef.value;
+  if (!el) return;
+  if (el.paused) { void el.play(); videoPlaying.value = true; }
+  else { el.pause(); videoPlaying.value = false; }
+}
+function videoAdjustVolume(delta: number) {
+  const el = videoRef.value;
+  if (!el) return;
+  el.volume = Math.max(0, Math.min(1, el.volume + delta));
+}
+function onVideoPlay() { videoPlaying.value = true; }
+function onVideoPause() { videoPlaying.value = false; }
+function onVideoRateChange() {
+  const el = videoRef.value;
+  if (el) videoPlaybackRate.value = el.playbackRate;
+}
 
 /** 内嵌播放器完整回退链；禁止下载时仅隐藏下载类 UI，音/视频仍可用本站 /download 以 inline 方式播放（与详情接口 download_allowed 一致）。 */
 function buildVideoPlaybackUrlQueue(fileId: string, d: FileDetailResponse): string[] {
@@ -1578,6 +1618,69 @@ function closeDeleteDialog() {
   deleteSubmitting.value = false;
 }
 
+/* ── 替换文件（管理员上传新版本覆盖原文件）── */
+
+function openReplaceFileModal() {
+  replaceFileError.value = "";
+  replaceFileMessage.value = "";
+  replaceFileModalOpen.value = true;
+}
+
+function closeReplaceFileModal() {
+  replaceFileModalOpen.value = false;
+  replaceFileError.value = "";
+  replaceFileMessage.value = "";
+}
+
+function onReplaceFileDragOver(e: DragEvent) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  replaceFileDragActive.value = true;
+}
+
+function onReplaceFileDragLeave() {
+  replaceFileDragActive.value = false;
+}
+
+function onReplaceFileDrop(e: DragEvent) {
+  e.preventDefault();
+  replaceFileDragActive.value = false;
+  const files = e.dataTransfer?.files;
+  if (files && files.length > 0) {
+    uploadReplaceFile(files[0]);
+  }
+}
+
+function onReplaceFileInputChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) uploadReplaceFile(file);
+  // 重置以便再次选择同一文件时仍能触发 change
+  input.value = "";
+}
+
+async function uploadReplaceFile(file: File) {
+  if (!detail.value) return;
+  replaceFileUploading.value = true;
+  replaceFileError.value = "";
+  replaceFileMessage.value = "";
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    await httpClient.request(
+      `/admin/resources/files/${encodeURIComponent(detail.value.id)}/replace`,
+      { method: "POST", body: formData },
+    );
+    toastSuccess("文件已更新。");
+    closeReplaceFileModal();
+    await loadDetail();
+  } catch (err: unknown) {
+    toastError(readApiError(err, "替换文件失败。"));
+  } finally {
+    replaceFileUploading.value = false;
+  }
+}
+
 async function saveDescription() {
   if (!detail.value || !editorDirty.value) return;
   const normalizedName = editFileName.value.trim();
@@ -1900,7 +2003,7 @@ function performDownloadFile() {
                     size="md"
                   />
                 </div>
-                <!-- 操作按钮行：面板全屏入口、视频元信息切换、编辑/标签/删除（管理员）、反馈、复制直链、磁盘路径复制 -->
+                <!-- 操作按钮行：面板全屏入口、视频元信息切换、反馈、复制链接、下载等 -->
                 <div class="w-full min-w-0">
                   <div
                     class="flex w-full flex-wrap items-center justify-start gap-2 py-1 sm:gap-3"
@@ -1923,39 +2026,6 @@ function performDownloadFile() {
                     @click="videoFileMetaVisible = !videoFileMetaVisible"
                   >
                     <FileText class="h-4 w-4" />
-                  </button>
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary shrink-0 whitespace-nowrap"
-                    @click="openDescriptionEditor"
-                  >
-                    编辑
-                  </button>
-                  <!-- 封面按钮：点击打开封面图片选择器（拖拽上传或输入 URL） -->
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary shrink-0 whitespace-nowrap"
-                    @click="coverPickerOpen = true"
-                  >
-                    封面
-                  </button>
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary shrink-0 whitespace-nowrap"
-                    @click="openTagEditor"
-                  >
-                    标签
-                  </button>
-                  <button
-                    v-if="canManageResourceDescriptions"
-                    type="button"
-                    class="btn-secondary shrink-0 whitespace-nowrap text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
-                    @click="openDeleteDialog"
-                  >
-                    删除
                   </button>
                   <button
                     type="button"
@@ -2013,6 +2083,49 @@ function performDownloadFile() {
                   >
                     <Download class="h-4 w-4" />
                   </button>
+                  </div>
+                </div>
+
+                <!-- 管理员工具栏：编辑、封面、标签、替换文件、删除（仅管理员可见） -->
+                <div v-if="canManageResourceDescriptions" class="w-full min-w-0">
+                  <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <button
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap"
+                      @click="openDescriptionEditor"
+                    >
+                      编辑
+                    </button>
+                    <!-- 封面按钮：点击打开封面图片选择器（拖拽上传或输入 URL） -->
+                    <button
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap"
+                      @click="coverPickerOpen = true"
+                    >
+                      封面
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap"
+                      @click="openTagEditor"
+                    >
+                      标签
+                    </button>
+                    <!-- 替换文件：上传新版本覆盖原文件内容，仅托管目录下的物理文件可用 -->
+                    <button
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap"
+                      @click="openReplaceFileModal"
+                    >
+                      更新文件
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                      @click="openDeleteDialog"
+                    >
+                      删除
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2088,13 +2201,12 @@ function performDownloadFile() {
                 <button
                   v-if="layoutWide && peerListAsideTempHidden"
                   type="button"
-                  class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-700/40 bg-slate-950/85 px-2.5 py-1 text-xs font-medium text-white shadow-md backdrop-blur-sm transition hover:bg-slate-950"
+                  class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-700/40 bg-slate-950/85 px-2.5 py-1 text-xs font-medium text-white shadow-md backdrop-blur-sm transition hover:bg-slate-950"
                   aria-label="显示同目录列表"
                   title="展开同文件夹列表"
                   @click="peerListAsideTempHidden = false"
                 >
                   <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  同目录
                 </button>
                 <div
                   ref="videoStageRef"
@@ -2111,9 +2223,48 @@ function performDownloadFile() {
                     :src="videoPlaybackActiveSrc"
                     @error="onVideoPlaybackError"
                     @loadedmetadata="onVideoLoadedMetadata"
+                    @play="onVideoPlay"
+                    @pause="onVideoPause"
+                    @ratechange="onVideoRateChange"
                   >
                     您的浏览器不支持内嵌视频播放，请使用上方下载按钮获取文件。
                   </video>
+              <!-- 视频控制工具栏：快进/快退、倍速、暂停/播放、音量（放在视频区域下方） -->
+              <div
+                v-if="isVideo"
+                class="mt-3 flex w-full flex-wrap items-center justify-center gap-2 bg-white px-3 py-2.5"
+              >
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(-10)">−10s</button>
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(-20)">−20s</button>
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(-30)">−30s</button>
+                <span class="mx-1 h-5 w-px bg-slate-200" />
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(10)">+10s</button>
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(20)">+20s</button>
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" @click="videoSkip(30)">+30s</button>
+                <span class="mx-1 h-5 w-px bg-slate-200" />
+                <button
+                  type="button"
+                  class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium transition hover:border-slate-300 hover:bg-slate-50 shrink-0"
+                  :class="videoPlaying ? 'text-amber-600 bg-amber-50' : 'text-sky-600 bg-sky-50'"
+                  @click="videoTogglePlay"
+                >
+                  {{ videoPlaying ? "⏸ 暂停" : "▶ 播放" }}
+                </button>
+                <span class="mx-1 h-5 w-px bg-slate-200" />
+                <button
+                  v-for="rate in [0.5, 1.25, 1.5, 2]"
+                  :key="rate"
+                  type="button"
+                  class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0"
+                  :class="videoPlaybackRate === rate ? 'bg-sky-100 text-sky-700' : ''"
+                  @click="videoSetPlaybackRate(rate)"
+                >
+                  {{ rate }}x
+                </button>
+                <span class="mx-1 h-5 w-px bg-slate-200" />
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" title="减小音量" @click="videoAdjustVolume(-0.1)">🔉−</button>
+                <button type="button" class="inline-flex h-7 items-center rounded-lg border border-slate-200 bg-white px-3 py-4 text-m font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shrink-0" title="增大音量" @click="videoAdjustVolume(0.1)">🔊+</button>
+              </div>
                 </div>
 
                 <aside
@@ -2232,13 +2383,12 @@ function performDownloadFile() {
                 <button
                   v-if="pdfPeerSidebar && peerListAsideTempHidden"
                   type="button"
-                  class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
+                  class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
                   aria-label="显示同目录列表"
                   title="展开同文件夹 PDF 列表"
                   @click="peerListAsideTempHidden = false"
                 >
                   <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  同目录
                 </button>
                 <div
                   class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner ring-1 ring-black/5"
@@ -2368,13 +2518,12 @@ function performDownloadFile() {
               <button
                 v-if="netcdfPeerSidebar && peerListAsideTempHidden"
                 type="button"
-                class="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
+                class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
                 aria-label="显示同目录列表"
                 title="展开同文件夹 NetCDF 列表"
                 @click="peerListAsideTempHidden = false"
               >
                 <PanelRightOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                同目录
               </button>
               <div
                 class="rounded-2xl border border-slate-200 bg-slate-50 shadow-inner ring-1 ring-black/5"
@@ -3109,4 +3258,60 @@ function performDownloadFile() {
     @update:open="coverPickerOpen = $event"
     @confirm="saveCoverUrl"
   />
+
+  <!-- 弹窗：管理员替换文件内容（拖拽 / 选择文件上传，覆盖原文件） -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+      <div v-if="replaceFileModalOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+          <div class="modal-card panel relative my-auto w-full max-w-md p-6">
+            <div class="shrink-0 border-b border-slate-200 pb-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold text-slate-900">更新文件</h3>
+                <div class="flex shrink-0 flex-wrap justify-end gap-3">
+                  <button type="button" class="btn-secondary" @click="closeReplaceFileModal">取消</button>
+                </div>
+              </div>
+              <p class="mt-2 text-xs text-slate-500">
+                上传新版本文件将<strong>覆盖</strong>原文件内容。文件名和扩展名保持不变，仅更新文件大小和修改时间。
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                当前文件：<span class="font-medium text-slate-700">{{ detail?.name ?? "" }}</span>
+              </p>
+            </div>
+
+            <div class="pt-5 space-y-4">
+              <!-- 拖拽上传区域 -->
+              <div
+                class="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition"
+                :class="replaceFileDragActive ? 'border-sky-400 bg-sky-50/60' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'"
+                @click="replaceFileInputRef?.click()"
+                @dragover="onReplaceFileDragOver"
+                @dragleave="onReplaceFileDragLeave"
+                @drop="onReplaceFileDrop"
+              >
+                <Upload class="mb-3 h-8 w-8 text-slate-300" />
+                <p class="text-sm text-slate-600">拖拽文件到此处，或<span class="text-sky-600">点击选择</span></p>
+                <p class="mt-1 text-xs text-slate-400">上传的新文件将覆盖原文件</p>
+                <input
+                  ref="replaceFileInputRef"
+                  type="file"
+                  class="hidden"
+                  @change="onReplaceFileInputChange"
+                />
+              </div>
+
+              <p v-if="replaceFileError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ replaceFileError }}</p>
+              <p v-if="replaceFileMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ replaceFileMessage }}</p>
+
+              <div v-if="replaceFileUploading" class="flex items-center justify-center gap-2 text-sm text-slate-500">
+                <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-sky-500" />
+                正在上传并替换文件…
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>

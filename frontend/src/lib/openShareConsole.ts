@@ -208,7 +208,7 @@ export function mountOpenShareConsole(router: Router): void {
       return true;
     },
     setSortMode(mode) {
-      if (!["name", "download", "format", "modified"].includes(mode)) {
+      if (!["smart", "name", "download", "format", "modified"].includes(mode)) {
         console.warn("[OpenShare.home.setSortMode] mode 取值无效");
         return false;
       }

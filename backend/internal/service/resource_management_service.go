@@ -99,3 +99,18 @@ func (s *ResourceManagementService) ListFiles(ctx context.Context, input ListMan
 	}
 	return items, nil
 }
+
+// FileOrderEntry mirrors the repository type for handler use.
+type FileOrderEntry struct {
+	FileID    string `json:"file_id"`
+	SortOrder int64  `json:"sort_order"`
+}
+
+// UpdateFolderFileOrder persists the custom file order for a folder.
+func (s *ResourceManagementService) UpdateFolderFileOrder(ctx context.Context, folderID string, orders []FileOrderEntry, operatorID, operatorIP string) error {
+	repoOrders := make([]repository.FileOrderEntry, len(orders))
+	for i, o := range orders {
+		repoOrders[i] = repository.FileOrderEntry{FileID: o.FileID, SortOrder: o.SortOrder}
+	}
+	return s.repo.UpdateFolderFileOrder(ctx, folderID, repoOrders, operatorID, operatorIP, s.nowFunc())
+}

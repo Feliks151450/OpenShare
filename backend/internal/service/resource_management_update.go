@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -416,4 +417,84 @@ func (s *ResourceManagementService) ensureCoverManagedRoot(ctx context.Context, 
 		return "", fmt.Errorf("create cover managed root folder: %w", err)
 	}
 	return folderID, nil
+}
+
+// ReplaceFile overwrites a managed file on disk with the uploaded content.
+// Only works for managed files that have a physical disk path (non-virtual).
+func (s *ResourceManagementService) ReplaceFile(ctx context.Context, fileID string, fileHeader *multipart.FileHeader, operatorID, operatorIP string) error {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return ErrManagedFileNotFound
+	}
+
+	current, err := s.repo.FindFileByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrManagedFileNotFound
+	}
+
+	// Only managed files with a physical path can be replaced
+	if current.FolderID == nil {
+		return fmt.Errorf("%w: cannot replace a file without a parent folder", ErrInvalidResourceEdit)
+	}
+	folder, err := s.repo.FindFolderByID(ctx, *current.FolderID)
+	if err != nil || folder == nil {
+		return ErrManagedFileNotFound
+	}
+	if folder.IsVirtual {
+		return fmt.Errorf("%w: cannot replace files in virtual directories", ErrInvalidResourceEdit)
+	}
+
+	// Build the disk path matching the original file name
+	diskPath := model.BuildManagedFilePath(folder.SourcePath, current.Name)
+	if diskPath == "" {
+		return fmt.Errorf("%w: cannot resolve file disk path", ErrInvalidResourceEdit)
+	}
+
+	// Verify the uploaded file name matches the original (case-insensitive check for Windows)
+	src, err := fileHeader.Open()
+	if err != nil {
+		return fmt.Errorf("open uploaded file: %w", err)
+	}
+	defer src.Close()
+
+	// Write to a temp file first, then rename to avoid partial writes
+	tmpPath := diskPath + ".tmp"
+	dst, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("create destination file: %w", err)
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, src)
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write file content: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close destination file: %w", err)
+	}
+
+	// Atomic rename to replace the original
+	if err := os.Rename(tmpPath, diskPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("replace file on disk: %w", err)
+	}
+
+	// Update file metadata (extension unchanged since file name stays the same)
+	logID, err := identity.NewID()
+	if err != nil {
+		return fmt.Errorf("generate log id: %w", err)
+	}
+	now := s.nowFunc()
+	// Only update size and timestamp; keep other metadata unchanged
+	_ = filepath.Ext(current.Name) // extension unchanged
+	if err := s.repo.UpdateFileSize(ctx, fileID, written, operatorID, operatorIP, logID, now); err != nil {
+		return fmt.Errorf("update file metadata after replace: %w", err)
+	}
+
+	return nil
 }

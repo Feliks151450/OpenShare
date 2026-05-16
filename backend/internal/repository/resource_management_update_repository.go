@@ -263,3 +263,51 @@ func (r *ResourceManagementRepository) PatchFolderCdnUrl(ctx context.Context, fo
 		return nil
 	})
 }
+
+// FileOrderEntry represents a file's custom sort order entry.
+type FileOrderEntry struct {
+	FileID    string `json:"file_id"`
+	SortOrder int64  `json:"sort_order"`
+}
+
+// UpdateFolderFileOrder batch-updates the custom sort order for files within a folder.
+func (r *ResourceManagementRepository) UpdateFolderFileOrder(ctx context.Context, folderID string, orders []FileOrderEntry, operatorID, operatorIP string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Reset all file orders in this folder
+		if err := tx.Model(&model.File{}).
+			Where("folder_id = ?", folderID).
+			Update("sort_order", 0).Error; err != nil {
+			return fmt.Errorf("reset file order: %w", err)
+		}
+		// Write new orders
+		for _, entry := range orders {
+			if err := tx.Model(&model.File{}).
+				Where("id = ? AND folder_id = ?", entry.FileID, folderID).
+				Update("sort_order", entry.SortOrder).Error; err != nil {
+				return fmt.Errorf("update file sort_order: %w", err)
+			}
+		}
+		logID, err := identity.NewID()
+		if err != nil {
+			return fmt.Errorf("generate log id: %w", err)
+		}
+		return createOperationLogTx(tx, logID, operatorID, "folder_file_order_updated", "folder", folderID, "file order updated", operatorIP, now)
+	})
+}
+
+// UpdateFileSize updates a file's size and updated_at after content replacement.
+func (r *ResourceManagementRepository) UpdateFileSize(ctx context.Context, fileID string, newSize int64, operatorID, operatorIP, logID string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(map[string]any{
+			"size":       newSize,
+			"updated_at": now,
+		})
+		if result.Error != nil {
+			return fmt.Errorf("update file size: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return createOperationLogTx(tx, logID, operatorID, "file_replaced", "file", fileID, "file content replaced", operatorIP, now)
+	})
+}

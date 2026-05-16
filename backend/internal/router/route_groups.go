@@ -160,9 +160,20 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	)
 
 	adminProtected.PUT(
+		"/resources/folders/:folderID/file-order",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.UpdateFolderFileOrder,
+	)
+
+	adminProtected.PUT(
 		"/resources/files/:fileID/tags",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.fileTag.AdminReplaceFileTags,
+	)
+	adminProtected.POST(
+		"/resources/files/:fileID/replace",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.ReplaceFile,
 	)
 	adminProtected.POST(
 		"/resources/virtual-files",

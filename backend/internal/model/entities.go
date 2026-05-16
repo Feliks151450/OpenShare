@@ -122,7 +122,9 @@ type File struct {
 	// CustomPath 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件。空字符串表示未设置。
 	CustomPath string `gorm:"column:custom_path;type:text;uniqueIndex:ux_files_custom_path"`
 	// AllowDownload nil = 继承所在文件夹链；均未设置则默认允许下载
-	AllowDownload *bool     `gorm:"column:allow_download"`
+	AllowDownload *bool `gorm:"column:allow_download"`
+	// SortOrder 自定义排序序号（1-based）。0 表示未参与自定义排序。同一文件夹下序号连续且唯一。
+	SortOrder     int64     `gorm:"column:sort_order;type:integer;not null;default:0"`
 	Size          int64     `gorm:"column:size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime;index:idx_files_created_at,sort:desc"`

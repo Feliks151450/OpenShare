@@ -491,3 +491,73 @@ func (h *ResourceManagementHandler) UploadCoverImage(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"url": url})
 }
+
+// UpdateFolderFileOrder 更新文件夹内文件的自定义排序。
+func (h *ResourceManagementHandler) UpdateFolderFileOrder(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	folderID := ctx.Param("folderID")
+
+	var req struct {
+		Orders []struct {
+			FileID    string `json:"file_id"`
+			SortOrder int64  `json:"sort_order"`
+		} `json:"orders"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if len(req.Orders) == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "orders is required"})
+		return
+	}
+
+	// 转换为 service 层的类型
+	orders := make([]service.FileOrderEntry, len(req.Orders))
+	for i, o := range req.Orders {
+		orders[i] = service.FileOrderEntry{FileID: o.FileID, SortOrder: o.SortOrder}
+	}
+
+	if err := h.service.UpdateFolderFileOrder(ctx.Request.Context(), folderID, orders, identity.AdminID, ctx.ClientIP()); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update file order"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ReplaceFile 用上传的文件覆盖替换原文件（仅托管目录下的物理文件，不支持虚拟文件）。
+func (h *ResourceManagementHandler) ReplaceFile(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	fileID := ctx.Param("fileID")
+
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+
+	if err := h.service.ReplaceFile(ctx.Request.Context(), fileID, fileHeader, identity.AdminID, ctx.ClientIP()); err != nil {
+		switch {
+		case errors.Is(err, service.ErrManagedFileNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to replace file"})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+}

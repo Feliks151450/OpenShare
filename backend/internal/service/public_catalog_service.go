@@ -160,11 +160,14 @@ func (s *PublicCatalogService) ListPublicFolderFiles(ctx context.Context, input 
 		return nil, ErrFolderNotFound
 	}
 
+	// 自定义排序优先：sort_order ASC 作为第一排序键，未设置排序的文件 (sort_order=0) 自然排在后面
+	orderBy := append([]string{"sort_order ASC"}, normalized.OrderBy...)
+
 	files, total, err := s.repository.ListPublicFolderFiles(ctx, repository.PublicFolderFileListQuery{
 		FolderID: normalized.FolderID,
 		Offset:   (normalized.Page - 1) * normalized.PageSize,
 		Limit:    normalized.PageSize,
-		OrderBy:  normalized.OrderBy,
+		OrderBy:  orderBy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list public folder files: %w", err)
