@@ -11,6 +11,8 @@ import { resolveMarkdownImageUrlToHref } from "../../lib/markdown";
 const props = defineProps<{
   modelValue: string;  // 当前封面 URL
   open: boolean;       // 弹窗是否打开
+  /** 由父组件（视频详情页）传入：截取视频当前帧，返回 JPG File 供上传 */
+  captureVideoFrame?: () => Promise<File | null>;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +26,24 @@ const uploadPending = ref(false);
 const uploadError = ref("");
 const previewUrl = ref("");
 const selectedFile = ref<File | null>(null);
+const capturing = ref(false);
+
+/** 点击"当前视频帧"：调用父组件传入的截帧函数，拿到 File 后走 handleFile 流程 */
+async function handleCaptureFrame() {
+  if (!props.captureVideoFrame) return;
+  capturing.value = true;
+  uploadError.value = "";
+  try {
+    const file = await props.captureVideoFrame();
+    if (file) {
+      handleFile(file);
+    }
+  } catch (err: unknown) {
+    uploadError.value = readApiError(err, "截取视频帧失败");
+  } finally {
+    capturing.value = false;
+  }
+}
 
 // 弹窗打开时用当前值初始化草稿
 watch(
@@ -47,7 +67,14 @@ function close() {
   emit("update:open", false);
 }
 
-function confirm() {
+/** 确认：若 URL 为空但已选了图片，自动先上传获取站内链接再确认 */
+async function confirm() {
+  if (!urlDraft.value.trim() && selectedFile.value) {
+    await uploadToServer();
+    if (!urlDraft.value.trim()) {
+      return; // 上传失败，不关闭弹窗
+    }
+  }
   emit("confirm", urlDraft.value.trim());
   close();
 }
@@ -166,6 +193,16 @@ const isInternalUrl = () => urlDraft.value.trim().startsWith("/files/");
             选择图片文件
             <input type="file" accept="image/*" class="hidden" @change="handleFileInput" />
           </label>
+          <!-- 视频详情页传入截帧函数时显示，点击自动截取当前视频帧 -->
+          <button
+            v-if="captureVideoFrame"
+            type="button"
+            class="btn-secondary ml-2"
+            :disabled="capturing"
+            @click="handleCaptureFrame"
+          >
+            {{ capturing ? "截取中…" : "当前视频帧" }}
+          </button>
         </div>
         <div v-else class="space-y-3">
           <img
@@ -178,6 +215,16 @@ const isInternalUrl = () => urlDraft.value.trim().startsWith("/files/");
               重新选择
               <input type="file" accept="image/*" class="hidden" @change="handleFileInput" />
             </label>
+            <!-- 视频详情页传入截帧函数时显示，点击自动截取当前视频帧 -->
+            <button
+              v-if="captureVideoFrame"
+              type="button"
+              class="btn-secondary text-sm"
+              :disabled="capturing"
+              @click="handleCaptureFrame"
+            >
+              {{ capturing ? "截取中…" : "当前视频帧" }}
+            </button>
             <button
               v-if="selectedFile"
               type="button"
@@ -199,7 +246,7 @@ const isInternalUrl = () => urlDraft.value.trim().startsWith("/files/");
         <button
           type="button"
           class="btn-primary"
-          :disabled="!urlDraft.trim()"
+          :disabled="!urlDraft.trim() && !selectedFile"
           @click="confirm"
         >
           确认

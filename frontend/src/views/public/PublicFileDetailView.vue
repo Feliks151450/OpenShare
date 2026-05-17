@@ -429,6 +429,37 @@ function videoSkip(seconds: number) {
   if (!el) return;
   el.currentTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + seconds));
 }
+
+/** 截取视频当前帧，返回 JPG File 供封面选择器上传使用 */
+async function captureVideoFrame(): Promise<File | null> {
+  const video = videoRef.value;
+  if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+    return null;
+  }
+  return new Promise((resolve) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          resolve(null);
+          return;
+        }
+        const file = new File([blob], "video-frame.jpg", { type: "image/jpeg" });
+        resolve(file);
+      },
+      "image/jpeg",
+      0.92,
+    );
+  });
+}
 function videoSetPlaybackRate(rate: number) {
   const el = videoRef.value;
   if (!el) return;
@@ -3360,6 +3391,7 @@ function performDownloadFile() {
   <CoverImagePicker
     :open="coverPickerOpen"
     :model-value="detail?.cover_url ?? ''"
+    :capture-video-frame="isVideo ? captureVideoFrame : undefined"
     @update:open="coverPickerOpen = $event"
     @confirm="saveCoverUrl"
   />
