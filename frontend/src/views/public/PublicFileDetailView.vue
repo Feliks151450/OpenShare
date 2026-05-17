@@ -479,13 +479,6 @@ function videoTogglePlay() {
   if (el.paused) { void el.play(); videoPlaying.value = true; }
   else { el.pause(); videoPlaying.value = false; }
 }
-function videoAdjustVolume(delta: number) {
-  const el = videoRef.value;
-  if (!el) return;
-  el.volume = Math.max(0, Math.min(1, el.volume + delta));
-  videoVolume.value = el.volume;
-  videoMuted.value = el.muted;
-}
 /* 音量滑块 */
 const videoVolume = ref(1);
 const videoMuted = ref(false);

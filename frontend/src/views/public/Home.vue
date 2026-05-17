@@ -303,7 +303,7 @@ function openMoveFileModal() {
 function onMoveFileCompleted() {
   moveFileModalOpen.value = false;
   // 刷新当前目录以反映移动后的变化
-  loadDirectory(true);
+  loadDirectory({ force: true });
 }
 
 const createFolderModalOpen = ref(false);

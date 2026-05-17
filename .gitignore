@@ -63,6 +63,9 @@ node_modules
 
 ### Local Scripts
 /scripts/
+build/*
+/build/*
+/build/
 build/configs/config.local.json
 build/openshare
 build/openshare.pid

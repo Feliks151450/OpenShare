@@ -322,7 +322,7 @@ function readFileAsDataURL(file: File) {
           <div v-if="newTokenValue" class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
             <p class="text-xs font-medium text-emerald-800">Token 已创建，请立即复制保存（关闭后无法再次查看）：</p>
             <div class="mt-2 flex items-center gap-2">
-              <input :value="newTokenValue" class="field flex-1 font-mono text-xs" readonly @focus="$event.target.select()" />
+              <input :value="newTokenValue" class="field flex-1 font-mono text-xs" readonly @focus="($event.target as HTMLInputElement).select()" />
               <button type="button" class="btn-secondary shrink-0" @click="copyNewToken">复制</button>
             </div>
           </div>
