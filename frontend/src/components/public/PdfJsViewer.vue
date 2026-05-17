@@ -229,34 +229,9 @@ function fillViewport() {
   }
 }
 
-async function toggleFullscreen() {
-  if (!outerRef.value) return;
-  if (isFullscreen.value) {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    }
-    // CSS 伪全屏模式直接关闭
-    isFullscreen.value = false;
-  } else {
-    try {
-      // 尝试原生全屏（桌面浏览器 / Android）
-      await outerRef.value.requestFullscreen();
-    } catch {
-      // iPhone Safari 不支持元素全屏，使用 CSS 伪全屏
-      isFullscreen.value = true;
-    }
-  }
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value;
 }
-
-function onFullscreenChange() {
-  isFullscreen.value = !!document.fullscreenElement;
-}
-
-watch(outerRef, (el, _prev, onCleanup) => {
-  if (!el) return;
-  document.addEventListener("fullscreenchange", onFullscreenChange);
-  onCleanup(() => document.removeEventListener("fullscreenchange", onFullscreenChange));
-});
 
 function scrollToPage(num: number) {
   const clamped = Math.max(1, Math.min(num, totalPages.value));
@@ -285,12 +260,19 @@ onBeforeUnmount(() => { cleanup(); });
 </script>
 
 <template>
-  <div
-    ref="outerRef"
-    class="flex flex-col rounded-2xl border border-slate-200 bg-white"
-    :class="isFullscreen ? 'fixed inset-0 z-[130] max-h-none rounded-none' : ''"
-    :style="isFullscreen ? {} : { maxHeight: 'min(75vh, 760px)' }"
-  >
+  <Teleport to="body" :disabled="!isFullscreen">
+    <!-- 全屏遮罩层 -->
+    <div v-if="isFullscreen" class="fixed inset-0 z-[130] bg-slate-100" />
+    <div
+      ref="outerRef"
+      :class="[
+        'flex flex-col bg-white',
+        isFullscreen
+          ? 'fixed inset-0 z-[131] rounded-none'
+          : 'rounded-2xl border border-slate-200',
+      ]"
+      :style="isFullscreen ? {} : { maxHeight: 'min(75vh, 760px)' }"
+    >
     <div
       v-if="totalPages > 0 && !error"
       class="relative z-10 flex shrink-0 flex-wrap items-center justify-center gap-2 border-b border-slate-100 bg-white px-3 py-2 sm:gap-3"
@@ -325,4 +307,5 @@ onBeforeUnmount(() => { cleanup(); });
 
     <div ref="scrollRef" v-show="!loading && !error" class="min-h-0 flex-1 overflow-y-auto bg-slate-100" />
   </div>
+  </Teleport>
 </template>

@@ -216,6 +216,7 @@ const downloadTimestamps = ref<number[]>([]);
 const uploadModalOpen = ref(false);
 const uploadSuccessModalOpen = ref(false);
 const uploadSubmitting = ref(false);
+const uploadProgress = ref(0);
 const uploadMessage = ref("");
 const uploadError = ref("");
 const uploadFileInput = ref<HTMLInputElement | null>(null);
@@ -2193,6 +2194,7 @@ async function submitUpload() {
   }
 
   uploadSubmitting.value = true;
+  uploadProgress.value = 0;
   uploadError.value = "";
   uploadMessage.value = "";
   try {
@@ -2205,7 +2207,41 @@ async function submitUpload() {
     uploadForm.value.entries.forEach((entry) => {
       formData.append("files", entry.file, entry.file.name);
     });
-    const response = await httpClient.post<{ receipt_code: string; item_count: number; status: string }>("/public/submissions", formData);
+
+    // 使用 XHR 以支持上传进度回调
+    const response = await new Promise<{ receipt_code: string; item_count: number; status: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/public/submissions");
+      xhr.withCredentials = true;
+
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          uploadProgress.value = Math.round((e.loaded / e.total) * 100);
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            reject(new Error("invalid response"));
+          }
+        } else if (xhr.status === 400) {
+          reject(new HttpError(400, xhr.responseText));
+        } else if (xhr.status === 409) {
+          reject(new HttpError(409, xhr.responseText));
+        } else {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      });
+
+      xhr.addEventListener("error", () => reject(new Error("network error")));
+      xhr.addEventListener("abort", () => reject(new Error("aborted")));
+
+      xhr.send(formData);
+    });
+
     toastSuccess(response.status === "approved"
       ? `已上传 ${response.item_count} 个文件，请保存回执码 ${response.receipt_code}。`
       : `已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`);
@@ -2230,6 +2266,7 @@ async function submitUpload() {
     }
   } finally {
     uploadSubmitting.value = false;
+    uploadProgress.value = 0;
   }
 }
 
@@ -2835,7 +2872,7 @@ async function syncSessionReceiptCode() {
                   : 'border-b border-slate-200 px-0 py-0'"
               >
                 <div v-if="currentFolderDescriptionHTML" :class="useWideDescriptionLayout
-                ? 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:border-b xl:rounded-none xl:mx-0 xl:mt-0 dark:border-slate-800 dark:bg-slate-900/40'
+                ? 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:border-none xl:rounded-none xl:mx-0 xl:mt-0 xl:pr-0 dark:border-slate-800 dark:bg-slate-900/40'
                 : 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-6 sm:my-6 sm:px-5 sm:py-5 xl:border-b xl:mx-6 xl:my-6 dark:border-slate-800 dark:bg-slate-900/40'"
                 >
                   <div class="space-y-3">
@@ -3140,7 +3177,7 @@ async function syncSessionReceiptCode() {
                     class="mt-2"
                   />
                   <div
-                    class="mt-3 flex w-full min-w-0 text-xs"
+                    class="my-2 flex w-full min-w-0 text-xs"
                     :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"
                   >
                     <template v-if="row.kind === 'file'">
@@ -3261,7 +3298,7 @@ async function syncSessionReceiptCode() {
                       class="mt-2"
                     />
                 <div
-                  class="mt-3 flex w-full min-w-0 text-xs"
+                  class="my-2 flex w-full min-w-0 text-xs"
                   :class="row.kind === 'file' ? 'items-start gap-2' : 'flex-wrap items-center gap-x-4 gap-y-1'"
                 >
                   <template v-if="row.kind === 'file'">
@@ -3919,6 +3956,16 @@ async function syncSessionReceiptCode() {
                 <p v-else class="mt-2 text-sm text-slate-400">当前还没有选择任何文件。</p>
               </div>
             </div>
+<!-- 上传进度条 -->
+              <div v-if="uploadSubmitting" class="space-y-1">
+                <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    class="h-full rounded-full bg-sky-500 transition-[width] duration-300"
+                    :style="{ width: `${uploadProgress}%` }"
+                  />
+                </div>
+                <p class="text-right text-xs text-slate-500">{{ uploadProgress }}%</p>
+              </div>
 <div class="flex justify-end gap-3">
                 <button type="button" class="btn-secondary" @click="closeUploadModal">取消</button>
                 <button type="submit" class="btn-primary" :disabled="uploadSubmitting || uploadCollecting || uploadForm.entries.length === 0">

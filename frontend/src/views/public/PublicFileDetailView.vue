@@ -636,12 +636,10 @@ const peerSidebarSameExtLabel = computed((): "video" | "pdf" | "nc" | null => {
 });
 
 /** 非视频文件的浏览器内预览类型 */
-type DetailPreviewVisualKind = "image" | "pdf" | "markdown" | "plain" | "csv" | "netcdf";
+type DetailPreviewVisualKind = "image" | "pdf" | "markdown" | "plain" | "csv" | "netcdf" | "html" | "json";
 
 const PREVIEW_TEXT_MAX_BYTES = 1_048_576;
 /** 本站 PDF：fetch 为 Blob 再交给 iframe，绕过服务端 Content-Disposition 触发的强制下载 */
-const PDF_PREVIEW_MAX_BYTES = 52_428_800;
-
 const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpeg", "jpg", "jfif", "gif", "webp", "svg", "bmp"]);
 
 function normalizedFileExtension(d: FileDetailResponse): string {
@@ -668,6 +666,12 @@ function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisual
   }
   if (ext === "nc") {
     return "netcdf";
+  }
+  if (mime === "text/html" || ext === "html" || ext === "htm") {
+    return "html";
+  }
+  if (mime === "application/json" || ext === "json") {
+    return "json";
   }
   if (mime === "text/plain" || ext === "txt" || ext === "ncl") {
     return "plain";
@@ -699,7 +703,7 @@ const showNcCopyServerStoragePath = computed(() => {
   return (detail.value.storage_path ?? "").trim().length > 0;
 });
 
-const TEXTUAL_PREVIEW_KINDS = new Set<DetailPreviewVisualKind>(["markdown", "plain", "csv"]);
+const TEXTUAL_PREVIEW_KINDS = new Set<DetailPreviewVisualKind>(["markdown", "plain", "csv", "html", "json"]);
 
 const needsFetchedTextPreview = computed(() => {
   const k = previewVisualKind.value;
@@ -769,6 +773,16 @@ const previewMarkdownRendered = computed(() => {
   return renderSimpleMarkdown(previewFetchedText.value);
 });
 
+/** JSON 预览格式化：解析后带缩进重新序列化，解析失败则返回原文 */
+const previewJsonFormatted = computed(() => {
+  if (previewVisualKind.value !== "json" || !previewFetchedText.value.trim()) return "";
+  try {
+    return JSON.stringify(JSON.parse(previewFetchedText.value), null, 2);
+  } catch {
+    return previewFetchedText.value;
+  }
+});
+
 const previewNetcdfMarkdownHtml = computed(() => {
   if (previewVisualKind.value !== "netcdf" || !previewNetcdfStructure.value) {
     return "";
@@ -792,7 +806,7 @@ const netcdfPeerSidebar = computed(
 
 /** plain 中的 .ncl 与 csv 使用等宽展示 */
 const previewFetchedTextUseMonospace = computed(() => {
-  if (previewVisualKind.value === "csv" || previewVisualKind.value === "netcdf") {
+  if (previewVisualKind.value === "csv" || previewVisualKind.value === "netcdf" || previewVisualKind.value === "json") {
     return true;
   }
   if (previewVisualKind.value === "plain" && detail.value) {
@@ -801,96 +815,11 @@ const previewFetchedTextUseMonospace = computed(() => {
   return false;
 });
 
-const pdfBlobUrl = ref("");
-const pdfPreviewLoading = ref(false);
-const pdfPreviewError = ref("");
-/** PDF 预览方案：从系统设置读取，"blob"（传统 iframe）或 "pdfjs" */
-const pdfPreviewMethod = ref<"blob" | "pdfjs">("blob");
-let pdfBlobAbortController: AbortController | null = null;
-
-function revokePdfBlobUrl() {
-  if (pdfBlobUrl.value) {
-    URL.revokeObjectURL(pdfBlobUrl.value);
-    pdfBlobUrl.value = "";
-  }
-}
-
-function abortPdfBlobFetch() {
-  pdfBlobAbortController?.abort();
-  pdfBlobAbortController = null;
-}
+/** PDF 预览方案：统一使用 PDF.js */
 
 /** PDF 是否走本站 /download（用 fetch+Blob）；外链仍直接 iframe src */
 const pdfPreviewUsesBackendBlob = computed(
   () => previewVisualKind.value === "pdf" && fileUsesBackendDownloadHref(mediaSourceURL.value),
-);
-
-const pdfIframeSrc = computed(() => {
-  if (previewVisualKind.value !== "pdf") {
-    return "";
-  }
-  const direct = absoluteDownloadURL.value;
-  if (!direct) {
-    return "";
-  }
-  if (pdfPreviewUsesBackendBlob.value) {
-    return pdfBlobUrl.value;
-  }
-  return direct;
-});
-
-watch(
-  () =>
-    ({
-      id: fileID.value,
-      kind: previewVisualKind.value,
-      fetchSrc: previewEmbedDownloadURL.value,
-      useBlob: pdfPreviewUsesBackendBlob.value,
-    }) as const,
-  async ({ id, kind, fetchSrc, useBlob }) => {
-    abortPdfBlobFetch();
-    revokePdfBlobUrl();
-    pdfPreviewLoading.value = false;
-    pdfPreviewError.value = "";
-
-    // PDF.js 模式下不触发 blob 下载，避免 50MB 限制弹窗
-    if (!id || kind !== "pdf" || !fetchSrc || !useBlob || pdfPreviewMethod.value === "pdfjs") {
-      return;
-    }
-
-    pdfPreviewLoading.value = true;
-    const ac = new AbortController();
-    pdfBlobAbortController = ac;
-
-    try {
-      const res = await fetch(fetchSrc, { credentials: "include", signal: ac.signal });
-      if (!res.ok) {
-        toastError(res.status === 403 ? "不允许访问该文件。" : "加载 PDF 失败。");
-        return;
-      }
-      const cl = res.headers.get("content-length");
-      if (cl != null) {
-        const n = Number(cl);
-        if (Number.isFinite(n) && n > PDF_PREVIEW_MAX_BYTES) {
-          toastError(`PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`);
-          return;
-        }
-      }
-      const buf = await res.arrayBuffer();
-      if (buf.byteLength > PDF_PREVIEW_MAX_BYTES) {
-        toastError(`PDF 超过内嵌预览上限（约 ${Math.floor(PDF_PREVIEW_MAX_BYTES / 1024 / 1024)} MB），请下载或在新标签页打开。`);
-        return;
-      }
-      pdfBlobUrl.value = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
-    } catch (e: unknown) {
-      if (e instanceof DOMException && e.name === "AbortError") {
-        return;
-      }
-      toastError("无法加载 PDF 预览（网络或浏览器限制）。请尝试「在新标签页打开」或使用下载。");
-    } finally {
-      pdfPreviewLoading.value = false;
-    }
-  },
 );
 
 function abortInlineTextPreview() {
@@ -1017,8 +946,6 @@ watch(
 
 onBeforeUnmount(() => {
   abortInlineTextPreview();
-  abortPdfBlobFetch();
-  revokePdfBlobUrl();
   teardownVideoStageObserver();
   fileDescriptionResizeObserver?.disconnect();
   markdownPeekFileId.value = null;
@@ -1390,7 +1317,6 @@ async function loadLargeDownloadPolicy() {
       const b = Number((live as any).large_download_confirm_bytes);
       if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
       wideLayoutExtensions.value = ((live as any).wide_layout_extensions ?? "").trim();
-      if ((live as any).pdf_preview_method) pdfPreviewMethod.value = (live as any).pdf_preview_method;
     }
     return;
   }
@@ -1401,7 +1327,6 @@ async function loadLargeDownloadPolicy() {
       const b = Number((live as any).large_download_confirm_bytes);
       if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
       wideLayoutExtensions.value = ((live as any).wide_layout_extensions ?? "").trim();
-      if ((live as any).pdf_preview_method) pdfPreviewMethod.value = (live as any).pdf_preview_method;
     }
     if (staticDataLoader.policyApplied) return;
   }
@@ -1415,15 +1340,13 @@ async function loadLargeDownloadPolicy() {
       if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
       wideLayoutExtensions.value = (cached.wide_layout_extensions ?? "").trim();
       if (cached.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(cached.directory_cdn_urls);
-      if ((cached as any).pdf_preview_method) pdfPreviewMethod.value = (cached as any).pdf_preview_method;
       staticDataLoader.markPolicyApplied();
       return;
     }
-    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string; pdf_preview_method?: string; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
+    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
     const b = Number(response.large_download_confirm_bytes);
     if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
     wideLayoutExtensions.value = (response.wide_layout_extensions ?? "").trim();
-    if (response.pdf_preview_method) pdfPreviewMethod.value = response.pdf_preview_method as "blob" | "pdfjs";
     if (response.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(response.directory_cdn_urls);
     if ((response as any).global_cdn_url) staticDataLoader.setGlobalCdnUrl((response as any).global_cdn_url);
     staticDataLoader.markPolicyApplied();
@@ -2583,40 +2506,11 @@ function performDownloadFile() {
                   :class="showPdfPeerAsideExpanded && pdfPeerSidebar ? 'min-w-0 flex-1' : ''"
                 >
                 <div class="relative min-h-[min(70vh,720px)] w-full bg-white">
-                  <!-- PDF.js 预览方案：按页加载，支持大文件 -->
                   <PdfJsViewer
-                    v-if="pdfPreviewMethod === 'pdfjs'"
                     :key="fileID"
                     :file-id="fileID"
                     :src="pdfPreviewUsesBackendBlob ? previewEmbedDownloadURL : absoluteDownloadURL"
                   />
-                  <!-- 传统 iframe Blob 预览方案 -->
-                  <template v-else>
-                    <p
-                      v-if="pdfPreviewUsesBackendBlob && pdfPreviewLoading"
-                      class="px-4 py-16 text-center text-sm text-slate-600"
-                    >
-                      正在加载 PDF…
-                    </p>
-                    <div v-else-if="pdfPreviewError" class="space-y-4 px-4 py-12 text-center">
-                      <p class=" px-4 py-3 text-sm text-rose-700">{{ pdfPreviewError }}</p>
-                      <a
-                        :href="absoluteDownloadURL"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="inline-block text-sm font-medium text-blue-600 underline hover:text-blue-800"
-                      >
-                        在新标签页打开 PDF
-                      </a>
-                    </div>
-                    <iframe
-                      v-else-if="pdfIframeSrc"
-                      :key="`${fileID}:${pdfIframeSrc}`"
-                      title="PDF 预览"
-                      class="block min-h-[min(70vh,720px)] w-full border-0 bg-white"
-                      :src="pdfIframeSrc"
-                    />
-                  </template>
                 </div>
                 </div>
 
@@ -2801,6 +2695,19 @@ function performDownloadFile() {
                     >
                       <div class="markdown-content" v-html="previewNetcdfMarkdownHtml" @click.capture="handleMarkdownInternalLinkNavigate" />
                     </div>
+                    <!-- HTML 预览：沙箱 iframe 直接渲染 -->
+                    <iframe
+                      v-else-if="previewVisualKind === 'html' && previewFetchedText.trim()"
+                      class="min-h-[min(70vh,720px)] w-full rounded-xl bg-white ring-1 ring-slate-950/[0.04]"
+                      sandbox="allow-same-origin"
+                      :srcdoc="previewFetchedText"
+                      title="HTML 预览"
+                    />
+                    <!-- JSON 预览：格式化后等宽展示 -->
+                    <pre
+                      v-else-if="previewVisualKind === 'json'"
+                      class="max-h-[min(70vh,720px)] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-white px-4 py-3 font-mono text-xs leading-relaxed text-slate-800 ring-1 ring-slate-950/[0.04]"
+                    ><template v-if="previewJsonFormatted">{{ previewJsonFormatted }}</template><span v-else class="text-slate-400">（空白文件）</span></pre>
                     <pre
                       v-else
                       class="max-h-[min(70vh,720px)] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-white px-4 py-3 text-slate-800 ring-1 ring-slate-950/[0.04]"
