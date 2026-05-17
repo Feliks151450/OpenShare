@@ -247,6 +247,17 @@ class StaticDataLoader {
   /** 正在进行的 download-policy 请求 Promise，用于并发调用去重与等待 */
   private _policyPromise: Promise<void> | null = null;
 
+  /** 缓存的 /public/download-policy 原始响应，供 live 页面读取（非 export JSON） */
+  private _livePolicy: Record<string, unknown> | null = null;
+
+  get livePolicy(): Record<string, unknown> | null {
+    return this._livePolicy;
+  }
+
+  setLivePolicy(p: Record<string, unknown> | null): void {
+    this._livePolicy = p;
+  }
+
   /** 返回 download-policy 是否已加载完成 */
   get policyApplied(): boolean {
     return this._policyApplied;

@@ -47,6 +47,7 @@ type DownloadPolicy struct {
 	WideLayoutExtensions      string `json:"wide_layout_extensions"`
 	CdnMode                   bool   `json:"cdn_mode"`
 	GlobalCdnUrl              string `json:"global_cdn_url"`
+	PdfPreviewMethod          string `json:"pdf_preview_method"` // "blob" (default) or "pdfjs"
 }
 
 type SystemPolicy struct {
@@ -131,6 +132,7 @@ func (s *SystemSettingService) SavePolicy(ctx context.Context, incoming SystemPo
 	policy.Download.WideLayoutExtensions = incoming.Download.WideLayoutExtensions
 	policy.Download.CdnMode = incoming.Download.CdnMode
 	policy.Download.GlobalCdnUrl = incoming.Download.GlobalCdnUrl
+	policy.Download.PdfPreviewMethod = incoming.Download.PdfPreviewMethod
 	if incoming.CoverUploadDir != "" || policy.CoverUploadDir == "" {
 		policy.CoverUploadDir = incoming.CoverUploadDir
 	}

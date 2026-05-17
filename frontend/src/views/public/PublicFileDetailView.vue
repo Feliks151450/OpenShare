@@ -39,6 +39,7 @@ import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
 import { renderSimpleMarkdown } from "../../lib/markdown";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
+import PdfJsViewer from "../../components/public/PdfJsViewer.vue";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
@@ -803,6 +804,8 @@ const previewFetchedTextUseMonospace = computed(() => {
 const pdfBlobUrl = ref("");
 const pdfPreviewLoading = ref(false);
 const pdfPreviewError = ref("");
+/** PDF 预览方案：从系统设置读取，"blob"（传统 iframe）或 "pdfjs" */
+const pdfPreviewMethod = ref<"blob" | "pdfjs">("blob");
 let pdfBlobAbortController: AbortController | null = null;
 
 function revokePdfBlobUrl() {
@@ -850,7 +853,8 @@ watch(
     pdfPreviewLoading.value = false;
     pdfPreviewError.value = "";
 
-    if (!id || kind !== "pdf" || !fetchSrc || !useBlob) {
+    // PDF.js 模式下不触发 blob 下载，避免 50MB 限制弹窗
+    if (!id || kind !== "pdf" || !fetchSrc || !useBlob || pdfPreviewMethod.value === "pdfjs") {
       return;
     }
 
@@ -1379,9 +1383,26 @@ onMounted(() => {
 const wideLayoutExtensions = ref("");
 
 async function loadLargeDownloadPolicy() {
-  if (staticDataLoader.policyApplied) return;
+  // 如果 policy 已由 PublicLayout 预加载，从 livePolicy 缓存读取
+  if (staticDataLoader.policyApplied) {
+    const live = staticDataLoader.livePolicy;
+    if (live) {
+      const b = Number((live as any).large_download_confirm_bytes);
+      if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+      wideLayoutExtensions.value = ((live as any).wide_layout_extensions ?? "").trim();
+      if ((live as any).pdf_preview_method) pdfPreviewMethod.value = (live as any).pdf_preview_method;
+    }
+    return;
+  }
   if (staticDataLoader.policyPromise) {
     await staticDataLoader.policyPromise;
+    const live = staticDataLoader.livePolicy;
+    if (live) {
+      const b = Number((live as any).large_download_confirm_bytes);
+      if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
+      wideLayoutExtensions.value = ((live as any).wide_layout_extensions ?? "").trim();
+      if ((live as any).pdf_preview_method) pdfPreviewMethod.value = (live as any).pdf_preview_method;
+    }
     if (staticDataLoader.policyApplied) return;
   }
   // 先同步设 Promise 再启动异步工作，消除竞态窗口
@@ -1394,13 +1415,15 @@ async function loadLargeDownloadPolicy() {
       if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
       wideLayoutExtensions.value = (cached.wide_layout_extensions ?? "").trim();
       if (cached.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(cached.directory_cdn_urls);
+      if ((cached as any).pdf_preview_method) pdfPreviewMethod.value = (cached as any).pdf_preview_method;
       staticDataLoader.markPolicyApplied();
       return;
     }
-    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
+    const response = await httpClient.get<{ large_download_confirm_bytes: number; wide_layout_extensions?: string; pdf_preview_method?: string; directory_cdn_urls?: Record<string, string> }>("/public/download-policy");
     const b = Number(response.large_download_confirm_bytes);
     if (Number.isFinite(b) && b > 0) largeDownloadConfirmBytes.value = b;
     wideLayoutExtensions.value = (response.wide_layout_extensions ?? "").trim();
+    if (response.pdf_preview_method) pdfPreviewMethod.value = response.pdf_preview_method as "blob" | "pdfjs";
     if (response.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(response.directory_cdn_urls);
     if ((response as any).global_cdn_url) staticDataLoader.setGlobalCdnUrl((response as any).global_cdn_url);
     staticDataLoader.markPolicyApplied();
@@ -2560,30 +2583,40 @@ function performDownloadFile() {
                   :class="showPdfPeerAsideExpanded && pdfPeerSidebar ? 'min-w-0 flex-1' : ''"
                 >
                 <div class="relative min-h-[min(70vh,720px)] w-full bg-white">
-                  <p
-                    v-if="pdfPreviewUsesBackendBlob && pdfPreviewLoading"
-                    class="px-4 py-16 text-center text-sm text-slate-600"
-                  >
-                    正在加载 PDF…
-                  </p>
-                  <div v-else-if="pdfPreviewError" class="space-y-4 px-4 py-12 text-center">
-                    <p class=" px-4 py-3 text-sm text-rose-700">{{ pdfPreviewError }}</p>
-                    <a
-                      :href="absoluteDownloadURL"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="inline-block text-sm font-medium text-blue-600 underline hover:text-blue-800"
-                    >
-                      在新标签页打开 PDF
-                    </a>
-                  </div>
-                  <iframe
-                    v-else-if="pdfIframeSrc"
-                    :key="`${fileID}:${pdfIframeSrc}`"
-                    title="PDF 预览"
-                    class="block min-h-[min(70vh,720px)] w-full border-0 bg-white"
-                    :src="pdfIframeSrc"
+                  <!-- PDF.js 预览方案：按页加载，支持大文件 -->
+                  <PdfJsViewer
+                    v-if="pdfPreviewMethod === 'pdfjs'"
+                    :key="fileID"
+                    :file-id="fileID"
+                    :src="pdfPreviewUsesBackendBlob ? previewEmbedDownloadURL : absoluteDownloadURL"
                   />
+                  <!-- 传统 iframe Blob 预览方案 -->
+                  <template v-else>
+                    <p
+                      v-if="pdfPreviewUsesBackendBlob && pdfPreviewLoading"
+                      class="px-4 py-16 text-center text-sm text-slate-600"
+                    >
+                      正在加载 PDF…
+                    </p>
+                    <div v-else-if="pdfPreviewError" class="space-y-4 px-4 py-12 text-center">
+                      <p class=" px-4 py-3 text-sm text-rose-700">{{ pdfPreviewError }}</p>
+                      <a
+                        :href="absoluteDownloadURL"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-block text-sm font-medium text-blue-600 underline hover:text-blue-800"
+                      >
+                        在新标签页打开 PDF
+                      </a>
+                    </div>
+                    <iframe
+                      v-else-if="pdfIframeSrc"
+                      :key="`${fileID}:${pdfIframeSrc}`"
+                      title="PDF 预览"
+                      class="block min-h-[min(70vh,720px)] w-full border-0 bg-white"
+                      :src="pdfIframeSrc"
+                    />
+                  </template>
                 </div>
                 </div>
 

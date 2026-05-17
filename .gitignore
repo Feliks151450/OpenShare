@@ -37,6 +37,8 @@ Thumbs.db
 # Local Environment
 /frontend/.env.local
 /frontend/.env.*.local
+/frontend/node_modules/*
+node_modules
 
 ### Backend (Go)
 # Build Artifacts (Binaries & Temp)

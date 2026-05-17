@@ -68,14 +68,10 @@ async function prefetchDownloadPolicy() {
   let taskResolve!: () => void;
   staticDataLoader.setPolicyPromise(new Promise<void>((r) => { taskResolve = r; }));
   try {
-    const resp = await httpClient.get<{
-      cdn_mode?: boolean;
-      global_cdn_url?: string;
-      directory_cdn_urls?: Record<string, string>;
-      large_download_confirm_bytes?: number;
-    }>("/public/download-policy");
-    if (resp.directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject(resp.directory_cdn_urls);
-    if (resp.global_cdn_url) staticDataLoader.setGlobalCdnUrl(resp.global_cdn_url);
+    const resp = await httpClient.get<Record<string, unknown>>("/public/download-policy");
+    if ((resp as any).directory_cdn_urls) staticDataLoader.setCdnUrlMapFromObject((resp as any).directory_cdn_urls);
+    if ((resp as any).global_cdn_url) staticDataLoader.setGlobalCdnUrl((resp as any).global_cdn_url);
+    staticDataLoader.setLivePolicy(resp);
     staticDataLoader.markPolicyApplied();
   } catch {
     /* 忽略 */

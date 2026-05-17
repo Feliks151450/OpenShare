@@ -39,6 +39,7 @@ func (h *SystemSettingHandler) GetPublicDownloadPolicy(ctx *gin.Context) {
 		"large_download_confirm_bytes": policy.Download.LargeDownloadConfirmBytes,
 		"cdn_mode":                     policy.Download.CdnMode,
 		"wide_layout_extensions":       policy.Download.WideLayoutExtensions,
+		"pdf_preview_method":           policy.Download.PdfPreviewMethod,
 	}
 	if policy.Download.CdnMode {
 		resp["global_cdn_url"] = policy.Download.GlobalCdnUrl

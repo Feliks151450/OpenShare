@@ -16,6 +16,7 @@ interface SystemPolicy {
     wide_layout_extensions?: string;
     cdn_mode?: boolean;
     global_cdn_url?: string;
+    pdf_preview_method?: string;
   };
   cover_upload_dir?: string;
 }
@@ -80,6 +81,7 @@ const form = reactive<SystemPolicy>({
     wide_layout_extensions: "",
     cdn_mode: false,
     global_cdn_url: "",
+    pdf_preview_method: "blob",
   },
   cover_upload_dir: "",
 });
@@ -144,6 +146,7 @@ function serializeDownloadState() {
     wide_layout_extensions: (form.download.wide_layout_extensions ?? "").trim(),
     cdn_mode: form.download.cdn_mode ?? false,
     global_cdn_url: (form.download.global_cdn_url ?? "").trim(),
+    pdf_preview_method: form.download.pdf_preview_method ?? "blob",
   });
 }
 
@@ -761,6 +764,26 @@ function isManagedRootClientChild(path: string, root: string) {
           <label class="text-sm font-medium text-slate-700">全局数据 CDN 直链</label>
           <input v-model="form.download.global_cdn_url" type="url" class="field" placeholder="https://cdn.example.com/openshare-global.json" />
           <p class="text-sm text-slate-500">填入导出全局数据 JSON 后在 CDN 上的直链地址。</p>
+        </div>
+        <div class="border-t border-slate-200 pt-5">
+          <h4 class="text-sm font-semibold text-slate-800">PDF 预览方案</h4>
+          <p class="mt-1 text-sm text-slate-500">选择 PDF 文件在详情页的内嵌预览方式。</p>
+        </div>
+        <div class="space-y-3">
+          <label class="inline-flex items-start gap-3 cursor-pointer">
+            <input v-model="form.download.pdf_preview_method" type="radio" value="blob" class="mt-0.5 h-4 w-4 border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <span class="text-sm font-medium text-slate-700">传统模式</span>
+              <p class="text-xs text-slate-500">整份下载后用 iframe 展示，上限 50MB。兼容性最好，但大文件无法预览。</p>
+            </div>
+          </label>
+          <label class="inline-flex items-start gap-3 cursor-pointer">
+            <input v-model="form.download.pdf_preview_method" type="radio" value="pdfjs" class="mt-0.5 h-4 w-4 border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <span class="text-sm font-medium text-slate-700">PDF.js（推荐）</span>
+              <p class="text-xs text-slate-500">按页加载，无文件大小限制，提供翻页/缩放控件。使用 HTTP Range 请求流式加载。</p>
+            </div>
+          </label>
         </div>
         <button type="submit" class="btn-primary" :disabled="uploadSaving || !systemPolicyDirty">
           {{ uploadSaving ? "更新中…" : "确认更新" }}
