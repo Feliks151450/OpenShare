@@ -17,7 +17,7 @@ const props = withDefaults(
 function chipClass() {
   return props.size === "md"
     ? "rounded-lg px-2.5 py-1 text-xs font-medium"
-    : "rounded-md px-2 py-0.5 text-[11px] font-medium leading-snug";
+    : "rounded-md px-2 py-0.5 text-[13px] font-medium leading-snug";
 }
 </script>
 

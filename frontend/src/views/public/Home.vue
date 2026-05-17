@@ -3159,7 +3159,7 @@ async function syncSessionReceiptCode() {
                       <span class="text-slate-500">{{ row.sizeText }}</span>
                     </template>
                   </div>
-                  <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                  <div class="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                     <button
                       type="button"
                       :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
@@ -3281,7 +3281,7 @@ async function syncSessionReceiptCode() {
                   </template>
                 </div>
 
-                <div class="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 py-2.5">
+                <div class="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 py-2.5">
                   <button
                     type="button"
                     :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
