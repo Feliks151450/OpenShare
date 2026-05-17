@@ -66,6 +66,7 @@ node_modules
 build/*
 /build/*
 /build/
-build/configs/config.local.json
-build/openshare
-build/openshare.pid
+/build/configs/config.local.json
+/build/openshare
+/build/openshare.pid
+/build/configs/config.local.json
