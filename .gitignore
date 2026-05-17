@@ -39,6 +39,9 @@ Thumbs.db
 /frontend/.env.*.local
 /frontend/node_modules/*
 node_modules
+/node_modules
+/node_modules/
+package-lock.json
 
 ### Backend (Go)
 # Build Artifacts (Binaries & Temp)
