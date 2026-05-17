@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
+  ArrowRightLeft,
   ChevronDown,
   Clock,
   Database,
@@ -37,6 +38,7 @@ import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
 import { renderSimpleMarkdown } from "../../lib/markdown";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
+import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
@@ -152,6 +154,19 @@ const deletePassword = ref("");
 const deleteMoveToTrash = ref(true);
 const deleteSubmitting = ref(false);
 const deleteError = ref("");
+
+/* 移动文件到其他文件夹 */
+const moveFileModalOpen = ref(false);
+const moveFileTarget = computed<{ id: string; name: string }[]>(() =>
+  detail.value ? [{ id: detail.value.id, name: detail.value.name }] : [],
+);
+const moveFileCurrentFolderId = computed(() => detail.value?.folder_id ?? "");
+
+function onMoveFileCompleted() {
+  moveFileModalOpen.value = false;
+  // 文件已移动到其他文件夹，返回上级目录
+  goBack();
+}
 /* 替换文件：管理员上传新版本覆盖原始文件 */
 const replaceFileModalOpen = ref(false);
 const replaceFileUploading = ref(false);
@@ -181,6 +196,7 @@ watch(
   () => fileID.value,
   () => {
     peerListAsideTempHidden.value = false;
+    peerDrawerOpen.value = false;
   },
 );
 
@@ -1027,18 +1043,38 @@ const layoutWide = computed(
     peerSidebarSameExtLabel.value !== null,
 );
 
+/** 窄屏时以抽屉形式展示同目录列表 */
+const peerDrawerOpen = ref(false);
+
+/** 是否存在可展示的同目录列表（不论宽窄屏） */
+const hasPeerList = computed(() => {
+  if (!folderIdForPeers.value) return false;
+  if (peerSidebarSameExtLabel.value === "video") return folderVideoPeers.value.length > 0 || folderVideoPeersLoading.value;
+  if (peerSidebarSameExtLabel.value === "pdf") return pdfPeerSidebar.value;
+  if (peerSidebarSameExtLabel.value === "nc") return netcdfPeerSidebar.value;
+  return false;
+});
+
 const detailInnerMaxWidthClass = computed(() => {
   if (props.panelPresentation) {
     return "max-w-none";
   }
-  return layoutWide.value ? "max-w-none" : "max-w-8xl";
+  return layoutWide.value && isWideScreen.value ? "max-w-none" : "max-w-8xl";
 });
 
+/** 宽屏时内嵌展示同目录列表；窄屏时以抽屉形式展示 */
 const showVideoPeerAsideExpanded = computed(
-  () => layoutWide.value && !peerListAsideTempHidden.value,
+  () => layoutWide.value && isWideScreen.value && !peerListAsideTempHidden.value,
 );
-const showPdfPeerAsideExpanded = computed(() => pdfPeerSidebar.value && !peerListAsideTempHidden.value);
-const showNetcdfPeerAsideExpanded = computed(() => netcdfPeerSidebar.value && !peerListAsideTempHidden.value);
+const showPdfPeerAsideExpanded = computed(() => pdfPeerSidebar.value && isWideScreen.value && !peerListAsideTempHidden.value);
+const showNetcdfPeerAsideExpanded = computed(() => netcdfPeerSidebar.value && isWideScreen.value && !peerListAsideTempHidden.value);
+
+/** 窄屏或无 layoutWide 时，显示「同目录列表」触发按钮（抽屉入口） */
+const showPeerDrawerButton = computed(() => {
+  if (props.panelPresentation) return false;
+  if (!hasPeerList.value) return false;
+  return !showVideoPeerAsideExpanded.value && !showPdfPeerAsideExpanded.value && !showNetcdfPeerAsideExpanded.value;
+});
 
 const peerSidebarCopy = computed(() => {
   switch (peerSidebarSameExtLabel.value) {
@@ -1144,6 +1180,14 @@ function scrollCurrentPeerIntoView() {
   if (currentPeerLiEl.value) {
     currentPeerLiEl.value.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
+}
+
+/** 打开窄屏同目录抽屉并在渲染后滚动到当前文件 */
+async function openPeerDrawer() {
+  peerListAsideTempHidden.value = false;
+  peerDrawerOpen.value = true;
+  await nextTick();
+  scrollCurrentPeerIntoView();
 }
 
 /** 视频详情页默认折叠「所属文件夹、下载量」等元数据，由用户点击「文件信息」展开 */
@@ -2160,6 +2204,16 @@ function performDownloadFile() {
                   >
                     <Download class="h-4 w-4" />
                   </button>
+                  <!-- 窄屏时同目录列表入口按钮：点击从右侧抽屉展开 -->
+                  <button
+                    v-if="showPeerDrawerButton"
+                    type="button"
+                    class="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 text-sm font-medium text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                    @click="openPeerDrawer"
+                  >
+                    <PanelRightOpen class="h-4 w-4" />
+                    {{ peerSidebarCopy.title }}
+                  </button>
                   </div>
                 </div>
 
@@ -2195,6 +2249,16 @@ function performDownloadFile() {
                       @click="openReplaceFileModal"
                     >
                       更新文件
+                    </button>
+                    <!-- 移动文件：将当前文件移动到其他文件夹 -->
+                    <button
+                      v-if="detail"
+                      type="button"
+                      class="btn-secondary shrink-0 whitespace-nowrap"
+                      @click="moveFileModalOpen = true"
+                    >
+                      <ArrowRightLeft class="mr-1 inline h-4 w-4" />
+                      移动文件
                     </button>
                     <button
                       type="button"
@@ -2233,7 +2297,7 @@ function performDownloadFile() {
               <!-- 宽屏左右布局：简介左栏 + 内容右栏；非宽屏时保持原有上下布局 -->
               <div :class="useWideDescriptionLayout && isWideScreen ? 'xl:flex xl:gap-6 xl:pr-0 xl:max-h-[calc(100vh-13rem)]' : ''">
               <div
-                v-if="showFileDescriptionAbovePreview || (useWideDescriptionLayout && isWideScreen)"
+                v-if="descriptionHTML && showFileDescriptionAbovePreview || (useWideDescriptionLayout && isWideScreen)"
                 :class="[
                   'mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5',
                   useWideDescriptionLayout && isWideScreen ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:rounded-none xl:border-none xl:bg-transparent xl:px-0 xl:py-0' : '',
@@ -2276,7 +2340,7 @@ function performDownloadFile() {
                 "
               >
                 <button
-                  v-if="layoutWide && peerListAsideTempHidden"
+                  v-if="layoutWide && isWideScreen && peerListAsideTempHidden"
                   type="button"
                   class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-700/40 bg-slate-950/85 px-2.5 py-1 text-xs font-medium text-white shadow-md backdrop-blur-sm transition hover:bg-slate-950"
                   aria-label="显示同目录列表"
@@ -2482,7 +2546,7 @@ function performDownloadFile() {
                 ]"
               >
                 <button
-                  v-if="pdfPeerSidebar && peerListAsideTempHidden"
+                  v-if="pdfPeerSidebar && isWideScreen && peerListAsideTempHidden"
                   type="button"
                   class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
                   aria-label="显示同目录列表"
@@ -2617,7 +2681,7 @@ function performDownloadFile() {
                 ]"
               >
               <button
-                v-if="netcdfPeerSidebar && peerListAsideTempHidden"
+                v-if="netcdfPeerSidebar && isWideScreen && peerListAsideTempHidden"
                 type="button"
                 class="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-md backdrop-blur-sm transition hover:bg-slate-50"
                 aria-label="显示同目录列表"
@@ -3410,6 +3474,95 @@ function performDownloadFile() {
                 正在上传并替换文件…
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：移动文件到其他文件夹（管理员功能） -->
+  <MoveFileModal
+    :open="moveFileModalOpen"
+    :files="moveFileTarget"
+    :current-folder-id="moveFileCurrentFolderId"
+    @close="moveFileModalOpen = false"
+    @moved="onMoveFileCompleted"
+  />
+
+  <!-- 窄屏同目录列表抽屉：从右侧滑入，含遮罩 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+      <div
+        v-if="peerDrawerOpen"
+        class="fixed inset-0 z-[119]"
+      >
+        <!-- 遮罩 -->
+        <div
+          class="absolute inset-0 bg-slate-950/30 backdrop-blur-[1px]"
+          @click="peerDrawerOpen = false"
+        />
+        <!-- 抽屉面板 -->
+        <div
+          class="absolute right-0 top-0 flex h-full w-[min(100vw,24rem)] flex-col overflow-hidden border-l border-slate-200 bg-white shadow-xl"
+          @click.stop
+        >
+          <!-- 头部 -->
+          <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+            <p class="text-sm font-medium text-slate-900">{{ peerSidebarCopy.title }}</p>
+            <button
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+              @click="peerDrawerOpen = false"
+            >
+              <PanelRightClose class="h-3.5 w-3.5 shrink-0" />
+            </button>
+          </div>
+          <!-- 列表内容 -->
+          <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            <p v-if="folderVideoPeersLoading" class="px-2 py-6 text-center text-sm text-slate-500">
+              加载列表…
+            </p>
+            <ul v-else-if="folderVideoPeers.length > 0" class="space-y-1">
+              <li v-for="peer in folderVideoPeers" :key="peer.id" :ref="(el: unknown) => { if (peer.id === fileID) currentPeerLiEl = (el as HTMLElement) ?? null; }">
+                <button
+                  v-if="panelPresentation"
+                  type="button"
+                  class="flex w-full min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                  :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
+                  @click="onPeerListNavigate(peer.id); peerDrawerOpen = false"
+                >
+                  <component
+                    :is="peerSidebarListIcon"
+                    class="mt-0.5 h-4 w-4 shrink-0"
+                    :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                    <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                  </div>
+                </button>
+                <RouterLink
+                  v-else
+                  :to="{ name: 'public-file-detail', params: { fileID: peer.id } }"
+                  class="flex min-w-0 items-start gap-2 rounded-xl px-2 py-2 text-left text-sm transition"
+                  :class="peer.id === fileID ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'"
+                  @click="peerDrawerOpen = false"
+                >
+                  <component
+                    :is="peerSidebarListIcon"
+                    class="mt-0.5 h-4 w-4 shrink-0"
+                    :class="peer.id === fileID ? 'text-blue-500' : 'text-slate-400'"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <span class="min-w-0 break-words leading-snug">{{ peer.name }}</span>
+                    <p v-if="(peer.remark ?? '').trim()" class="mt-0.5 truncate text-[11px] leading-4 text-slate-400">{{ (peer.remark ?? '').trim() }}</p>
+                  </div>
+                </RouterLink>
+              </li>
+            </ul>
+            <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
+              {{ peerSidebarCopy.empty }}
+            </p>
           </div>
         </div>
       </div>

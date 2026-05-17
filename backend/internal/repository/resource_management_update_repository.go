@@ -311,3 +311,60 @@ func (r *ResourceManagementRepository) UpdateFileSize(ctx context.Context, fileI
 		return createOperationLogTx(tx, logID, operatorID, "file_replaced", "file", fileID, "file content replaced", operatorIP, now)
 	})
 }
+
+// MoveFileToFolder updates a file's folder_id and adjusts folder stats for both
+// the source and target folder trees.
+func (r *ResourceManagementRepository) MoveFileToFolder(
+	ctx context.Context,
+	fileID string,
+	targetFolderID string,
+	operatorID string,
+	operatorIP string,
+	logID string,
+	now time.Time,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var file model.File
+		if err := tx.Select("id, folder_id, name, size, download_count").
+			Where("id = ?", fileID).
+			Take(&file).Error; err != nil {
+			return err
+		}
+
+		if file.FolderID == nil || *file.FolderID == targetFolderID {
+			return fmt.Errorf("file already in target folder")
+		}
+
+		// 检查目标文件夹下是否已有同名文件
+		var conflictCount int64
+		if err := tx.Model(&model.File{}).
+			Where("folder_id = ? AND name = ? AND id != ?", targetFolderID, file.Name, fileID).
+			Count(&conflictCount).Error; err != nil {
+			return fmt.Errorf("check file name conflict in target folder: %w", err)
+		}
+		if conflictCount > 0 {
+			return fmt.Errorf("target folder already contains a file named %q", file.Name)
+		}
+
+		srcFolderID := *file.FolderID
+
+		// 更新文件的 folder_id
+		if err := tx.Model(&model.File{}).Where("id = ?", fileID).
+			Update("folder_id", targetFolderID).Error; err != nil {
+			return fmt.Errorf("update file folder_id: %w", err)
+		}
+
+		// 调整源文件夹统计（减）
+		if err := model.AdjustFolderStatsTx(tx, &srcFolderID, -file.Size, -file.DownloadCount, -1); err != nil {
+			return fmt.Errorf("adjust source folder stats: %w", err)
+		}
+
+		// 调整目标文件夹统计（加）
+		if err := model.AdjustFolderStatsTx(tx, &targetFolderID, file.Size, file.DownloadCount, 1); err != nil {
+			return fmt.Errorf("adjust target folder stats: %w", err)
+		}
+
+		detail := fmt.Sprintf("moved %q from folder %s to folder %s", file.Name, srcFolderID, targetFolderID)
+		return createOperationLogTx(tx, logID, operatorID, "file_moved", "file", fileID, detail, operatorIP, now)
+	})
+}

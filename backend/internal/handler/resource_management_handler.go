@@ -50,8 +50,22 @@ type deleteManagedResourceRequest struct {
 	MoveToTrash *bool  `json:"move_to_trash"`
 }
 
+type moveFileRequest struct {
+	TargetFolderID string `json:"target_folder_id"`
+}
+
 func NewResourceManagementHandler(service *service.ResourceManagementService, authService *service.AdminAuthService, systemSettingService *service.SystemSettingService) *ResourceManagementHandler {
 	return &ResourceManagementHandler{service: service, authService: authService, systemSettingService: systemSettingService}
+}
+
+// ListFolders 返回所有非虚拟文件夹（不受 hide_public_catalog 影响），供管理员文件夹选择器使用。
+func (h *ResourceManagementHandler) ListFolders(ctx *gin.Context) {
+	items, err := h.service.ListAllFolders(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list folders"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 func (h *ResourceManagementHandler) ListFiles(ctx *gin.Context) {
@@ -555,6 +569,46 @@ func (h *ResourceManagementHandler) ReplaceFile(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to replace file"})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// MoveFile 将文件移动到指定目标文件夹，同步更新数据库和本地磁盘。
+func (h *ResourceManagementHandler) MoveFile(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	fileID := ctx.Param("fileID")
+
+	var req moveFileRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if req.TargetFolderID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "target_folder_id is required"})
+		return
+	}
+
+	if err := h.service.MoveFile(ctx.Request.Context(), service.MoveFileInput{
+		FileID:         fileID,
+		TargetFolderID: req.TargetFolderID,
+		OperatorID:     identity.AdminID,
+		OperatorIP:     ctx.ClientIP(),
+	}); err != nil {
+		switch {
+		case errors.Is(err, service.ErrManagedFileNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to move file"})
 		}
 		return
 	}

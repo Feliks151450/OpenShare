@@ -216,3 +216,24 @@ func (r *ResourceManagementRepository) ListFilePaths(ctx context.Context) ([]Man
 	}
 	return rows, nil
 }
+
+// AdminFolderItem is a lightweight folder entry for the admin folder picker.
+type AdminFolderItem struct {
+	ID       string
+	Name     string
+	ParentID *string
+}
+
+// ListAllFolders returns all non-virtual folders without public catalog filtering.
+func (r *ResourceManagementRepository) ListAllFolders(ctx context.Context) ([]AdminFolderItem, error) {
+	var rows []AdminFolderItem
+	if err := r.db.WithContext(ctx).
+		Model(&model.Folder{}).
+		Select("id, name, parent_id").
+		Where("is_virtual = ?", false).
+		Order("name ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list all folders: %w", err)
+	}
+	return rows, nil
+}

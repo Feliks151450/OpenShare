@@ -567,6 +567,39 @@ func (s *Service) RenameManagedFile(filePath, newName string) (string, error) {
 	return targetPath, nil
 }
 
+// MoveManagedFileToFolder moves a managed file from its current folder source path
+// to a target folder source path on disk. It generates the full source and destination
+// paths internally from the folder source paths and file name.
+func (s *Service) MoveManagedFileToFolder(srcFolderSourcePath, dstFolderSourcePath *string, fileName string) error {
+	fileName = filepath.Base(strings.TrimSpace(fileName))
+	if fileName == "" || fileName == "." || fileName == ".." {
+		return fmt.Errorf("managed file name is empty or invalid")
+	}
+	if srcFolderSourcePath == nil || dstFolderSourcePath == nil {
+		return fmt.Errorf("source and destination folder source paths must not be nil")
+	}
+
+	srcDir := filepath.Clean(strings.TrimSpace(*srcFolderSourcePath))
+	dstDir := filepath.Clean(strings.TrimSpace(*dstFolderSourcePath))
+	if srcDir == "" || dstDir == "" {
+		return fmt.Errorf("source and destination folder source paths must not be empty")
+	}
+	if srcDir == dstDir {
+		return nil
+	}
+
+	srcPath := filepath.Join(srcDir, fileName)
+	dstPath := filepath.Join(dstDir, fileName)
+
+	if _, err := os.Stat(dstPath); err == nil {
+		return ErrManagedFileConflict
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect move destination: %w", err)
+	}
+
+	return MoveRegularFile(srcPath, dstPath)
+}
+
 func (s *Service) EnsureManagedDirectory(dirPath string) error {
 	dirPath = filepath.Clean(strings.TrimSpace(dirPath))
 	if dirPath == "" {

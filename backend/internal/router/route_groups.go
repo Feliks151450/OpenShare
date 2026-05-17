@@ -125,7 +125,12 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	adminProtected.GET("/folders/tree", handlers.imports.GetFolderTree)
 	adminProtected.GET("/export/global", handlers.export_.ExportGlobal)
 	adminProtected.GET("/export/directory/:folderID", handlers.export_.ExportDirectory)
-	adminProtected.POST(
+	adminProtected.GET(
+			"/resources/folders",
+			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+			handlers.resourceManagement.ListFolders,
+		)
+		adminProtected.POST(
 			"/resources/folders",
 			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 			handlers.resourceManagement.CreateFolder,
@@ -174,6 +179,11 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		"/resources/files/:fileID/replace",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.ReplaceFile,
+	)
+	adminProtected.PUT(
+		"/resources/files/:fileID/move",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.MoveFile,
 	)
 	adminProtected.POST(
 		"/resources/virtual-files",

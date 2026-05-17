@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import {
+  ArrowRightLeft,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -53,6 +54,7 @@ import {
 } from "../../lib/markdownCatalogNavigateDisplay";
 import { markdownRoutePublicFileDetailId, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
+import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
 import { collectDroppedEntries, normalizeFiles, type UploadSelectionEntry } from "../../lib/uploads/fileDrop";
 import {
@@ -282,6 +284,23 @@ const fileOrderError = ref("");
 const fileOrderDragSrc = ref(-1);
 const fileOrderDragOver = ref(-1);
 const fileOrderDragPos = ref<"above" | "below">("below");
+
+/* 移动文件到其他文件夹 */
+const moveFileModalOpen = ref(false);
+/** 从多选行中提取文件列表（仅 kind === 'file'）供移动弹窗使用 */
+const moveFileCandidates = computed<{ id: string; name: string }[]>(() =>
+  selectedRows.value.filter((row) => row.kind === "file").map((row) => ({ id: row.id, name: row.name })),
+);
+
+function openMoveFileModal() {
+  moveFileModalOpen.value = true;
+}
+
+function onMoveFileCompleted() {
+  moveFileModalOpen.value = false;
+  // 刷新当前目录以反映移动后的变化
+  loadDirectory(true);
+}
 
 const createFolderModalOpen = ref(false);
 const createFolderNameDraft = ref("");
@@ -2745,6 +2764,16 @@ async function syncSessionReceiptCode() {
                   >
                     自定义文件排序
                   </button>
+                  <!-- 移动文件按钮：选中文件后可将文件移动到其他文件夹 -->
+                  <button
+                    v-if="canManageResourceDescriptions && moveFileCandidates.length > 0"
+                    type="button"
+                    class="btn-secondary"
+                    @click="openMoveFileModal"
+                  >
+                    <ArrowRightLeft class="mr-1 h-4 w-4" />
+                    移动文件 ({{ moveFileCandidates.length }})
+                  </button>
                   <button
                     v-if="canManageResourceDescriptions"
                     type="button"
@@ -3069,7 +3098,7 @@ async function syncSessionReceiptCode() {
             <article
               v-for="row in block.rows"
               :key="`${row.kind}-${row.id}`"
-              class="group relative min-w-0 flex cursor-pointer flex-col overflow-hidden rounded-3xl border transition hover:shadow-sm"
+              class="group relative min-w-xs flex cursor-pointer flex-col overflow-hidden rounded-3xl border transition hover:shadow-sm"
               :class="[
                 row.coverUrl ? 'min-h-0' : 'min-h-[155px] px-2.5 pt-2.5 sm:px-2.5',
                 row.kind === 'folder' ? 'border-slate-200 bg-sky-50/50 hover:border-sky-500 hover:bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-100',
@@ -4374,13 +4403,22 @@ async function syncSessionReceiptCode() {
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 弹窗：移动文件到其他文件夹（管理员功能，复用现有复选框多选） -->
+  <MoveFileModal
+    :open="moveFileModalOpen"
+    :files="moveFileCandidates"
+    :current-folder-id="currentFolderID"
+    @close="moveFileModalOpen = false"
+    @moved="onMoveFileCompleted"
+  />
 </template>
 
 <style scoped>
 .public-home-card-grid {
   display: grid;
   /* 列数由主内容区宽度决定（非整页视口），避免 xl 出现侧栏时仍按视口算 4 列导致卡片过窄 */
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
 }
 
 @keyframes warning-fade-in {

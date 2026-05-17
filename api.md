@@ -745,6 +745,10 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 以下接口需要 `resource_moderation` 权限，部分需要 `manage_system` 或超管权限。
 
+#### `GET /api/admin/resources/folders`
+
+列出所有非虚拟文件夹（不受 `hide_public_catalog` 影响，供管理员文件夹选择器使用）。返回：`{ "items": [{ "id", "name", "parent_id" }] }`
+
 #### `GET /api/admin/resources/files`
 
 列出所有托管文件（支持搜索）。参数：`?q=关键词`
@@ -770,6 +774,16 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 #### `DELETE /api/admin/resources/files/:fileID`
 
 删除文件。请求体：`{ "password": "...", "move_to_trash": true }`
+
+#### `PUT /api/admin/resources/files/:fileID/move`
+
+将文件移动到指定目标文件夹，同步更新数据库和本地磁盘。文件 ID 不变，原链接依然可用。请求体：
+```json
+{
+  "target_folder_id": "uuid"
+}
+```
+> 目标文件夹存在同名文件时返回错误。虚拟目录/文件仅更新 DB 记录。
 
 #### `POST /api/admin/resources/folders`
 
