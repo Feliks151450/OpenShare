@@ -11,10 +11,10 @@ import (
 	"openshare/backend/internal/storage"
 )
 
-func buildRouteHandlers(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *routeHandlers {
+func buildRouteHandlers(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) (*routeHandlers, *routeServices) {
 	repos := buildRouteRepositories(db)
 	services := buildRouteServices(db, cfg, repos, sessionManager)
-	return buildHandlers(cfg, sessionManager, services, repos)
+	return buildHandlers(cfg, sessionManager, services, repos), services
 }
 
 func buildRouteRepositories(db *gorm.DB) *routeRepositories {
@@ -36,6 +36,7 @@ func buildRouteRepositories(db *gorm.DB) *routeRepositories {
 		systemSetting:      repository.NewSystemSettingRepository(db),
 		upload:             repository.NewUploadRepository(db),
 		receiptCode:        repository.NewReceiptCodeRepository(db),
+		apiToken:           repository.NewApiTokenRepository(db),
 	}
 }
 
@@ -72,6 +73,7 @@ func buildRouteServices(
 		search:             searchService,
 		siteVisit:          service.NewSiteVisitService(repos.siteVisit),
 		systemSetting:      systemSettingService,
+		apiToken:           service.NewApiTokenService(repos.apiToken),
 	}
 }
 
@@ -96,5 +98,6 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		siteVisit:          handler.NewSiteVisitHandler(services.siteVisit),
 		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting, repos.imports),
 		export_:            handler.NewExportHandler(services.announcement, services.publicCatalog, services.systemSetting, services.fileTag, services.imports, services.publicDownload, repos.imports),
+		apiToken:           handler.NewApiTokenHandler(services.apiToken),
 	}
 }

@@ -6,9 +6,6 @@
 实现位置：
 
 - **SPA**：`frontend` 打包的主站，`main.ts` 挂载后可用。
-- **只读静态页**：`frontend/standalone-readonly/readonly.js`（hash 路由，便于静态／`file://` 部署）。
-
-两端的 **方法签名与语义尽量一致**；下文先写共有约定，再标出差异。
 
 ---
 
@@ -17,7 +14,7 @@
 | 字段 | 类型 | 含义 |
 |------|------|------|
 | `version` | `string` | 当前文档对应实现版本：**`1.0`**。 |
-| `runtime` | `'spa' \| 'readonly'` | **`spa`**：Vue Router + History；**`readonly`**：hash 路由。 |
+| `runtime` | `'spa'` | **`spa`**：Vue Router + History |
 | `nav` | object | 页面导航相关。 |
 | `home` | object | 首页目录列表视图／排序偏好（不涉及搜索关键词等临时状态）。 |
 | `staticData` | `StaticDataLoader` | CDN 静态数据加载器，可配置预导出 JSON 直链以替代部分公开 API 请求。 |
@@ -98,8 +95,6 @@
 
 **参数**：`opts?: { replace?: boolean }`。  
 **返回**：`Promise<void>`。
-
-**只读静态页**：**不提供** `/upload`。方法返回 **`Promise.resolve(false)`**；并在 **首次调用**时在控制台 **`console.warn`** 说明静态页不包含该路由。**无 `opts`** 重载兼容。
 
 ---
 
@@ -395,7 +390,7 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 ---
 
-## 管理端导出接口
+# 管理端导出接口
 
 管理员可在后台"系统配置 → 当前已托管文件目录"区域导出静态 JSON 文件，上传至 CDN 后供前端 `staticData` 加载。
 
@@ -481,9 +476,8 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 ---
 
-## 公开 API
+# 公开 API
 
-所有公开接口无需登录，`credentials: include`（SPA）或 `credentials: omit`（只读静态页）。
 
 ### 目录与文件
 
@@ -691,9 +685,21 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 #### `POST /api/public/submissions`
 
-用户上传资料。请求体为 `multipart/form-data`，字段：`files`（文件）、`folder_id`（目标目录）、`description`（说明）。
+用户上传资料。请求体为 `multipart/form-data`，字段：
 
-**响应**：`{ "receipt_code": "ABCD-1234" }`
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `files` | file[] | 上传文件列表 |
+| `folder_id` | string | 目标目录 ID |
+| `description` | string | 资料简介（可选） |
+| `manifest` | string (JSON) | 文件路径清单，格式 `[{ "relative_path": "subdir/file.txt" }]` |
+| `overwrite` | string | 设为 `"1"` 时覆盖同名文件（仅管理员直接上传生效，不产生新 DB 记录） |
+
+管理员（具有 `submission_moderation` 权限或超管）上传时直接通过审核，`status` 返回 `"approved"`；访客上传进入审核池。
+
+> **外部 API 调用**：需携带 `Authorization: Bearer <token>` 头（token 从 `POST /api/admin/session/login` 获取）。校验通过后获得管理员身份，上传直接通过审核。
+
+**响应**：`{ "receipt_code": "ABCD-1234", "status": "approved|pending", "item_count": 2, "names": [...], "uploaded_at": "..." }`
 
 #### `GET /api/public/submissions/:receiptCode`
 
@@ -715,11 +721,189 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 ---
 
-## 管理端 API
+# 管理端 API
 
 所有管理端接口需 **admin 登录态**（Cookie / Session），部分接口需特定权限。
 
 ### 认证与会话
+
+所有管理端接口均支持两种鉴权方式：
+
+| 方式 | 适用场景 | 说明 |
+|------|---------|------|
+| Cookie | 浏览器访问管理后台 | 登录后自动设置，无需手动处理 |
+| Bearer Token | 外部 API 调用（curl/脚本/第三方服务） | 在账号设置中创建 API Token，放入 `Authorization: Bearer <osk_...>` 头 |
+
+API Token 持久有效，仅手动删除时失效。退出登录不会使 Token 失效。所有 `RequireAdminAuth` / `RequireAdminPermission` / `RequireSuperAdmin` 保护的接口均可通过 Bearer Token 调用。
+
+### 多语言调用示例
+
+以下示例均使用 API Token 进行鉴权。`<BASE_URL>` 替换为实际部署地址，`<TOKEN>` 替换为创建的 API Token。
+
+#### curl
+
+```bash
+# 获取当前管理员信息
+curl -s https://<BASE_URL>/api/admin/me \
+  -H "Authorization: Bearer <TOKEN>"
+
+# 上传文件（管理员直接通过审核）
+curl -X POST https://<BASE_URL>/api/public/submissions \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "folder_id=<FOLDER_ID>" \
+  -F "files=@test.pdf" \
+  -F 'manifest=[{"relative_path":"test.pdf"}]'
+
+# 批量上传
+curl -X POST https://<BASE_URL>/api/public/submissions \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "folder_id=<FOLDER_ID>" \
+  -F "files=@a.pdf" \
+  -F "files=@b.pdf" \
+  -F 'manifest=[{"relative_path":"a.pdf"},{"relative_path":"b.pdf"}]'
+
+# 覆盖同名文件
+curl -X POST https://<BASE_URL>/api/public/submissions \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "folder_id=<FOLDER_ID>" \
+  -F "files=@test.pdf" \
+  -F "overwrite=1"
+
+# 列出所有托管文件
+curl -s https://<BASE_URL>/api/admin/resources/files \
+  -H "Authorization: Bearer <TOKEN>"
+
+# 更新文件元数据
+curl -s -X PUT https://<BASE_URL>/api/admin/resources/files/<FILE_ID> \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"新文件名","description":"简介","remark":"备注"}'
+
+# 删除文件
+curl -s -X DELETE https://<BASE_URL>/api/admin/resources/files/<FILE_ID> \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"<ADMIN_PASSWORD>","move_to_trash":true}'
+
+# 审核通过提交
+curl -s -X POST https://<BASE_URL>/api/admin/submissions/<SUBMISSION_ID>/approve \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+#### Python
+
+```python
+import requests
+
+BASE = "https://<BASE_URL>/api"
+HEADERS = {"Authorization": "Bearer <TOKEN>"}
+
+# 获取管理员信息
+r = requests.get(f"{BASE}/admin/me", headers=HEADERS)
+print(r.json())
+
+# 上传文件
+with open("test.pdf", "rb") as f:
+    r = requests.post(
+        f"{BASE}/public/submissions",
+        headers=HEADERS,
+        files={"files": ("test.pdf", f, "application/pdf")},
+        data={
+            "folder_id": "<FOLDER_ID>",
+            "manifest": '[{"relative_path":"test.pdf"}]',
+        },
+    )
+    print(r.json())
+
+# 列出文件
+r = requests.get(f"{BASE}/admin/resources/files", headers=HEADERS)
+for item in r.json()["items"]:
+    print(item["id"], item["name"])
+
+# 更新文件
+r = requests.put(
+    f"{BASE}/admin/resources/files/<FILE_ID>",
+    headers={**HEADERS, "Content-Type": "application/json"},
+    json={"name": "新名称", "description": "简介"},
+)
+print(r.status_code)
+```
+
+#### JavaScript (fetch)
+
+```js
+const BASE = "https://<BASE_URL>/api";
+const HEADERS = { Authorization: "Bearer <TOKEN>" };
+
+// 获取管理员信息
+const me = await fetch(`${BASE}/admin/me`, { headers: HEADERS }).then(r => r.json());
+console.log(me.admin.display_name);
+
+// 上传文件
+const form = new FormData();
+form.set("folder_id", "<FOLDER_ID>");
+form.set("manifest", JSON.stringify([{ relative_path: "test.pdf" }]));
+form.append("files", fileBlob, "test.pdf");  // fileBlob 为 File 或 Blob 对象
+
+const upload = await fetch(`${BASE}/public/submissions`, {
+  method: "POST",
+  headers: HEADERS,  // 注意：不要手动设置 Content-Type，浏览器会自动带 boundary
+  body: form,
+}).then(r => r.json());
+console.log(upload.status, upload.item_count);
+
+// 查询下载策略
+const policy = await fetch(`${BASE}/public/download-policy`).then(r => r.json());
+console.log(policy.large_download_confirm_bytes);
+```
+
+#### Go
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "mime/multipart"
+    "net/http"
+    "os"
+)
+
+const baseURL = "https://<BASE_URL>/api"
+const token = "<TOKEN>"
+
+func main() {
+    // 获取管理员信息
+    req, _ := http.NewRequest("GET", baseURL+"/admin/me", nil)
+    req.Header.Set("Authorization", "Bearer "+token)
+    resp, _ := http.DefaultClient.Do(req)
+    body, _ := io.ReadAll(resp.Body)
+    resp.Body.Close()
+    fmt.Println(string(body))
+
+    // 上传文件
+    var buf bytes.Buffer
+    w := multipart.NewWriter(&buf)
+    w.WriteField("folder_id", "<FOLDER_ID>")
+    w.WriteField("manifest", `[{"relative_path":"test.pdf"}]`)
+    fw, _ := w.CreateFormFile("files", "test.pdf")
+    file, _ := os.Open("test.pdf")
+    io.Copy(fw, file)
+    file.Close()
+    w.Close()
+
+    req, _ = http.NewRequest("POST", baseURL+"/public/submissions", &buf)
+    req.Header.Set("Authorization", "Bearer "+token)
+    req.Header.Set("Content-Type", w.FormDataContentType())
+    resp, _ = http.DefaultClient.Do(req)
+    body, _ = io.ReadAll(resp.Body)
+    resp.Body.Close()
+    fmt.Println(string(body))
+}
+```
 
 #### `POST /api/admin/session/login`
 
@@ -731,7 +915,82 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 #### `GET /api/admin/me`
 
-获取当前管理员信息。
+获取当前管理员信息。响应为：
+
+```json
+{
+  "admin": {
+    "id": "uuid",
+    "username": "superadmin",
+    "display_name": "xxx",
+    "avatar_url": "https://...",
+    "role": "super_admin|admin",
+    "status": "active|disabled",
+    "permissions": ["submission_moderation", "resource_moderation"]
+  }
+}
+```
+
+> **注意**：`role === "super_admin"` 时 `permissions` 为 `null`，但超管天然具有所有权限。普通管理员的 `permissions` 为字符串数组，逐一列出已分配的权限。前端判断权限时应同时检查 `role === "super_admin" || permissions.includes("目标权限")`。
+
+### API Token 管理
+
+用于创建和管理外部 API 调用的 Bearer Token。
+
+#### `GET /api/admin/api-tokens`
+
+列出当前管理员的所有 API Token。响应：`{ "items": [{ "id", "name", "last_used_at", "created_at" }] }`
+
+#### `POST /api/admin/api-tokens`
+
+创建新的 API Token。请求体：`{ "name": "CLI 脚本" }`。响应：`{ "id", "name", "token": "osk_xxx", "created_at" }`
+
+> `token` 仅在创建时返回一次，之后无法再次查看。Token 前缀 `osk_`，持久有效直至手动删除。
+
+#### `DELETE /api/admin/api-tokens/:tokenID`
+
+删除指定 API Token。
+
+**API Token 管理示例**（通过 Cookie 登录后在浏览器中操作，或使用已有 Token 管理）：
+
+```bash
+# 创建 Token
+curl -s -X POST https://<BASE_URL>/api/admin/api-tokens \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"CI 部署脚本"}'
+# → {"id":"...","name":"CI 部署脚本","token":"osk_xxxx","created_at":"..."}
+
+# 列出所有 Token
+curl -s https://<BASE_URL>/api/admin/api-tokens \
+  -H "Authorization: Bearer <TOKEN>"
+# → {"items":[{"id":"...","name":"CI 部署脚本","last_used_at":"...","created_at":"..."}]}
+
+# 删除 Token
+curl -s -X DELETE https://<BASE_URL>/api/admin/api-tokens/<TOKEN_ID> \
+  -H "Authorization: Bearer <TOKEN>"
+# → 204 No Content
+```
+
+```python
+# 创建 Token
+r = requests.post(
+    f"{BASE}/admin/api-tokens",
+    headers={**HEADERS, "Content-Type": "application/json"},
+    json={"name": "Python 脚本"},
+)
+token = r.json()["token"]  # 仅此一次可获取
+print(f"新 Token: {token}")
+
+# 列出 Token
+r = requests.get(f"{BASE}/admin/api-tokens", headers=HEADERS)
+for t in r.json()["items"]:
+    print(t["id"], t["name"], t["last_used_at"])
+
+# 删除 Token
+r = requests.delete(f"{BASE}/admin/api-tokens/<TOKEN_ID>", headers=HEADERS)
+print(r.status_code)  # 204
+```
 
 #### `POST /api/admin/session/change-password`
 

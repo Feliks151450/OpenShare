@@ -50,6 +50,9 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	adminProtected.GET("/dashboard/stats", handlers.adminDashboard.GetStats)
 	adminProtected.POST("/session/change-password", handlers.adminAuth.ChangePassword)
 	adminProtected.PATCH("/account/profile", handlers.adminAuth.UpdateProfile)
+		adminProtected.GET("/api-tokens", handlers.apiToken.List)
+		adminProtected.POST("/api-tokens", handlers.apiToken.Create)
+		adminProtected.DELETE("/api-tokens/:tokenID", handlers.apiToken.Delete)
 	adminProtected.GET("/operation-logs", handlers.operationLog.List)
 
 	adminProtected.GET(

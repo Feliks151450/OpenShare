@@ -88,6 +88,7 @@ func (h *PublicUploadHandler) parseSubmissionRequest(ctx *gin.Context) (*parsedP
 			FolderID:    ctx.PostForm("folder_id"),
 			UploaderIP:  ctx.ClientIP(),
 			Files:       files,
+			Overwrite:   ctx.PostForm("overwrite") == "1",
 		},
 		closers: closers,
 	}, nil

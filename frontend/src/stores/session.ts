@@ -10,6 +10,8 @@ export const useSessionStore = defineStore("session", () => {
   const role = ref("");
   const status = ref("");
   const permissions = ref<string[]>([]);
+  /** API Bearer token，仅在登录时返回一次 */
+  const token = ref("");
   const pendingAuditCount = ref(0);
   const isSuperAdmin = computed(() => role.value === "super_admin");
 
@@ -20,6 +22,7 @@ export const useSessionStore = defineStore("session", () => {
     role?: string;
     status?: string;
     permissions?: string[];
+    token?: string;
   }) {
     authenticated.value = value;
     displayName.value = name;
@@ -29,6 +32,7 @@ export const useSessionStore = defineStore("session", () => {
     role.value = value ? (payload?.role ?? "") : "";
     status.value = value ? (payload?.status ?? "") : "";
     permissions.value = value ? [...(payload?.permissions ?? [])] : [];
+    token.value = value ? (payload?.token ?? token.value) : "";
     pendingAuditCount.value = value ? pendingAuditCount.value : 0;
   }
 
@@ -53,6 +57,7 @@ export const useSessionStore = defineStore("session", () => {
     role,
     status,
     permissions,
+    token,
     pendingAuditCount,
     isSuperAdmin,
     setAuthenticated,

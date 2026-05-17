@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ type PublicUploadInput struct {
 	FolderID    string
 	UploaderIP  string
 	Files       []PublicUploadFileInput
+	Overwrite   bool
 }
 
 type PublicUploadFileInput struct {
@@ -105,7 +107,7 @@ func (s *PublicUploadService) CreateSubmission(ctx context.Context, input Public
 	if err != nil {
 		return nil, fmt.Errorf("resolve upload folder path: %w", err)
 	}
-	if err := s.resolveUploadFileNames(ctx, rootFolder, rootFolderDisplayPath, normalized.Files); err != nil {
+	if err := s.resolveUploadFileNames(ctx, rootFolder, rootFolderDisplayPath, normalized.Files, normalized.Overwrite); err != nil {
 		return nil, err
 	}
 
@@ -183,7 +185,7 @@ func (s *PublicUploadService) CreateSubmission(ctx context.Context, input Public
 	}
 
 	if canDirectPublish {
-		result, publishErr := s.publishDirectUploadBatch(ctx, rootFolder, submissions, actor.AdminID, normalized.UploaderIP, now)
+		result, publishErr := s.publishDirectUploadBatch(ctx, rootFolder, submissions, actor.AdminID, normalized.UploaderIP, now, normalized.Overwrite)
 		if publishErr != nil {
 			s.cleanupStagedSubmissions(submissions)
 			return nil, publishErr
@@ -219,14 +221,16 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 	adminID string,
 	operatorIP string,
 	reviewedAt time.Time,
+	overwrite bool,
 ) (*PublicUploadResult, error) {
 	if rootFolder == nil || rootFolder.SourcePath == nil || strings.TrimSpace(*rootFolder.SourcePath) == "" {
 		return nil, ErrUploadFolderNotFound
 	}
 
 	published := make([]directPublishedUpload, 0, len(submissions))
-	items := make([]repository.ApprovedUploadBatchItem, 0, len(submissions))
-	names := make([]string, 0, len(submissions))
+	newItems := make([]repository.ApprovedUploadBatchItem, 0)
+	newSubmissions := make([]model.Submission, 0)
+	allNames := make([]string, 0, len(submissions))
 	rootSourcePath := strings.TrimSpace(*rootFolder.SourcePath)
 
 	for _, submission := range submissions {
@@ -241,6 +245,29 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 				return nil, fmt.Errorf("ensure direct upload target directory failed (%v); rollback failed: %w", err, rollbackErr)
 			}
 			return nil, fmt.Errorf("ensure direct upload target directory: %w", err)
+		}
+
+		// 覆盖模式：检查是否已有同名文件，有则替换内容而非创建新记录
+		replaced := false
+		if overwrite {
+			destPath := filepath.Join(targetDir, filepath.Base(submission.Name))
+			if _, statErr := os.Stat(destPath); statErr == nil {
+				// 磁盘：删除旧文件，后面 MoveStagedFileToFolder 会移入新文件
+				if rmErr := s.storage.RemoveManagedFilePermanently(destPath); rmErr != nil {
+					return nil, fmt.Errorf("overwrite existing file on disk: %w", rmErr)
+				}
+				// 数据库：找到旧记录，更新元数据而非创建新记录
+				existingID, updateErr := s.repository.UpdateExistingFileMetadata(
+					ctx, &rootFolder.ID, submission.Name,
+					submission.Size, submission.Extension, submission.MimeType, reviewedAt,
+				)
+				if updateErr != nil {
+					return nil, fmt.Errorf("update existing file metadata: %w", updateErr)
+				}
+				if existingID != "" {
+					replaced = true
+				}
+			}
 		}
 
 		finalPath, finalName, err := s.storage.MoveStagedFileToFolder(submission.StagingPath, targetDir, submission.Name)
@@ -259,27 +286,35 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 			finalName:         finalName,
 			finalRelativePath: finalRelativePath,
 		})
-		items = append(items, repository.ApprovedUploadBatchItem{
+		allNames = append(allNames, finalName)
+
+		if replaced {
+			// 已替换现有文件：不创建新的 DB 记录
+			continue
+		}
+		newItems = append(newItems, repository.ApprovedUploadBatchItem{
 			SubmissionID:      submission.ID,
 			FinalName:         finalName,
 			FinalRelativePath: finalRelativePath,
 		})
-		names = append(names, finalName)
+		newSubmissions = append(newSubmissions, submission)
 	}
 
-	if err := s.repository.CreateApprovedUploadBatch(ctx, rootFolder, submissions, items, adminID, operatorIP, reviewedAt); err != nil {
-		rollbackErr := s.rollbackDirectPublishedUploads(published)
-		if rollbackErr != nil {
-			return nil, fmt.Errorf("persist direct upload failed (%v); rollback failed: %w", err, rollbackErr)
+	if len(newItems) > 0 {
+		if err := s.repository.CreateApprovedUploadBatch(ctx, rootFolder, newSubmissions, newItems, adminID, operatorIP, reviewedAt); err != nil {
+			rollbackErr := s.rollbackDirectPublishedUploads(published)
+			if rollbackErr != nil {
+				return nil, fmt.Errorf("persist direct upload failed (%v); rollback failed: %w", err, rollbackErr)
+			}
+			return nil, fmt.Errorf("persist direct upload: %w", err)
 		}
-		return nil, fmt.Errorf("persist direct upload: %w", err)
 	}
 
 	return &PublicUploadResult{
 		ReceiptCode: submissions[0].ReceiptCode,
 		Status:      model.SubmissionStatusApproved,
-		ItemCount:   len(submissions),
-		Names:       names,
+		ItemCount:   len(allNames),
+		Names:       allNames,
 		UploadedAt:  reviewedAt,
 	}, nil
 }

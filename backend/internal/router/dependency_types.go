@@ -26,10 +26,12 @@ type routeHandlers struct {
 	siteVisit          *handler.SiteVisitHandler
 	systemSetting      *handler.SystemSettingHandler
 	export_            *handler.ExportHandler
+	apiToken           *handler.ApiTokenHandler
 }
 
 type routeRepositories struct {
 	admin              *repository.AdminRepository
+	apiToken           *repository.ApiTokenRepository
 	adminDashboard     *repository.AdminDashboardRepository
 	announcement       *repository.AnnouncementRepository
 	feedback           *repository.FeedbackRepository
@@ -67,4 +69,5 @@ type routeServices struct {
 	search             *service.SearchService
 	siteVisit          *service.SiteVisitService
 	systemSetting      *service.SystemSettingService
+	apiToken           *service.ApiTokenService
 }

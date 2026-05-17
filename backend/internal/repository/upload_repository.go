@@ -98,6 +98,53 @@ func (r *UploadRepository) CreateUploadBatch(ctx context.Context, submissions []
 	})
 }
 
+// UpdateExistingFileMetadata finds a file by folder ID and name, then updates its
+// size, extension, and mime type. Adjusts folder stats for the size delta.
+// Returns the existing file ID, or empty string if not found.
+func (r *UploadRepository) UpdateExistingFileMetadata(
+	ctx context.Context,
+	folderID *string,
+	name string,
+	newSize int64,
+	newExtension string,
+	newMimeType string,
+	now time.Time,
+) (string, error) {
+	if folderID == nil || *folderID == "" || name == "" {
+		return "", nil
+	}
+	var existingID string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var f model.File
+		if err := tx.Select("id, folder_id, size").
+			Where("folder_id = ? AND name = ?", *folderID, name).
+			Take(&f).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return fmt.Errorf("find existing file: %w", err)
+		}
+		sizeDelta := newSize - f.Size
+		updates := map[string]any{
+			"size":       newSize,
+			"extension":  newExtension,
+			"mime_type":  newMimeType,
+			"updated_at": now,
+		}
+		if err := tx.Model(&model.File{}).Where("id = ?", f.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update existing file: %w", err)
+		}
+		if sizeDelta != 0 {
+			if err := model.AdjustFolderStatsTx(tx, f.FolderID, sizeDelta, 0, 0); err != nil {
+				return fmt.Errorf("adjust folder stats: %w", err)
+			}
+		}
+		existingID = f.ID
+		return nil
+	})
+	return existingID, err
+}
+
 func (r *UploadRepository) CreateApprovedUploadBatch(
 	ctx context.Context,
 	rootFolder *model.Folder,

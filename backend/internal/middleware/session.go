@@ -2,14 +2,31 @@ package middleware
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"openshare/backend/internal/service"
 	"openshare/backend/internal/session"
 )
 
-func SessionLoader(manager *session.Manager) gin.HandlerFunc {
+func SessionLoader(manager *session.Manager, apiTokenService *service.ApiTokenService) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+		// 优先尝试 Authorization: Bearer <api_token>
+		authHeader := ctx.GetHeader("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			rawToken := strings.TrimPrefix(authHeader, "Bearer ")
+			if rawToken != "" && apiTokenService != nil {
+				identity, resolveErr := apiTokenService.ResolveByTokenHash(ctx.Request.Context(), rawToken)
+				if resolveErr == nil && identity != nil {
+					session.SetAdminIdentity(ctx, *identity)
+					ctx.Next()
+					return
+				}
+			}
+		}
+
+		// 其次尝试 Cookie（浏览器访问）
 		cookieValue, err := ctx.Cookie(managerCookieName(manager))
 		if err != nil {
 			ctx.Next()

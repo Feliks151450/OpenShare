@@ -20,6 +20,10 @@ interface AdminMeResponse {
   };
 }
 
+interface LoginResponse extends AdminMeResponse {
+  token?: string; // 登录时返回的原始 session token，用于 Bearer 外部 API 调用
+}
+
 interface AdminDashboardStatsResponse {
   pending_audit_count: number;
 }
@@ -73,11 +77,11 @@ async function login() {
   loginError.value = "";
 
   try {
-    const response = await httpClient.post<AdminMeResponse>("/admin/session/login", {
+    const response = await httpClient.post<LoginResponse>("/admin/session/login", {
       username: username.value,
       password: password.value,
     });
-    applySession(response);
+    applySession(response, response.token);
     await loadPendingAuditCount();
     await trackVisit();
     password.value = "";
@@ -95,7 +99,7 @@ async function logout() {
   sessionStore.reset();
 }
 
-function applySession(response: AdminMeResponse) {
+function applySession(response: AdminMeResponse, token?: string) {
   sessionStore.setAuthenticated(true, response.admin.display_name || response.admin.username, {
     username: response.admin.username,
     adminId: response.admin.id,
@@ -103,6 +107,7 @@ function applySession(response: AdminMeResponse) {
     role: response.admin.role,
     status: response.admin.status,
     permissions: response.admin.permissions,
+    token,
   });
 }
 

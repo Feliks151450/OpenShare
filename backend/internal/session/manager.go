@@ -106,7 +106,7 @@ func (m *Manager) Create(ctx context.Context, admin *model.Admin) (string, Admin
 	}
 
 	cookieValue := m.signToken(token)
-	identity := AdminIdentity{
+	adminIdentity := AdminIdentity{
 		SessionID:   sessionModel.ID,
 		AdminID:     admin.ID,
 		Username:    admin.Username,
@@ -116,7 +116,7 @@ func (m *Manager) Create(ctx context.Context, admin *model.Admin) (string, Admin
 		ExpiresAt:   sessionModel.ExpiresAt,
 	}
 
-	return cookieValue, identity, nil
+	return cookieValue, adminIdentity, nil
 }
 
 func (m *Manager) Resolve(ctx context.Context, cookieValue string) (*ResolveResult, error) {

@@ -16,9 +16,10 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	engine := gin.New()
 	engine.Use(gin.Logger(), gin.Recovery())
 	engine.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
-	engine.Use(middleware.SessionLoader(sessionManager))
 
-	handlers := buildRouteHandlers(db, cfg, sessionManager)
+	handlers, services := buildRouteHandlers(db, cfg, sessionManager)
+	engine.Use(middleware.SessionLoader(sessionManager, services.apiToken))
+
 	registerHealthRoutes(engine, func(ctx *gin.Context) {
 		sqlDB, err := db.DB()
 		if err != nil {

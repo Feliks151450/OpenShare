@@ -14,6 +14,7 @@ type normalizedUploadInput struct {
 	FolderID    string
 	UploaderIP  string
 	Files       []normalizedUploadFile
+	Overwrite   bool
 }
 
 type normalizedUploadFile struct {
@@ -76,5 +77,6 @@ func (s *PublicUploadService) normalizeInput(input PublicUploadInput) (*normaliz
 		FolderID:    strings.TrimSpace(input.FolderID),
 		UploaderIP:  strings.TrimSpace(input.UploaderIP),
 		Files:       files,
+		Overwrite:   input.Overwrite,
 	}, nil
 }

@@ -25,6 +25,7 @@ func (s *PublicUploadService) resolveUploadFileNames(
 	rootFolder *model.Folder,
 	rootFolderDisplayPath string,
 	files []normalizedUploadFile,
+	overwrite bool,
 ) error {
 	if rootFolder == nil || rootFolder.SourcePath == nil || strings.TrimSpace(*rootFolder.SourcePath) == "" {
 		return ErrUploadFolderNotFound
@@ -56,6 +57,9 @@ func (s *PublicUploadService) resolveUploadFileNames(
 	for _, relativeDir := range orderedUploadNamespaceDirs(plannedEntriesByDir) {
 		if err := s.seedReservedNamesFromDisk(existingEntriesByDir, *rootFolder.SourcePath, relativeDir); err != nil {
 			return err
+		}
+		if overwrite {
+			continue // 覆盖模式：跳过与磁盘已有文件的冲突检查
 		}
 		existingEntries := ensureUploadNamespaceDir(existingEntriesByDir, relativeDir)
 		plannedEntries := plannedEntriesByDir[relativeDir]

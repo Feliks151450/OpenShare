@@ -25,6 +25,7 @@ var managedModels = []any{
 	&model.SystemSetting{},
 	&model.SystemStat{},
 	&model.DailyStat{},
+	&model.ApiToken{},
 }
 
 // EnsureSchema initializes the current baseline schema used by the application.

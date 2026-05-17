@@ -291,6 +291,19 @@ type DailyStat struct {
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
+// ApiToken is an admin-created bearer token for external API access.
+// Tokens persist until manually deleted and survive login/logout cycles.
+type ApiToken struct {
+	ID         string    `gorm:"column:id;type:text;primaryKey"`
+	AdminID    string    `gorm:"column:admin_id;type:text;not null;index:idx_api_tokens_admin_id"`
+	Name       string    `gorm:"column:name;type:text;not null;default:''"`
+	TokenHash  string    `gorm:"column:token_hash;type:text;not null;uniqueIndex:ux_api_tokens_token_hash"`
+	LastUsedAt *time.Time `gorm:"column:last_used_at"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
+
+	Admin *Admin `gorm:"foreignKey:AdminID"`
+}
+
 // SystemSetting stores extensible JSON-backed management policy blobs.
 type SystemSetting struct {
 	Key         string    `gorm:"column:key;type:text;primaryKey"`
@@ -319,6 +332,7 @@ func (DownloadEvent) TableName() string  { return "download_events" }
 func (FileDailyDownload) TableName() string {
 	return "file_daily_downloads"
 }
+func (ApiToken) TableName() string      { return "api_tokens" }
 func (SystemSetting) TableName() string { return "system_settings" }
 func (SystemStat) TableName() string    { return "system_stats" }
 func (DailyStat) TableName() string     { return "daily_stats" }

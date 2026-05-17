@@ -62,6 +62,7 @@ const passwordValid = computed(() => {
 
 onMounted(() => {
   resetProfileForm();
+  loadApiTokens();
 });
 
 function resetProfileForm() {
@@ -141,6 +142,69 @@ async function changePassword() {
   } finally {
     passwordSaving.value = false;
   }
+}
+
+// ── API Token 管理 ──
+interface ApiTokenItem {
+  id: string;
+  name: string;
+  last_used_at: string | null;
+  created_at: string;
+}
+const apiTokens = ref<ApiTokenItem[]>([]);
+const newTokenName = ref("");
+const newTokenValue = ref("");
+const tokenCreating = ref(false);
+const tokenDeleting = ref<string | null>(null);
+
+async function loadApiTokens() {
+  try {
+    const resp = await httpClient.get<{ items: ApiTokenItem[] }>("/admin/api-tokens");
+    apiTokens.value = resp.items;
+  } catch { /* ignore */ }
+}
+
+async function createApiToken() {
+  const name = newTokenName.value.trim();
+  if (!name || tokenCreating.value) return;
+  tokenCreating.value = true;
+  try {
+    const resp = await httpClient.post<{ token: string; id: string; name: string }>("/admin/api-tokens", { name });
+    newTokenValue.value = resp.token;
+    newTokenName.value = "";
+    await loadApiTokens();
+  } catch {
+    toastError("创建 API Token 失败。");
+  } finally {
+    tokenCreating.value = false;
+  }
+}
+
+async function deleteApiToken(id: string) {
+  tokenDeleting.value = id;
+  try {
+    await httpClient.request(`/admin/api-tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+    apiTokens.value = apiTokens.value.filter((t) => t.id !== id);
+  } catch {
+    toastError("删除 API Token 失败。");
+  } finally {
+    tokenDeleting.value = null;
+  }
+}
+
+async function copyNewToken() {
+  if (!newTokenValue.value) return;
+  try {
+    await navigator.clipboard.writeText(newTokenValue.value);
+    toastSuccess("API Token 已复制到剪贴板。");
+  } catch {
+    toastError("复制失败，请手动选择复制。");
+  }
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString();
 }
 
 function applySessionProfile(admin: AdminProfileResponse["admin"]) {
@@ -234,6 +298,51 @@ function readFileAsDataURL(file: File) {
           <button type="button" class="btn-primary" :disabled="profileSaving || !profileDirty" @click="saveProfile">
             {{ profileSaving ? "更新中…" : "确认更新" }}
           </button>
+        </div>
+      </SurfaceCard>
+
+      <!-- API Token 管理卡片 -->
+      <SurfaceCard>
+        <div>
+          <h2 class="text-lg font-semibold text-slate-900">API Token</h2>
+          <p class="mt-1 text-sm text-slate-500">创建 Token 后通过 <code class="rounded bg-slate-100 px-1 text-xs">Authorization: Bearer &lt;token&gt;</code> 头调用管理端接口。Token 仅创建时显示一次，持久有效直至手动删除。</p>
+        </div>
+        <div class="mt-4 space-y-3">
+          <!-- 创建表单 -->
+          <form class="flex items-end gap-2" @submit.prevent="createApiToken">
+            <div class="flex-1 space-y-1">
+              <label class="text-xs font-medium text-slate-600">Token 名称</label>
+              <input v-model="newTokenName" class="field" placeholder="例如：CLI 脚本、CI 部署" />
+            </div>
+            <button type="submit" class="btn-primary shrink-0" :disabled="tokenCreating || !newTokenName.trim()">
+              {{ tokenCreating ? "创建中…" : "创建" }}
+            </button>
+          </form>
+          <!-- 新创建的 Token 展示（仅一次） -->
+          <div v-if="newTokenValue" class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p class="text-xs font-medium text-emerald-800">Token 已创建，请立即复制保存（关闭后无法再次查看）：</p>
+            <div class="mt-2 flex items-center gap-2">
+              <input :value="newTokenValue" class="field flex-1 font-mono text-xs" readonly @focus="$event.target.select()" />
+              <button type="button" class="btn-secondary shrink-0" @click="copyNewToken">复制</button>
+            </div>
+          </div>
+          <!-- 已有 Token 列表 -->
+          <div v-if="apiTokens.length > 0" class="space-y-1">
+            <div v-for="t in apiTokens" :key="t.id" class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-700">{{ t.name }}</p>
+                <p class="text-xs text-slate-400">
+                  创建于 {{ formatDate(t.created_at) }}
+                  <template v-if="t.last_used_at"> · 最近使用 {{ formatDate(t.last_used_at) }}</template>
+                  <template v-else> · 尚未使用</template>
+                </p>
+              </div>
+              <button type="button" class="btn-secondary shrink-0 text-xs text-rose-600" :disabled="tokenDeleting === t.id" @click="deleteApiToken(t.id)">
+                {{ tokenDeleting === t.id ? "…" : "删除" }}
+              </button>
+            </div>
+          </div>
+          <p v-else-if="!newTokenValue" class="text-sm text-slate-400">暂无 API Token，请创建。</p>
         </div>
       </SurfaceCard>
 

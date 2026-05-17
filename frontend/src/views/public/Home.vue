@@ -224,6 +224,7 @@ const currentReceiptCode = ref("");
 const uploadForm = ref({
   description: "",
   entries: [] as UploadSelectionEntry[],
+  overwrite: false,
 });
 const uploadDropActive = ref(false);
 const uploadCollecting = ref(false);
@@ -263,6 +264,8 @@ const selectedResourceKeys = ref<string[]>([]);
 const cardMultiSelectMode = ref(false);
 const canManageResourceDescriptions = ref(false);
 const canManageAnnouncements = ref(false);
+/** 具有提交审核权限的管理员可直接上传文件无需审核 */
+const canModerateSubmissions = ref(false);
 const homeSessionAdminId = ref("");
 const homeSessionIsSuperAdmin = ref(false);
 const folderDescriptionEditorOpen = ref(false);
@@ -1723,6 +1726,7 @@ async function loadDirectory(options?: { force?: boolean }) {
 async function loadAdminPermission() {
   canManageResourceDescriptions.value = false;
   canManageAnnouncements.value = false;
+  canModerateSubmissions.value = false;
   homeSessionAdminId.value = "";
   homeSessionIsSuperAdmin.value = false;
   try {
@@ -1736,6 +1740,7 @@ async function loadAdminPermission() {
     homeSessionAdminId.value = String(a.id ?? "").trim();
     canManageResourceDescriptions.value = isSuper || perms.includes("resource_moderation");
     canManageAnnouncements.value = isSuper || perms.includes("announcements");
+    canModerateSubmissions.value = isSuper || perms.includes("submission_moderation");
   } catch {
     /* 未登录或非管理员 */
   }
@@ -2121,7 +2126,9 @@ function openUpload() {
   uploadMessage.value = "";
   uploadForm.value.description = "";
   uploadForm.value.entries = [];
-  void syncSessionReceiptCode();
+  if (!canModerateSubmissions.value) {
+    void syncSessionReceiptCode();
+  }
   if (uploadFileInput.value) {
     uploadFileInput.value.value = "";
   }
@@ -2201,6 +2208,9 @@ async function submitUpload() {
     const formData = new FormData();
     formData.set("folder_id", currentFolderID.value);
     formData.set("description", uploadForm.value.description.trim());
+    if (uploadForm.value.overwrite) {
+      formData.set("overwrite", "1");
+    }
     formData.set("manifest", JSON.stringify(uploadForm.value.entries.map((entry) => ({
       relative_path: entry.relativePath,
     }))));
@@ -2227,12 +2237,10 @@ async function submitUpload() {
           } catch {
             reject(new Error("invalid response"));
           }
-        } else if (xhr.status === 400) {
-          reject(new HttpError(400, xhr.responseText));
-        } else if (xhr.status === 409) {
-          reject(new HttpError(409, xhr.responseText));
         } else {
-          reject(new Error(`HTTP ${xhr.status}`));
+          let payload: unknown = null;
+          try { payload = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+          reject(new HttpError(`HTTP ${xhr.status}`, xhr.status, payload));
         }
       });
 
@@ -2242,9 +2250,13 @@ async function submitUpload() {
       xhr.send(formData);
     });
 
-    toastSuccess(response.status === "approved"
-      ? `已上传 ${response.item_count} 个文件，请保存回执码 ${response.receipt_code}。`
-      : `已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`);
+    if (canModerateSubmissions.value) {
+      toastSuccess(`已上传 ${response.item_count} 个文件。`);
+    } else if (response.status === "approved") {
+      toastSuccess(`已上传 ${response.item_count} 个文件，请保存回执码 ${response.receipt_code}。`);
+    } else {
+      toastSuccess(`已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`);
+    }
     window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
     currentReceiptCode.value = response.receipt_code;
     uploadForm.value.description = "";
@@ -2258,9 +2270,9 @@ async function submitUpload() {
     syncBodyScrollLock();
   } catch (err) {
     if (err instanceof HttpError && err.status === 400) {
-      toastError("上传参数无效。");
+      toastError(readApiError(err, "上传参数无效。"));
     } else if (err instanceof HttpError && err.status === 409) {
-      toastError("提交上传失败，请检查名称或者联系管理员");
+      toastError(readApiError(err, "提交上传失败，请检查名称或者联系管理员"));
     } else {
       toastError("提交上传失败。");
     }
@@ -3877,7 +3889,10 @@ async function syncSessionReceiptCode() {
             <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <h3 class="text-lg font-semibold text-slate-900">上传资料</h3>
-                <p class="mt-1 text-sm text-slate-500">当前目录下直接上传资料，提交后会进入审核池。</p>
+                <p class="mt-1 text-sm text-slate-500">
+                  <template v-if="canModerateSubmissions">以管理员身份直接上传，无需审核。</template>
+                  <template v-else>当前目录下直接上传资料，提交后会进入审核池。</template>
+                </p>
               </div>
               <button type="button" class="btn-secondary" @click="closeUploadModal">关闭</button>
             </div>
@@ -3888,7 +3903,8 @@ async function syncSessionReceiptCode() {
               <p class="mt-1 font-medium text-slate-900">{{ breadcrumbs.length ? breadcrumbs.map((item) => item.name).join(" / ") : "主页根目录" }}</p>
             </div>
 
-            <label class="space-y-2">
+            <!-- 回执码：仅访客上传时显示，管理员直接上传无需回执 -->
+            <label v-if="!canModerateSubmissions" class="space-y-2">
               <span class="text-sm font-medium text-slate-700">回执码</span>
               <div class="rounded-xl bg-slate-50 px-4 py-3">
                 <p class="text-sm font-semibold tracking-[0.12em] text-slate-900">
@@ -3956,6 +3972,11 @@ async function syncSessionReceiptCode() {
                 <p v-else class="mt-2 text-sm text-slate-400">当前还没有选择任何文件。</p>
               </div>
             </div>
+<!-- 覆盖同名文件：仅管理员可见 -->
+              <label v-if="canModerateSubmissions" class="mt-3 inline-flex items-center gap-3 cursor-pointer">
+                <input v-model="uploadForm.overwrite" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                <span class="text-sm text-slate-700">覆盖同名文件（已存在的文件将被替换）</span>
+              </label>
 <!-- 上传进度条 -->
               <div v-if="uploadSubmitting" class="space-y-1">
                 <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200">
