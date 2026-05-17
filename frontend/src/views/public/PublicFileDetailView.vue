@@ -36,7 +36,7 @@ import {
 } from "../../lib/fileDirectUrl";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
-import { renderSimpleMarkdown } from "../../lib/markdown";
+import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import PdfJsViewer from "../../components/public/PdfJsViewer.vue";
@@ -327,6 +327,12 @@ function syncMarkdownPeekBodyScrollLock() {
 }
 
 const backendDownloadPath = computed(() => `/api/public/files/${encodeURIComponent(fileID.value)}/download`);
+
+/** 视频 poster：将 cover_url（站内相对路径或外链）解析为真实图片 URL，Safari 需要显式 poster 才能显示首帧 */
+const videoPoster = computed(() => {
+  if (!detail.value) return undefined;
+  return fileCoverImageHrefFromFields(detail.value.cover_url, detail.value.description ?? "") || undefined;
+});
 
 const downloadActionsAllowed = computed(() => detail.value?.download_allowed !== false);
 
@@ -2300,6 +2306,7 @@ function performDownloadFile() {
                     controls
                     playsinline
                     preload="metadata"
+                    :poster="videoPoster"
                     :src="videoPlaybackActiveSrc"
                     @error="onVideoPlaybackError"
                     @loadedmetadata="onVideoLoadedMetadata"
