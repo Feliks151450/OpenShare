@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
 
-BACKEND_PORT="${BACKEND_PORT:-8080}"
+BACKEND_PORT="${BACKEND_PORT:-5173}"
 DATA_DIR="${DATA_DIR:-$ROOT_DIR/.production}"
 DEV_DATA_DIR="$ROOT_DIR/.localdata"
 LOG_DIR="$DATA_DIR/logs"
