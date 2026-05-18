@@ -47,6 +47,7 @@ import {
   renderSimpleMarkdown,
 } from "../../lib/markdown";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
+import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -272,6 +273,15 @@ const folderDescriptionEditorOpen = ref(false);
 const folderCoverPickerOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
+const folderDescriptionTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const {
+  isDragOver: folderDescIsDragOver,
+  isUploading: folderDescIsUploading,
+  onDragEnter: onFolderDescDragEnter,
+  onDragOver: onFolderDescDragOver,
+  onDragLeave: onFolderDescDragLeave,
+  handleDrop: onFolderDescDrop,
+} = useMarkdownImageDrop({ modelRef: folderDescriptionDraft });
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
@@ -4148,12 +4158,27 @@ async function syncSessionReceiptCode() {
               <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
                 简介（Markdown）
               </span>
-              <textarea
-                v-model="folderDescriptionDraft"
-                class="field-area order-2 min-h-[17rem] w-full resize-y rounded-3xl lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 lg:resize-none"
-                rows="10"
-                placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。"
-              />
+              <div class="order-2 lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 relative">
+                <textarea
+                  ref="folderDescriptionTextareaRef"
+                  v-model="folderDescriptionDraft"
+                  class="field-area min-h-[17rem] w-full resize-y rounded-3xl lg:h-full lg:min-h-0 lg:resize-none transition-colors"
+                  :class="{ 'border-blue-400 bg-blue-50/60': folderDescIsDragOver, 'opacity-50 pointer-events-none': folderDescIsUploading }"
+                  rows="10"
+                  placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。拖拽图片到此处自动上传插入。"
+                  @dragenter="onFolderDescDragEnter"
+                  @dragover="onFolderDescDragOver"
+                  @dragleave="onFolderDescDragLeave"
+                  @drop="onFolderDescDrop($event, folderDescriptionTextareaRef)"
+                />
+                <!-- 上传中遮罩 -->
+                <div
+                  v-if="folderDescIsUploading"
+                  class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
+                >
+                  <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
+                </div>
+              </div>
               <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
                 <h4 class="text-lg font-semibold text-slate-900">简介预览</h4>
               </div>

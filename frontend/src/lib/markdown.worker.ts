@@ -1,25 +1,7 @@
 // Web Worker: offloads CPU-intensive marked.parse() from the main thread.
 // DOMPurify stays on the main thread (requires DOM API).
 import { marked, type Renderer, type Tokens } from "marked";
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function isSafeImageUrlForSrc(url: string): boolean {
-  const u = url.trim().toLowerCase();
-  if (!u) return false;
-  if (u.startsWith("javascript:") || u.startsWith("data:") || u.startsWith("vbscript:")) {
-    return false;
-  }
-  return true;
-}
-
+import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref } from "./markdown-shared";
 // Reuse the same marked config across invocations
 marked.use({
   gfm: true,
@@ -43,7 +25,7 @@ marked.use({
       if (!isSafeImageUrlForSrc(rawHref)) {
         return escapeHtml(token.raw ?? altPlain);
       }
-      const src = escapeHtml(rawHref);
+      const src = escapeHtml(resolveMarkdownImageUrlToHref(rawHref));
       const alt = escapeHtml(altPlain);
       const title =
         token.title != null && String(token.title).trim() !== ""

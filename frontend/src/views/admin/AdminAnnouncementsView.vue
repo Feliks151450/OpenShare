@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, toRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -8,6 +8,7 @@ import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { renderSimpleMarkdown } from "../../lib/markdown";
+import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
@@ -46,6 +47,15 @@ const form = reactive({
   isPinned: false,
 });
 
+const announcementContentTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const {
+  isDragOver: annIsDragOver,
+  isUploading: annIsUploading,
+  onDragEnter: onAnnDragEnter,
+  onDragOver: onAnnDragOver,
+  onDragLeave: onAnnDragLeave,
+  handleDrop: onAnnDrop,
+} = useMarkdownImageDrop({ modelRef: toRef(form, "content") });
 const canManageAnnouncements = computed(() => sessionStore.hasPermission("announcements"));
 const editorTitle = computed(() => editingItem.value ? "编辑公告" : "新建公告");
 const previewHTML = computed(() => renderSimpleMarkdown(form.content));
@@ -385,12 +395,27 @@ function pinLabel(item: AnnouncementItem) {
 
               <label class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">公告内容</span>
-                <textarea
-                  v-model="form.content"
-                  rows="16"
-                  class="field-area"
-                  placeholder="输入公告正文，支持简单 Markdown 语法"
-                />
+                <div class="relative">
+                  <textarea
+                    ref="announcementContentTextareaRef"
+                    v-model="form.content"
+                    rows="16"
+                    class="field-area transition-colors"
+                    :class="{ 'border-blue-400 bg-blue-50/60': annIsDragOver, 'opacity-50 pointer-events-none': annIsUploading }"
+                    placeholder="输入公告正文，支持简单 Markdown 语法。拖拽图片到此处自动上传插入。"
+                    @dragenter="onAnnDragEnter"
+                    @dragover="onAnnDragOver"
+                    @dragleave="onAnnDragLeave"
+                    @drop="onAnnDrop($event, announcementContentTextareaRef)"
+                  />
+                  <!-- 上传中遮罩 -->
+                  <div
+                    v-if="annIsUploading"
+                    class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
+                  >
+                    <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
+                  </div>
+                </div>
               </label>
             </div>
 

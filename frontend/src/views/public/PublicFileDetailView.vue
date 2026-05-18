@@ -41,6 +41,7 @@ import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import PdfJsViewer from "../../components/public/PdfJsViewer.vue";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
+import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -137,6 +138,15 @@ const editCoverUrl = ref("");
 const editCustomPath = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
+const descriptionTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const {
+  isDragOver: descIsDragOver,
+  isUploading: descIsUploading,
+  onDragEnter: onDescDragEnter,
+  onDragOver: onDescDragOver,
+  onDragLeave: onDescDragLeave,
+  handleDrop: onDescDrop,
+} = useMarkdownImageDrop({ modelRef: editDescription });
 const coverPickerOpen = ref(false);
 const tagEditorOpen = ref(false);
 const tagCatalog = ref<FileTagDefinition[]>([]);
@@ -3071,12 +3081,27 @@ function performDownloadFile() {
                 <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
                   简介（Markdown）
                 </span>
-                <textarea
-                  v-model="editDescription"
-                  class="field-area order-2 min-h-[17rem] w-full resize-y rounded-3xl lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 lg:resize-none"
-                  rows="10"
-                  placeholder="仅在文件详情页展示；支持简单 Markdown。"
-                />
+                <div class="order-2 lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 relative">
+                  <textarea
+                    ref="descriptionTextareaRef"
+                    v-model="editDescription"
+                    class="field-area min-h-[17rem] w-full resize-y rounded-3xl lg:h-full lg:min-h-0 lg:resize-none transition-colors"
+                    :class="{ 'border-blue-400 bg-blue-50/60': descIsDragOver, 'opacity-50 pointer-events-none': descIsUploading }"
+                    rows="10"
+                    placeholder="仅在文件详情页展示；支持简单 Markdown。拖拽图片到此处自动上传插入。"
+                    @dragenter="onDescDragEnter"
+                    @dragover="onDescDragOver"
+                    @dragleave="onDescDragLeave"
+                    @drop="onDescDrop($event, descriptionTextareaRef)"
+                  />
+                  <!-- 上传中遮罩 -->
+                  <div
+                    v-if="descIsUploading"
+                    class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
+                  >
+                    <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
+                  </div>
+                </div>
                 <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
                   <h4 class="text-sm font-medium text-slate-700">简介预览</h4>
                 </div>

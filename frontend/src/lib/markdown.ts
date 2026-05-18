@@ -1,14 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked, type Renderer, type Tokens } from "marked";
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref } from "./markdown-shared";
+export { resolveMarkdownImageUrlToHref };
 
 /** 从简介 Markdown 中取封面图：仅当 alt 为 `cover`（不区分大小写）时，取首次出现的图片 URL */
 export function extractCoverImageUrlFromMarkdown(source: string): string | null {
@@ -31,50 +24,6 @@ export function stripCoverImageMarkdown(source: string): string {
     .replace(/!\[cover\]\([^)]*\)/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function isSafeImageUrlForSrc(url: string): boolean {
-  const u = url.trim().toLowerCase();
-  if (!u) {
-    return false;
-  }
-  if (u.startsWith("javascript:") || u.startsWith("data:") || u.startsWith("vbscript:")) {
-    return false;
-  }
-  return true;
-}
-
-const internalFileCoverRe = /^\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-
-function internalFileCoverHref(path: string): string | null {
-  const m = path.trim().match(internalFileCoverRe);
-  if (!m) {
-    return null;
-  }
-  return `/api/public/files/${m[1]}/download`;
-}
-
-/** 将 Markdown 中的图片地址转为可在当前页展示的绝对 URL */
-export function resolveMarkdownImageUrlToHref(raw: string): string {
-  const u = raw.trim();
-  if (!u) {
-    return "";
-  }
-  if (typeof window === "undefined") {
-    return u;
-  }
-  if (/^https?:\/\//i.test(u)) {
-    return u;
-  }
-  const internal = internalFileCoverHref(u);
-  if (internal) {
-    return internal;
-  }
-  try {
-    return new URL(u, window.location.href).href;
-  } catch {
-    return u;
-  }
 }
 
 export function coverImageHrefFromDescription(description: string): string | null {
