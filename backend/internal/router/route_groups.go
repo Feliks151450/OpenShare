@@ -144,7 +144,8 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 			handlers.resourceManagement.CreateVirtualFolder,
 		)
 		adminProtected.GET("/resources/files", handlers.resourceManagement.ListFiles)
-	adminProtected.PUT(
+		adminProtected.GET("/resources/check-custom-path", handlers.resourceManagement.CheckCustomPath)
+		adminProtected.PUT(
 		"/resources/folders/:folderID",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.UpdateFolderDescription,

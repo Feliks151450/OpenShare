@@ -1134,6 +1134,45 @@ print(r.status_code)  # 204
 
 **响应**：`{ "url": "/files/cover-uuid" }`
 
+#### `GET /api/admin/resources/check-custom-path?path=xxx`
+
+检查指定自定义路径是否可用（格式校验 + 是否已被占用），不暴露已用路径列表。
+
+**参数**：`?path=doc/report`
+
+**响应（可用）**：
+```json
+{
+  "path": "doc/report",
+  "available": true
+}
+```
+
+**响应（不可用 - 已被占用）**：
+```json
+{
+  "path": "doc/report",
+  "available": false
+}
+```
+
+**响应（不可用 - 格式/保留冲突）**：
+```json
+{
+  "path": "api/test",
+  "available": false,
+  "reason": "custom path is invalid"
+}
+```
+
+**鉴权**：`AdminAuth`（Cookie 或 `Authorization: Bearer <token>`）。
+
+```bash
+# curl 示例
+curl -H "Authorization: Bearer $TOKEN" \
+  "$ORIGIN/api/admin/resources/check-custom-path?path=doc%2Freport"
+```
+
 ### 文件标签
 
 #### `GET /api/admin/file-tags`

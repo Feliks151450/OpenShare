@@ -615,3 +615,14 @@ func (h *ResourceManagementHandler) MoveFile(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
+
+// CheckCustomPath 检查自定义路径是否可用（格式校验 + 唯一性检查）。
+func (h *ResourceManagementHandler) CheckCustomPath(ctx *gin.Context) {
+	path := strings.TrimSpace(ctx.Query("path"))
+	result, err := h.service.CheckCustomPathAvailability(ctx.Request.Context(), path)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check custom path"})
+		return
+	}
+	ctx.JSON(http.StatusOK, result)
+}

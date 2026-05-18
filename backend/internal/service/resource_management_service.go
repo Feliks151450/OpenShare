@@ -106,6 +106,25 @@ type FileOrderEntry struct {
 	SortOrder int64  `json:"sort_order"`
 }
 
+// CheckCustomPathAvailability 校验 custom_path 格式并检查是否已被占用，返回可用性结果。
+func (s *ResourceManagementService) CheckCustomPathAvailability(ctx context.Context, customPath string) (*CustomPathCheckResult, error) {
+	if err := ValidateCustomPath(customPath); err != nil {
+		return &CustomPathCheckResult{Path: customPath, Available: false, Reason: err.Error()}, nil
+	}
+	exists, err := s.repo.CustomPathExists(ctx, customPath, "")
+	if err != nil {
+		return nil, err
+	}
+	return &CustomPathCheckResult{Path: customPath, Available: !exists}, nil
+}
+
+// CustomPathCheckResult 自定义路径可用性检查结果。
+type CustomPathCheckResult struct {
+	Path      string `json:"path"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"` // 不可用时的原因
+}
+
 // UpdateFolderFileOrder persists the custom file order for a folder.
 func (s *ResourceManagementService) UpdateFolderFileOrder(ctx context.Context, folderID string, orders []FileOrderEntry, operatorID, operatorIP string) error {
 	repoOrders := make([]repository.FileOrderEntry, len(orders))
