@@ -120,7 +120,7 @@ func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool 
 		return true
 	}
 	switch mt {
-	case "application/pdf", "text/plain", "text/markdown", "text/csv", "text/tab-separated-values":
+	case "application/pdf", "text/plain", "text/markdown", "text/csv", "text/tab-separated-values", "text/html":
 		return true
 	default:
 		if strings.Contains(mt, "markdown") {
@@ -132,7 +132,7 @@ func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool 
 	case ".mp4", ".webm", ".mov", ".m4v", ".ogv", ".mkv", ".avi",
 		".mp3", ".wav", ".aac", ".m4a", ".oga", ".ogg", ".opus", ".flac",
 		".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp",
-		".pdf", ".txt", ".md", ".markdown", ".csv", ".tsv", ".nc":
+		".pdf", ".txt", ".md", ".markdown", ".csv", ".tsv", ".nc", ".html", ".htm":
 		return true
 	default:
 		return false
@@ -142,12 +142,12 @@ func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool 
 // InlineEmbedDispositionAllowed 是否允许在带 ?inline=1 时使用 Content-Disposition: inline（PDF、图片等内嵌预览）。
 func InlineEmbedDispositionAllowed(mimeType, fileName string) bool {
 	mt := strings.ToLower(strings.TrimSpace(mimeType))
-	if mt == "application/pdf" || strings.HasPrefix(mt, "image/") {
+	if mt == "application/pdf" || strings.HasPrefix(mt, "image/") || mt == "text/html" {
 		return true
 	}
 	ext := strings.ToLower(filepath.Ext(fileName))
 	switch ext {
-	case ".pdf", ".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp":
+	case ".pdf", ".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp", ".html", ".htm":
 		return true
 	default:
 		return false

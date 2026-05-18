@@ -136,6 +136,7 @@ func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
 		"folder_id": result.FolderID,
 		"file_id":   result.FileID,
 		"name":      result.Name,
+		"extension": result.Extension,
 	})
 }
 

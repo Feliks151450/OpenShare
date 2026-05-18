@@ -348,10 +348,11 @@ func (s *PublicCatalogService) ResolveCustomPath(ctx context.Context, customPath
 
 // CustomPathResolveResult 自定义路径解析结果，含类型和 ID。
 type CustomPathResolveResult struct {
-	Type     string `json:"type"` // "folder" 或 "file"
-	FolderID string `json:"folder_id,omitempty"`
-	FileID   string `json:"file_id,omitempty"`
-	Name     string `json:"name"`
+	Type      string `json:"type"` // "folder" 或 "file"
+	FolderID  string `json:"folder_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Name      string `json:"name"`
+	Extension string `json:"extension,omitempty"` // 文件扩展名，如 .html
 }
 
 // ResolveCustomPathFull 同时查找文件夹和文件的自定义路径，返回完整解析结果。
@@ -379,9 +380,10 @@ func (s *PublicCatalogService) ResolveCustomPathFull(ctx context.Context, custom
 	}
 	if file != nil {
 		return &CustomPathResolveResult{
-			Type:   "file",
-			FileID: file.ID,
-			Name:   file.Name,
+			Type:      "file",
+			FileID:    file.ID,
+			Name:      file.Name,
+			Extension: strings.TrimSpace(file.Extension),
 		}, nil
 	}
 	return nil, nil

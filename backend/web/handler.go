@@ -5,6 +5,7 @@ package webui
 import (
 	"bytes"
 	"io/fs"
+	"log"
 	"mime"
 	"net/http"
 	"path"
@@ -14,7 +15,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Register(engine *gin.Engine) {
+// CustomPathHandler is called when a request path doesn't match any API route or embedded static file.
+// It should return true if it handled the request (wrote a response), false to fall through to the SPA index.html.
+type CustomPathHandler func(ctx *gin.Context, requestPath string) bool
+
+func Register(engine *gin.Engine, customPathHandler CustomPathHandler) {
 	dist, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic("webui: load embedded dist: " + err.Error())
@@ -22,6 +27,8 @@ func Register(engine *gin.Engine) {
 
 	engine.NoRoute(func(ctx *gin.Context) {
 		requestPath := ctx.Request.URL.Path
+		log.Printf("[no-route] requestPath=%q", requestPath)
+
 		if strings.HasPrefix(requestPath, "/api/") || requestPath == "/api" {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
@@ -35,6 +42,11 @@ func Register(engine *gin.Engine) {
 
 		if hasFile(dist, target) {
 			serveEmbeddedFile(ctx, dist, target)
+			return
+		}
+
+		// 在回退到 SPA 之前，检查是否为 HTML 文件的自定义路径
+		if customPathHandler != nil && customPathHandler(ctx, requestPath) {
 			return
 		}
 

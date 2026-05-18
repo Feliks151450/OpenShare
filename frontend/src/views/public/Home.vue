@@ -1285,9 +1285,29 @@ watch(
         folder_id: string;
         file_id: string;
         name: string;
+        extension: string;
       }>(`/public/resolve-custom-path?path=${encodeURIComponent(trimmed)}`);
       if (resp.type === "file" && resp.file_id) {
-        // 文件自定义路径 → 跳转到文件详情页
+        // HTML 文件自定义路径：fetch 获取内容后直接替换当前页面（地址栏保持自定义路径）
+        const ext = (resp.extension ?? "").toLowerCase();
+        if (ext === ".html" || ext === ".htm") {
+          try {
+            const downloadUrl = `/api/public/files/${encodeURIComponent(resp.file_id)}/download?inline=1`;
+            const fetchResp = await fetch(downloadUrl);
+            if (!fetchResp.ok) throw new Error("fetch html failed");
+            const html = await fetchResp.text();
+            document.open();
+            document.write(html);
+            document.close();
+            return;
+          } catch {
+            // fetch 失败时回退到文件详情页
+            customPathResolvedFolderID.value = "";
+            router.replace({ name: "public-file-detail", params: { fileID: resp.file_id } });
+            return;
+          }
+        }
+        // 其它文件自定义路径 → 跳转到文件详情页
         customPathResolvedFolderID.value = "";
         router.replace({ name: "public-file-detail", params: { fileID: resp.file_id } });
         return;

@@ -44,7 +44,7 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	api := engine.Group("/api")
 	registerPublicRoutes(api, handlers)
 	registerAdminRoutes(api, handlers)
-	webui.Register(engine)
+	webui.Register(engine, newCustomPathHTMLHandler(services.publicCatalog, services.publicDownload))
 
 	return engine
 }
