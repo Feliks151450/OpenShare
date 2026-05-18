@@ -604,7 +604,7 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 #### `GET /api/public/files/:fileID/download`
 
-下载文件（302 重定向到直链或流式返回）。视频类文件可加 `?inline=1` 内嵌预览。
+下载文件（302 重定向到直链或流式返回）。以下文件类型支持 `?inline=1` 在浏览器中内嵌预览：视频/音频、图片、PDF、HTML、纯文本、Markdown、CSV 等。
 
 #### `GET /api/public/folders/:folderID/download`
 
@@ -650,9 +650,14 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
   "type": "folder|file",
   "folder_id": "uuid",
   "file_id": "uuid",
-  "name": "..."
+  "name": "...",
+  "extension": ".html"
 }
 ```
+
+`extension` 仅在 `type=file` 时返回，如 `.html`、`.pdf`。
+
+> **HTML 文件特殊处理**：当解析到 HTML 文件（`extension` 为 `.html` 或 `.htm`）时，前端不会跳转到文件详情页，而是直接获取文件内容并替换当前页面，使浏览器直接渲染网页。生产模式下后端在 SPA 路由前拦截，直接返回 HTML 内容，自定义路径保持在地址栏中。
 
 404：未找到对应路径。
 
