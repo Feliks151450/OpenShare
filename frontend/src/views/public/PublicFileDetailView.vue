@@ -713,7 +713,7 @@ function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisual
   if (mime === "application/json" || ext === "json") {
     return "json";
   }
-  if (mime === "text/plain" || ext === "txt" || ext === "ncl") {
+  if (mime === "text/plain" || ext === "txt" || ext === "ncl" || ext === "asc" || ext === "ascii") {
     return "plain";
   }
   return null;
@@ -732,12 +732,13 @@ const previewVisualKind = computed((): DetailPreviewVisualKind | null => {
   return fileDetailPreviewVisualKind(detail.value);
 });
 
-/** NetCDF：工具栏复制托管磁盘绝对路径（非网页 URL） */
-const showNcCopyServerStoragePath = computed(() => {
+/** NetCDF / ASCII：工具栏复制托管磁盘绝对路径（非网页 URL） */
+const COPY_SERVER_PATH_EXTENSIONS = new Set(["nc", "asc", "ascii"]);
+const showCopyServerStoragePath = computed(() => {
   if (!detail.value) {
     return false;
   }
-  if (normalizedFileExtension(detail.value) !== "nc") {
+  if (!COPY_SERVER_PATH_EXTENSIONS.has(normalizedFileExtension(detail.value))) {
     return false;
   }
   return (detail.value.storage_path ?? "").trim().length > 0;
@@ -844,13 +845,14 @@ const netcdfPeerSidebar = computed(
     Boolean(folderIdForPeers.value),
 );
 
-/** plain 中的 .ncl 与 csv 使用等宽展示 */
+/** plain 中的 .ncl / .asc / .ascii 与 csv 使用等宽展示 */
 const previewFetchedTextUseMonospace = computed(() => {
   if (previewVisualKind.value === "csv" || previewVisualKind.value === "netcdf" || previewVisualKind.value === "json") {
     return true;
   }
   if (previewVisualKind.value === "plain" && detail.value) {
-    return normalizedFileExtension(detail.value) === "ncl";
+    const ext = normalizedFileExtension(detail.value);
+    return ext === "ncl" || ext === "asc" || ext === "ascii";
   }
   return false;
 });
@@ -2153,7 +2155,7 @@ function performDownloadFile() {
                     <Link2 class="h-4 w-4" />
                   </button>
                   <button
-                    v-if="showNcCopyServerStoragePath"
+                    v-if="showCopyServerStoragePath"
                     type="button"
                     class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900 hover:shadow-sm hover:shadow-slate-950/[0.08]"
                     title="复制文件在托管服务器磁盘上的路径（POSIX 路径，不是网页链接）"

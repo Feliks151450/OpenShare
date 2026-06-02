@@ -1,12 +1,15 @@
 // Web Worker: offloads CPU-intensive marked.parse() from the main thread.
 // DOMPurify stays on the main thread (requires DOM API).
 import { marked, type Renderer, type Tokens } from "marked";
-import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref } from "./markdown-shared";
+import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref, markdownFencedCodeHtml } from "./markdown-shared";
 // Reuse the same marked config across invocations
 marked.use({
   gfm: true,
   breaks: true,
   renderer: {
+    code(this: Renderer, token: Tokens.Code): string {
+      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped);
+    },
     /* 支持图片宽度控制: ![描述|width=800](url) 或 ![描述|width=80%](url)，设置图片最大宽度 */
     image(this: Renderer, token: Tokens.Image): string {
       let altPlain = token.text ?? "";

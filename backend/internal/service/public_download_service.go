@@ -132,7 +132,7 @@ func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool 
 	case ".mp4", ".webm", ".mov", ".m4v", ".ogv", ".mkv", ".avi",
 		".mp3", ".wav", ".aac", ".m4a", ".oga", ".ogg", ".opus", ".flac",
 		".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".svg", ".bmp",
-		".pdf", ".txt", ".md", ".markdown", ".csv", ".tsv", ".nc", ".html", ".htm":
+		".pdf", ".txt", ".md", ".markdown", ".csv", ".tsv", ".nc", ".html", ".htm", ".asc", ".ascii":
 		return true
 	default:
 		return false

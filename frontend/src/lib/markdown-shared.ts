@@ -1,5 +1,23 @@
 // Shared markdown utilities — no DOM dependencies, safe for both main thread and Web Workers.
 
+/** fenced code block HTML with copy button — used by both main-thread and Worker marked configs */
+export function markdownFencedCodeHtml(lang: string, rawText: string, escaped: boolean): string {
+  const langToken = lang.trim().match(/^\S+/)?.[0] ?? "";
+  const langClass = langToken ? ` class="language-${escapeHtml(langToken)}"` : "";
+  const langLabel = langToken ? escapeHtml(langToken) : "";
+  const text = rawText.replace(/\n$/, "") + "\n";
+  const inner = escaped ? text : escapeHtml(text);
+  return (
+    `<div class="markdown-code-wrap">` +
+    `<div class="markdown-code-toolbar">` +
+    `<span class="markdown-code-lang">${langLabel}</span>` +
+    `<button type="button" class="markdown-code-copy" aria-label="复制代码块">复制</button>` +
+    `</div>` +
+    `<pre><code${langClass}>${inner}</code></pre>` +
+    `</div>`
+  );
+}
+
 export function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

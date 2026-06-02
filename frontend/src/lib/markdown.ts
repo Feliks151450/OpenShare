@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify";
 import { marked, type Renderer, type Tokens } from "marked";
-import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref } from "./markdown-shared";
+import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref, markdownFencedCodeHtml } from "./markdown-shared";
 export { resolveMarkdownImageUrlToHref };
 
 /** 从简介 Markdown 中取封面图：仅当 alt 为 `cover`（不区分大小写）时，取首次出现的图片 URL */
@@ -64,29 +64,12 @@ function encodeHrefLikeMarked(href: string): string | null {
   }
 }
 
-function markdownFencedCodeHtml(token: Tokens.Code): string {
-  const langToken = (token.lang ?? "").trim().match(/^\S+/)?.[0] ?? "";
-  const langClass = langToken ? ` class="language-${escapeHtml(langToken)}"` : "";
-  const langLabel = langToken ? escapeHtml(langToken) : "";
-  const text = token.text.replace(/\n$/, "") + "\n";
-  const inner = token.escaped ? text : escapeHtml(text);
-  return (
-    `<div class="markdown-code-wrap">` +
-    `<div class="markdown-code-toolbar">` +
-    `<span class="markdown-code-lang">${langLabel}</span>` +
-    `<button type="button" class="markdown-code-copy" aria-label="复制代码块">复制</button>` +
-    `</div>` +
-    `<pre><code${langClass}>${inner}</code></pre>` +
-    `</div>`
-  );
-}
-
 marked.use({
   gfm: true,
   breaks: false,
   renderer: {
     code(this: Renderer, token: Tokens.Code): string {
-      return markdownFencedCodeHtml(token);
+      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped);
     },
     image(this: Renderer, token: Tokens.Image): string {
       let altPlain = token.text ?? "";
