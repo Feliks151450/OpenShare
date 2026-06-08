@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Check, PanelLeftClose, PanelLeftOpen, UserRound } from "lucide-vue-next";
+import { Check, PanelLeftClose, PanelLeftOpen, RefreshCw, UserRound } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import { useSidebar } from "../../composables/useSidebar";
 
 import { HttpError, httpClient } from "../../lib/http/client";
+import { invalidateDirectoryViewCacheAll } from "../../lib/publicHomeDirectoryCache";
 import { useSessionStore } from "../../stores/session";
 import { toastError } from "../../lib/toast";
 
@@ -159,12 +160,18 @@ function onPointerDown(event: PointerEvent) {
     loginError.value = "";
   }
 }
+
+// 刷新页面：清除所有目录缓存后强制重新加载
+function refreshPage() {
+  invalidateDirectoryViewCacheAll();
+  window.location.reload();
+}
 </script>
 
 <template>
   <header class="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
     <div
-      class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-3 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]"
+      class="mx-auto flex h-16 w-full max-w-[1360px] items-center justify-between gap-1 px-3 sm:px-4 md:gap-4 md:px-6 lg:px-8 xl:max-w-[2150px]"
     >
       <button
         type="button"
@@ -175,7 +182,15 @@ function onPointerDown(event: PointerEvent) {
         <PanelLeftClose v-if="sidebarExpanded" class="h-5 w-5" />
         <PanelLeftOpen v-else class="h-5 w-5" />
       </button>
-      <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto">
+      <button
+        type="button"
+        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+        title="刷新"
+        @click="refreshPage"
+      >
+        <RefreshCw class="h-5 w-5" />
+      </button>
+      <nav class="flex min-w-0 flex-1 items-center justify-start gap-1 overflow-x-auto pl-1">
         <template v-for="item in items" :key="item.to">
           <button
             v-if="item.action"

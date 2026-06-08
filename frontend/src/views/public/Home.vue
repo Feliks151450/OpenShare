@@ -2918,7 +2918,7 @@ async function syncSessionReceiptCode() {
                 : 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-6 sm:my-6 sm:px-5 sm:py-5 xl:border-b xl:mx-6 xl:my-6 dark:border-slate-800 dark:bg-slate-900/40'"
                 >
                   <div class="space-y-3">
-                    <div class="relative">
+                    <div class="relative overflow-y-auto">
                       <div
                         ref="folderMarkdownClampRef"
                         class="markdown-content"

@@ -2292,7 +2292,7 @@ function performDownloadFile() {
                 ]"
               >
                 <div v-if="descriptionHTML" class="space-y-3">
-                  <div class="relative">
+                  <div class="relative overflow-y-auto">
                     <div
                       ref="fileDescriptionClampRef"
                       class="markdown-content"
@@ -2856,7 +2856,7 @@ function performDownloadFile() {
               class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
               <div v-if="descriptionHTML" class="space-y-3">
-                <div class="relative">
+                <div class="relative overflow-y-auto">
                   <div
                     ref="fileDescriptionClampRef"
                     class="markdown-content"

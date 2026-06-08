@@ -6,6 +6,7 @@
 
 # 检查端口占用
 sudo lsof -i :8080
+lsof -i :5173
 # 重建readonly.css
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && cd /home/llf/OpenShare/frontend && npm run build:readonly 2>&1
 
