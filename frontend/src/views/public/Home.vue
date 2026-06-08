@@ -28,6 +28,7 @@ import {
   PanelRightOpen,
   Plus,
   Check,
+  Star,
   Trash2,
   Upload,
 } from "lucide-vue-next";
@@ -36,6 +37,7 @@ import { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vu
 import PublicFileDetailView from "./PublicFileDetailView.vue";
 import SearchSection from "../../components/resources/SearchSection.vue";
 import { useNavActions } from "../../composables/useNavActions";
+import { useFavorites } from "../../composables/useFavorites";
 import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
@@ -152,6 +154,7 @@ const hotDownloadItems = ref<HotDownloadItem[]>([]);
 const latestItems = ref<LatestItem[]>([]);
 const sidebarDetailModal = ref<SidebarDetailModalState | null>(null);
 const { activePanel, closePanel: closeNavPanel } = useNavActions();
+const { isFavorited, toggleFavorite } = useFavorites();
 watch(activePanel, (panel) => {
   if (panel === "announcements") {
     openAnnouncementList();
@@ -3249,6 +3252,15 @@ async function syncSessionReceiptCode() {
                     <div class="flex items-center gap-2">
                       <button
                         type="button"
+                        :title="isFavorited(row.id) ? '取消收藏' : '收藏'"
+                        :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
+                        :aria-label="isFavorited(row.id) ? '取消收藏' : '收藏'"
+                        @click.stop="toggleFavorite(row.id, row.kind)"
+                      >
+                        <Star class="h-4 w-4" :fill="isFavorited(row.id) ? 'currentColor' : 'none'" />
+                      </button>
+                      <button
+                        type="button"
                         title="在新窗口中打开"
                         :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
                         aria-label="在新窗口中打开"
@@ -3369,6 +3381,15 @@ async function syncSessionReceiptCode() {
                     <Flag class="h-4 w-4" />
                   </button>
                   <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      :title="isFavorited(row.id) ? '取消收藏' : '收藏'"
+                      :class="['inline-flex items-center justify-center rounded-xl border p-2.5 transition', row.kind === 'folder' ? 'border-sky-200 bg-sky-50/50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900']"
+                      :aria-label="isFavorited(row.id) ? '取消收藏' : '收藏'"
+                      @click.stop="toggleFavorite(row.id, row.kind)"
+                    >
+                      <Star class="h-4 w-4" :fill="isFavorited(row.id) ? 'currentColor' : 'none'" />
+                    </button>
                     <button
                       type="button"
                       title="在新窗口中打开"

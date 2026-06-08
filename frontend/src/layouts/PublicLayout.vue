@@ -40,6 +40,7 @@ function triggerPanel(name: PanelName) {
 
 const links = [
   { to: "/", label: "首页" },
+  { to: "/favorites", label: "我的收藏" },
   { to: "/upload", label: "回执查询" },
   {
     to: "",

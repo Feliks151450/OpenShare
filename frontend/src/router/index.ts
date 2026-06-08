@@ -10,6 +10,7 @@ import AdminOperationLogsView from "@/views/admin/AdminOperationLogsView.vue";
 import AdminFileTagsView from "@/views/admin/AdminFileTagsView.vue";
 import AdminAnnouncementsView from "@/views/admin/AdminAnnouncementsView.vue";
 import PublicFileDetailView from "@/views/public/PublicFileDetailView.vue";
+import FavoritesView from "@/views/public/FavoritesView.vue";
 import HomeView from "@/views/public/Home.vue";
 import UploadView from "@/views/public/UploadView.vue";
 
@@ -27,6 +28,11 @@ const routes: RouteRecordRaw[] = [
         path: "upload",
         name: "public-upload",
         component: UploadView,
+      },
+      {
+        path: "favorites",
+        name: "public-favorites",
+        component: FavoritesView,
       },
       {
         path: "files/:fileID",
