@@ -8,7 +8,7 @@ marked.use({
   breaks: true,
   renderer: {
     code(this: Renderer, token: Tokens.Code): string {
-      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped);
+      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped ?? false);
     },
     /* 支持图片宽度控制: ![描述|width=800](url) 或 ![描述|width=80%](url)，设置图片最大宽度 */
     image(this: Renderer, token: Tokens.Image): string {

@@ -17,6 +17,7 @@ import {
   PanelRightOpen,
   Server,
   Share2,
+  Star,
   Upload,
 } from "lucide-vue-next";
 
@@ -49,6 +50,7 @@ import {
 } from "../../lib/markdownCatalogNavigateDisplay";
 import { onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
 import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
+import { useFavorites } from "../../composables/useFavorites";
 /** 递归嵌套「右侧预览」，避免与同名默认导出循环引用告警 */
 import PublicFileDetailPeek from "./PublicFileDetailView.vue";
 
@@ -202,6 +204,8 @@ const fileID = computed(() => {
   }
   return String(route.params.fileID ?? "");
 });
+
+const { isFavorited, toggleFavorite } = useFavorites();
 
 watch(
   () => fileID.value,
@@ -2143,6 +2147,20 @@ function performDownloadFile() {
                     @click="openFeedbackModal"
                   >
                     <Flag class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    :class="[
+                      'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:shadow-sm hover:shadow-slate-950/[0.08]',
+                      isFavorited(fileID)
+                        ? 'border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200 hover:text-slate-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900',
+                    ]"
+                    :title="isFavorited(fileID) ? '取消收藏' : '收藏'"
+                    :aria-label="isFavorited(fileID) ? '取消收藏' : '收藏'"
+                    @click="toggleFavorite(fileID, 'file')"
+                  >
+                    <Star class="h-4 w-4" :fill="isFavorited(fileID) ? 'currentColor' : 'none'" />
                   </button>
                   <button
                     v-if="downloadActionsAllowed"

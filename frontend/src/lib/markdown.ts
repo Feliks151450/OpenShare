@@ -69,7 +69,7 @@ marked.use({
   breaks: false,
   renderer: {
     code(this: Renderer, token: Tokens.Code): string {
-      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped);
+      return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped ?? false);
     },
     image(this: Renderer, token: Tokens.Image): string {
       let altPlain = token.text ?? "";

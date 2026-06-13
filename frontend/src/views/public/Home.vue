@@ -2883,6 +2883,20 @@ async function syncSessionReceiptCode() {
                   >
                     <Flag class="h-4 w-4" />
                   </button>
+                  <button
+                    type="button"
+                    :class="[
+                      'inline-flex h-11 w-11 items-center justify-center rounded-xl border transition-[transform,background-color,border-color,box-shadow,color] duration-200 hover:-translate-y-0.5 hover:shadow-sm hover:shadow-slate-950/[0.08]',
+                      isFavorited(currentFolderDetail.id)
+                        ? 'border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200 hover:text-slate-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-[#fafafa] hover:text-slate-900',
+                    ]"
+                    :title="isFavorited(currentFolderDetail.id) ? '取消收藏' : '收藏'"
+                    :aria-label="isFavorited(currentFolderDetail.id) ? '取消收藏' : '收藏'"
+                    @click="toggleFavorite(currentFolderDetail.id, 'folder')"
+                  >
+                    <Star class="h-4 w-4" :fill="isFavorited(currentFolderDetail.id) ? 'currentColor' : 'none'" />
+                  </button>
                   <!-- 自定义路径复制按钮：仅当该文件夹设置了 custom_path 时显示 -->
                   <button
                     v-if="currentFolderDetail.custom_path"

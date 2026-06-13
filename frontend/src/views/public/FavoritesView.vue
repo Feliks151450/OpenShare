@@ -188,8 +188,8 @@ function extractExtension(name: string): string {
 function computeCoverUrl(detail: FileDetail | FolderDetail, kind: "file" | "folder"): string | null {
   const desc = (detail.description ?? "").trim();
   const coverUrl = kind === "file"
-    ? fileCoverImageHrefFromFields((detail as FileDetail).cover_url, desc)
-    : fileCoverImageHrefFromFields((detail as FolderDetail).cover_url, desc);
+    ? fileCoverImageHrefFromFields((detail as FileDetail).cover_url ?? undefined, desc)
+    : fileCoverImageHrefFromFields((detail as FolderDetail).cover_url ?? undefined, desc);
   return coverUrl || null;
 }
 
