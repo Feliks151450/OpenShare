@@ -65,8 +65,10 @@ type UpdateManagedFolderDescriptionInput struct {
 	CustomPath       string
 	// DownloadPolicy 可选：nil 不修改；非空为 "inherit" | "allow" | "deny"
 	DownloadPolicy *string
-	OperatorID     string
-	OperatorIP     string
+	// HideFileExtension 可选：nil 不修改；非空为 "inherit" | "hide" | "show"
+	HideFileExtension *string
+	OperatorID        string
+	OperatorIP        string
 }
 
 func NewResourceManagementService(repo *repository.ResourceManagementRepository, storageService *storage.Service) *ResourceManagementService {

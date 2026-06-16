@@ -531,9 +531,12 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
   "is_virtual": false,
   "hide_public_catalog": true,
   "custom_path": "doc",
+  "hide_file_extension": "inherit|hide|show",
+  "hide_file_extension_resolved": false,
   "breadcrumbs": [{ "id": "uuid", "name": "..." }]
 }
 ```
+> `hide_file_extension` 为原始设置值；`hide_file_extension_resolved` 为沿祖先链解析后的最终值（`true` 表示隐藏后缀，默认 `false`）。
 
 #### `GET /api/public/folders/:folderID/files`
 
@@ -1071,10 +1074,12 @@ print(r.status_code)  # 204
   "cover_url": "https://... 或留空",
   "direct_link_prefix": "https://cdn.example.com/",
   "custom_path": "doc",
-  "download_policy": "inherit|allow|deny"
+  "download_policy": "inherit|allow|deny",
+  "hide_file_extension": "inherit|hide|show"
 }
 ```
 > `cover_url` 为 `*string` 类型，不传不覆盖已有值。
+> `hide_file_extension`：`inherit` 继承上层文件夹设置，`hide` 隐藏子文件后缀，`show` 显示子文件后缀。未设置时默认显示后缀。
 
 #### `DELETE /api/admin/resources/folders/:folderID`
 

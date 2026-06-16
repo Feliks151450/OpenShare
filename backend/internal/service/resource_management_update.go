@@ -149,6 +149,29 @@ func parseDownloadPolicy(raw *string) (apply bool, allowDownload *bool, err erro
 	}
 }
 
+// parseHideFileExtensionPolicy 解析管理端 hide_file_extension：nil 表示不改数据库字段；inherit 写入 NULL。
+func parseHideFileExtensionPolicy(raw *string) (apply bool, hideFileExtension *bool, err error) {
+	if raw == nil {
+		return false, nil, nil
+	}
+	s := strings.ToLower(strings.TrimSpace(*raw))
+	if s == "" {
+		return false, nil, nil
+	}
+	switch s {
+	case "inherit":
+		return true, nil, nil
+	case "hide":
+		v := true
+		return true, &v, nil
+	case "show":
+		v := false
+		return true, &v, nil
+	default:
+		return false, nil, ErrInvalidResourceEdit
+	}
+}
+
 func normalizeOptionalHTTPURL(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {

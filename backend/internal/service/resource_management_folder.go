@@ -74,6 +74,11 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		return ErrInvalidResourceEdit
 	}
 
+	applyHide, hideExtension, err := parseHideFileExtensionPolicy(input.HideFileExtension)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
+
 	// 校验并处理 custom_path
 	customPath := strings.TrimSpace(input.CustomPath)
 	if err := ValidateCustomPath(customPath); err != nil {
@@ -90,7 +95,7 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 	}
 
 	if current.SourcePath == nil || strings.TrimSpace(*current.SourcePath) == "" || current.Name == name {
-		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+		if err := s.repo.UpdateFolderMetadata(ctx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, applyHide, hideExtension, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrManagedFolderNotFound
 			}

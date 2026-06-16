@@ -136,6 +136,10 @@ type PublicFolderDetail struct {
 	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
 	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。
 	CustomPath string `json:"custom_path"`
+	// HideFileExtension 原始设置值：inherit/hide/show
+	HideFileExtension *bool `json:"hide_file_extension,omitempty"`
+	// HideFileExtensionResolved 解析后的最终值：true 表示隐藏后缀，false 表示显示
+	HideFileExtensionResolved bool `json:"hide_file_extension_resolved"`
 }
 
 func NewPublicCatalogService(
@@ -304,31 +308,38 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 	}
 
 	dlAllowed := true
+	hideExt := false
 	if s.download != nil {
 		var err error
 		dlAllowed, err = s.download.EffectiveDownloadAllowedForFolder(ctx, current)
 		if err != nil {
 			return nil, fmt.Errorf("resolve folder download policy: %w", err)
 		}
+		hideExt, err = s.download.EffectiveHideFileExtensionForFolder(ctx, current)
+		if err != nil {
+			return nil, fmt.Errorf("resolve folder hide file extension: %w", err)
+		}
 	}
 
 	detail := PublicFolderDetail{
-		ID:               current.ID,
-		Name:             current.Name,
-		Description:      current.Description,
-		Remark:           current.Remark,
-		CoverURL:         strings.TrimSpace(current.CoverURL),
-		ParentID:         current.ParentID,
-		Breadcrumbs:      breadcrumbs,
-		FileCount:        current.FileCount,
-		DownloadCount:    current.DownloadCount,
-		TotalSize:        current.TotalSize,
-		UpdatedAt:        current.UpdatedAt,
-		DirectLinkPrefix: strings.TrimSpace(current.DirectLinkPrefix),
-		DownloadAllowed:  dlAllowed,
-		DownloadPolicy:   DownloadPolicyString(current.AllowDownload),
-		IsVirtual:        current.IsVirtual,
-		CustomPath:       strings.TrimSpace(current.CustomPath),
+		ID:                        current.ID,
+		Name:                      current.Name,
+		Description:               current.Description,
+		Remark:                    current.Remark,
+		CoverURL:                  strings.TrimSpace(current.CoverURL),
+		ParentID:                  current.ParentID,
+		Breadcrumbs:               breadcrumbs,
+		FileCount:                 current.FileCount,
+		DownloadCount:             current.DownloadCount,
+		TotalSize:                 current.TotalSize,
+		UpdatedAt:                 current.UpdatedAt,
+		DirectLinkPrefix:          strings.TrimSpace(current.DirectLinkPrefix),
+		DownloadAllowed:           dlAllowed,
+		DownloadPolicy:            DownloadPolicyString(current.AllowDownload),
+		IsVirtual:                 current.IsVirtual,
+		CustomPath:                strings.TrimSpace(current.CustomPath),
+		HideFileExtension:         current.HideFileExtension,
+		HideFileExtensionResolved: hideExt,
 	}
 	if current.ParentID == nil {
 		h := current.HidePublicCatalog

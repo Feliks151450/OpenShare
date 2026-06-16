@@ -83,6 +83,7 @@ interface AnnouncementItem {
   title: string;
   content: string;
   is_pinned: boolean;
+  is_home: boolean;
   creator: {
     id: string;
     username: string;
@@ -144,6 +145,9 @@ const route = useRoute();
 const router = useRouter();
 
 const announcements = ref<AnnouncementItem[]>([]);
+const homeAnnouncement = ref<AnnouncementItem | null>(null);
+const homeAnnouncementContentHTML = ref("");
+let homeAnnouncementRenderSerial = 0;
 const selectedAnnouncementId = ref<string | null>(null);
 const selectedAnnouncement = computed(() => {
   if (!selectedAnnouncementId.value) return null;
@@ -288,6 +292,7 @@ const {
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
+const folderHideFileExtensionDraft = ref<"inherit" | "hide" | "show">("inherit");
 const folderHidePublicCatalogDraft = ref(false);
 /* 自定义路径（仅管理员可编辑）：在文件夹编辑弹窗中设置，如 "doc" 对应 /doc 访问该文件夹 */
 const folderCustomPathDraft = ref("");
@@ -603,11 +608,14 @@ const rows = computed<DirectoryRow[]>(() => [
   ...(currentFolderID.value
     ? files.value.map((file) => {
         const desc = (file.description ?? "").trim();
+        const ext = normalizeFileExtension(file.extension) || extractExtension(file.name);
+        const hideExt = currentFolderDetail.value?.hide_file_extension_resolved === true;
+        const displayName = hideExt && ext ? file.name.replace(new RegExp(`\\.${ext.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), '') : file.name;
         return {
           id: file.id,
           kind: "file" as const,
-          name: file.name,
-          extension: normalizeFileExtension(file.extension) || extractExtension(file.name),
+          name: displayName,
+          extension: ext,
           description: desc,
           remark: (file.remark ?? "").trim(),
           coverUrl: fileCoverImageHrefFromFields(file.cover_url, desc),
@@ -703,6 +711,19 @@ watch(
     renderMarkdownAsync(desc).then((html) => {
       if (mySerial === folderDescRenderSerial) {
         currentFolderDescriptionHTML.value = html;
+      }
+    });
+  },
+  { immediate: true },
+);
+
+watch(
+  () => homeAnnouncement.value?.content ?? "",
+  (content) => {
+    const mySerial = ++homeAnnouncementRenderSerial;
+    renderMarkdownAsync(content).then((html) => {
+      if (mySerial === homeAnnouncementRenderSerial) {
+        homeAnnouncementContentHTML.value = html;
       }
     });
   },
@@ -826,7 +847,8 @@ const folderEditorMetaDirty = computed(() => {
     folderRemarkDraft.value.trim() !== (d.remark ?? "").trim() ||
     folderDirectPrefixDraft.value.trim() !== (d.direct_link_prefix ?? "").trim() ||
     folderCustomPathDraft.value.trim() !== (d.custom_path ?? "").trim() ||
-    folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit")
+    folderDownloadPolicyDraft.value !== (d.download_policy ?? "inherit") ||
+    folderHideFileExtensionDraft.value !== (d.hide_file_extension ?? "inherit")
   );
 });
 
@@ -1214,6 +1236,7 @@ onMounted(async () => {
     loadDirectory(),
     loadLargeDownloadPolicy(),
   ]);
+  void loadHomeAnnouncement();
   // 管理员权限延后加载：主内容先渲染，编辑/删除按钮稍后出现
   loadAdminPermission();
 
@@ -1388,6 +1411,20 @@ async function loadAnnouncements() {
   }
 }
 
+async function loadHomeAnnouncement() {
+  const cached = staticDataLoader.homeAnnouncement;
+  if (cached) {
+    homeAnnouncement.value = cached as unknown as AnnouncementItem;
+    return;
+  }
+  try {
+    const response = await httpClient.get<{ announcement: AnnouncementItem | null }>("/public/announcements/home");
+    homeAnnouncement.value = response.announcement ?? null;
+  } catch {
+    homeAnnouncement.value = null;
+  }
+}
+
 function selectAnnouncement(id: string) {
   selectedAnnouncementId.value = id;
 }
@@ -1555,6 +1592,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderRemarkDraft.value = (detail.remark ?? "").trim();    folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
     folderCustomPathDraft.value = (detail.custom_path ?? "").trim();
     folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
+    folderHideFileExtensionDraft.value = detail.hide_file_extension ?? "inherit";
     breadcrumbs.value = detail.breadcrumbs ?? [];
   } else {
     currentFolderDetail.value = null;
@@ -1563,6 +1601,7 @@ function applyDirectoryViewToState(entry: DirectoryViewCacheEntry) {
     folderRemarkDraft.value = "";    folderDirectPrefixDraft.value = "";
     folderCustomPathDraft.value = "";
     folderDownloadPolicyDraft.value = "inherit";
+    folderHideFileExtensionDraft.value = "inherit";
     breadcrumbs.value = [];
   }
 }
@@ -1717,6 +1756,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderDescriptionDraft.value = detail.description ?? "";
       folderRemarkDraft.value = (detail.remark ?? "").trim();      folderDirectPrefixDraft.value = (detail.direct_link_prefix ?? "").trim();
       folderDownloadPolicyDraft.value = detail.download_policy ?? "inherit";
+      folderHideFileExtensionDraft.value = detail.hide_file_extension ?? "inherit";
       breadcrumbs.value = detail.breadcrumbs ?? [];
     } else {
       currentFolderDetail.value = null;
@@ -1724,6 +1764,7 @@ async function loadDirectory(options?: { force?: boolean }) {
       folderDescriptionDraft.value = "";
       folderRemarkDraft.value = "";      folderDirectPrefixDraft.value = "";
       folderDownloadPolicyDraft.value = "inherit";
+      folderHideFileExtensionDraft.value = "inherit";
       breadcrumbs.value = [];
     }
 
@@ -2520,6 +2561,7 @@ async function saveFolderDescription() {
           direct_link_prefix: folderDirectPrefixDraft.value.trim(),
           custom_path: folderCustomPathDraft.value.trim(),
           download_policy: folderDownloadPolicyDraft.value,
+          hide_file_extension: folderHideFileExtensionDraft.value,
         },
       });
     }
@@ -2541,6 +2583,7 @@ async function saveFolderDescription() {
       direct_link_prefix: folderDirectPrefixDraft.value.trim(),
       custom_path: folderCustomPathDraft.value.trim(),
       download_policy: folderDownloadPolicyDraft.value,
+      hide_file_extension: folderHideFileExtensionDraft.value,
       hide_public_catalog: isRoot ? folderHidePublicCatalogDraft.value : d.hide_public_catalog,
     };
     breadcrumbs.value = breadcrumbs.value.map((item, index) => (
@@ -2772,6 +2815,30 @@ async function syncSessionReceiptCode() {
                 </div>
               </div>
 
+            </div>
+          </div>
+
+          <!-- 首页公告：仅在根页面（无文件夹选中）时显示 -->
+          <div
+            v-if="!currentFolderID && homeAnnouncement"
+            class="border-b border-slate-200 px-4 py-5 sm:px-6 dark:border-slate-800"
+          >
+            <div class="rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-4">
+              <div class="flex items-start gap-3">
+                <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M18 3a1 1 0 00-1.447-.894L8.763 6H5a3 3 0 000 6h.28l1.771 5.316A1 1 0 008 18h1a1 1 0 001-1v-4.382l6.553 3.276A1 1 0 0018 15V3z" clip-rule="evenodd" />
+                  </svg>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-base font-semibold text-amber-900">{{ homeAnnouncement.title }}</h3>
+                  <div
+                    v-if="homeAnnouncementContentHTML"
+                    class="markdown-content mt-2 text-sm text-amber-800/90"
+                    v-html="homeAnnouncementContentHTML"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -3750,15 +3817,22 @@ async function syncSessionReceiptCode() {
   <!-- 弹窗：公告中心（左侧列表 + 右侧详情，支持 Markdown 渲染） -->
   <Teleport to="body">
     <Transition name="modal-shell">
-    <div v-if="announcementListOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 px-4">
-      <div class="modal-card panel flex h-[85vh] w-full max-w-6xl overflow-hidden">
-        <!-- 左侧公告列表 -->
-        <div class="flex w-64 shrink-0 flex-col border-r border-slate-200">
-          <div class="border-b border-slate-200 px-4 py-3">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p>
-            <h3 class="mt-1 text-lg font-semibold tracking-tight text-slate-900">全部公告</h3>
+    <div v-if="announcementListOpen" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/30 lg:px-4">
+      <div class="modal-card panel flex h-full w-full flex-col overflow-hidden rounded-none lg:h-[85vh] lg:max-w-6xl lg:rounded-2xl lg:flex-row">
+        <!-- 公告列表 -->
+        <div class="flex shrink-0 flex-col border-b border-slate-200 lg:h-auto lg:w-64 lg:border-b-0 lg:border-r">
+          <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcements</p>
+              <h3 class="mt-1 text-lg font-semibold tracking-tight text-slate-900">全部公告</h3>
+            </div>
+            <button type="button" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500 shadow-sm transition hover:bg-red-100 hover:text-red-600 hover:shadow" @click="closeAnnouncementList">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
           </div>
-          <div class="flex-1 overflow-y-auto">
+          <div class="flex-1 overflow-y-auto lg:max-h-none" :class="selectedAnnouncementId ? 'max-h-[30vh] lg:max-h-none' : 'max-h-[60vh]'">
             <p v-if="announcements.length === 0" class="px-4 py-6 text-center text-sm text-slate-500">
               暂无公告
             </p>
@@ -3790,7 +3864,7 @@ async function syncSessionReceiptCode() {
           </div>
         </div>
 
-        <!-- 右侧公告详情 -->
+        <!-- 公告详情 -->
         <div class="flex min-w-0 flex-1 flex-col">
           <template v-if="selectedAnnouncement">
             <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
@@ -3823,7 +3897,6 @@ async function syncSessionReceiptCode() {
                 >
                   编辑
                 </button>
-                <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
               </div>
             </div>
             <div class="flex-1 overflow-y-auto px-6 py-5">
@@ -3831,9 +3904,6 @@ async function syncSessionReceiptCode() {
             </div>
           </template>
           <div v-else class="flex flex-1 flex-col">
-            <div class="flex items-center justify-end border-b border-slate-200 px-6 py-4">
-              <button type="button" class="btn-secondary" @click="closeAnnouncementList">关闭</button>
-            </div>
             <div class="flex flex-1 items-center justify-center text-sm text-slate-400">
               请选择一条公告
             </div>
@@ -4270,6 +4340,18 @@ async function syncSessionReceiptCode() {
               </select>
               <p class="text-xs leading-5 text-slate-500">
                 「继承」时随上层文件夹策略；未设置时默认允许下载。禁止后整包下载与列表下载入口会隐藏，且接口返回 403。
+              </p>
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-sm font-medium text-slate-700">子文件是否显示后缀</span>
+              <select v-model="folderHideFileExtensionDraft" class="field">
+                <option value="inherit">继承上层文件夹设置</option>
+                <option value="show">显示后缀</option>
+                <option value="hide">隐藏后缀</option>
+              </select>
+              <p class="text-xs leading-5 text-slate-500">
+                「继承」时随上层文件夹策略；未设置时默认显示后缀。隐藏后文件名不显示扩展名（如 .pdf、.docx）。
               </p>
             </label>
 

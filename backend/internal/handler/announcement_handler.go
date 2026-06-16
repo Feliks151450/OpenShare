@@ -20,6 +20,7 @@ type saveAnnouncementRequest struct {
 	Content  string                   `json:"content"`
 	Status   model.AnnouncementStatus `json:"status"`
 	IsPinned *bool                    `json:"is_pinned,omitempty"`
+	IsHome   *bool                    `json:"is_home,omitempty"`
 }
 
 func NewAnnouncementHandler(service *service.AnnouncementService) *AnnouncementHandler {
@@ -33,6 +34,19 @@ func (h *AnnouncementHandler) ListPublic(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *AnnouncementHandler) GetHomeAnnouncement(ctx *gin.Context) {
+	item, err := h.service.FindHomeAnnouncement(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get home announcement"})
+		return
+	}
+	if item == nil {
+		ctx.JSON(http.StatusOK, gin.H{"announcement": nil})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"announcement": item})
 }
 
 func (h *AnnouncementHandler) ListAdmin(ctx *gin.Context) {
@@ -62,6 +76,7 @@ func (h *AnnouncementHandler) Create(ctx *gin.Context) {
 		Content:    req.Content,
 		Status:     req.Status,
 		IsPinned:   req.IsPinned,
+		IsHome:     req.IsHome,
 		OperatorID: identity.AdminID,
 		OperatorIP: ctx.ClientIP(),
 	})
@@ -72,6 +87,10 @@ func (h *AnnouncementHandler) Create(ctx *gin.Context) {
 		}
 		if errors.Is(err, service.ErrAnnouncementPinDenied) {
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can pin announcements"})
+			return
+		}
+		if errors.Is(err, service.ErrAnnouncementHomeDenied) {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can set homepage announcement"})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create announcement"})
@@ -98,6 +117,7 @@ func (h *AnnouncementHandler) Update(ctx *gin.Context) {
 		Content:    req.Content,
 		Status:     req.Status,
 		IsPinned:   req.IsPinned,
+		IsHome:     req.IsHome,
 		OperatorID: identity.AdminID,
 		OperatorIP: ctx.ClientIP(),
 	})
@@ -107,6 +127,8 @@ func (h *AnnouncementHandler) Update(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid announcement"})
 		case errors.Is(err, service.ErrAnnouncementPinDenied):
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can pin announcements"})
+		case errors.Is(err, service.ErrAnnouncementHomeDenied):
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "only super admin can set homepage announcement"})
 		case errors.Is(err, service.ErrAnnouncementUpdateDenied):
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "cannot update this announcement"})
 		case errors.Is(err, service.ErrAnnouncementNotFound):

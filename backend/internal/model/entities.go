@@ -90,8 +90,10 @@ type Folder struct {
 	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。空字符串表示未设置。
 	CustomPath string `gorm:"column:custom_path;type:text;uniqueIndex:ux_folders_custom_path"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载
-	AllowDownload *bool     `gorm:"column:allow_download"`
-	FileCount     int64     `gorm:"column:file_count;type:integer;not null;default:0"`
+	AllowDownload *bool `gorm:"column:allow_download"`
+	// HideFileExtension nil = 继承上层；解析后均未设置则默认显示后缀
+	HideFileExtension *bool     `gorm:"column:hide_file_extension"`
+	FileCount         int64     `gorm:"column:file_count;type:integer;not null;default:0"`
 	TotalSize     int64     `gorm:"column:total_size;type:integer;not null;default:0"`
 	DownloadCount int64     `gorm:"column:download_count;type:integer;not null;default:0"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime;index:idx_folders_created_at,sort:desc"`
@@ -207,6 +209,7 @@ type Announcement struct {
 	Content     string             `gorm:"column:content;type:text;not null;default:''"`
 	Status      AnnouncementStatus `gorm:"column:status;type:text;not null;default:'draft';index:idx_announcements_status_published_at"`
 	IsPinned    bool               `gorm:"column:is_pinned;type:boolean;not null;default:false;index:idx_announcements_is_pinned"`
+	IsHome      bool               `gorm:"column:is_home;type:boolean;not null;default:false"`
 	CreatedByID EntityID           `gorm:"column:created_by_id;type:text;not null"`
 	PublishedAt *time.Time         `gorm:"column:published_at;type:datetime;index:idx_announcements_status_published_at,sort:desc"`
 	CreatedAt   time.Time          `gorm:"column:created_at;autoCreateTime"`

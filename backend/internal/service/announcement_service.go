@@ -20,6 +20,7 @@ var (
 	ErrAnnouncementDeleteDenied = errors.New("announcement delete denied")
 	ErrAnnouncementUpdateDenied = errors.New("announcement update denied")
 	ErrAnnouncementPinDenied    = errors.New("announcement pin denied")
+	ErrAnnouncementHomeDenied   = errors.New("announcement home setting denied")
 )
 
 type AnnouncementService struct {
@@ -34,6 +35,7 @@ type AnnouncementItem struct {
 	Content     string                   `json:"content"`
 	Status      model.AnnouncementStatus `json:"status"`
 	IsPinned    bool                     `json:"is_pinned"`
+	IsHome      bool                     `json:"is_home"`
 	CreatedByID string                   `json:"created_by_id"`
 	Creator     AnnouncementCreator      `json:"creator"`
 	PublishedAt *time.Time               `json:"published_at,omitempty"`
@@ -54,6 +56,7 @@ type SaveAnnouncementInput struct {
 	Content    string
 	Status     model.AnnouncementStatus
 	IsPinned   *bool
+	IsHome     *bool
 	OperatorID string
 	OperatorIP string
 }
@@ -82,6 +85,18 @@ func (s *AnnouncementService) ListAdmin(ctx context.Context) ([]AnnouncementItem
 	return mapAnnouncements(items), nil
 }
 
+func (s *AnnouncementService) FindHomeAnnouncement(ctx context.Context) (*AnnouncementItem, error) {
+	item, err := s.repo.FindHomeAnnouncement(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, nil
+	}
+	result := mapAnnouncements([]model.Announcement{*item})
+	return &result[0], nil
+}
+
 func (s *AnnouncementService) Create(ctx context.Context, input SaveAnnouncementInput) (*AnnouncementItem, error) {
 	title, content, status, err := normalizeAnnouncementInput(input.Title, input.Content, input.Status)
 	if err != nil {
@@ -101,12 +116,17 @@ func (s *AnnouncementService) Create(ctx context.Context, input SaveAnnouncement
 	if err != nil {
 		return nil, err
 	}
+	isHome, err := s.resolveHomeValue(ctx, nil, input.OperatorID, input.IsHome)
+	if err != nil {
+		return nil, err
+	}
 	item := &model.Announcement{
 		ID:          id,
 		Title:       title,
 		Content:     content,
 		Status:      status,
 		IsPinned:    isPinned,
+		IsHome:      isHome,
 		CreatedByID: input.OperatorID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -151,6 +171,10 @@ func (s *AnnouncementService) Update(ctx context.Context, id string, input SaveA
 	if err != nil {
 		return nil, err
 	}
+	isHome, err := s.resolveHomeValue(ctx, current, input.OperatorID, input.IsHome)
+	if err != nil {
+		return nil, err
+	}
 
 	now := s.nowFunc()
 	updates := map[string]any{
@@ -158,6 +182,7 @@ func (s *AnnouncementService) Update(ctx context.Context, id string, input SaveA
 		"content":    content,
 		"status":     status,
 		"is_pinned":  isPinned,
+		"is_home":    isHome,
 		"updated_at": now,
 	}
 	switch status {
@@ -208,6 +233,30 @@ func (s *AnnouncementService) resolvePinnedValue(
 	}
 	if operator.Role != string(model.AdminRoleSuperAdmin) {
 		return false, ErrAnnouncementPinDenied
+	}
+	return *requested, nil
+}
+
+func (s *AnnouncementService) resolveHomeValue(
+	ctx context.Context,
+	current *model.Announcement,
+	operatorID string,
+	requested *bool,
+) (bool, error) {
+	operator, err := s.loadOperator(ctx, operatorID)
+	if err != nil {
+		return false, err
+	}
+	if operator == nil {
+		return false, ErrAnnouncementUpdateDenied
+	}
+
+	currentHome := current != nil && current.IsHome
+	if requested == nil {
+		return currentHome, nil
+	}
+	if operator.Role != string(model.AdminRoleSuperAdmin) {
+		return false, ErrAnnouncementHomeDenied
 	}
 	return *requested, nil
 }
@@ -328,6 +377,7 @@ func mapAnnouncements(items []model.Announcement) []AnnouncementItem {
 			Content:     item.Content,
 			Status:      item.Status,
 			IsPinned:    item.IsPinned,
+			IsHome:      item.IsHome,
 			CreatedByID: item.CreatedByID,
 			Creator: AnnouncementCreator{
 				ID:          item.CreatedBy.ID,

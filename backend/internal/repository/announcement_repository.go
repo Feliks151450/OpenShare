@@ -32,6 +32,21 @@ func (r *AnnouncementRepository) ListPublic(ctx context.Context) ([]model.Announ
 	return items, nil
 }
 
+func (r *AnnouncementRepository) FindHomeAnnouncement(ctx context.Context) (*model.Announcement, error) {
+	var item model.Announcement
+	err := r.db.WithContext(ctx).
+		Preload("CreatedBy").
+		Where("is_home = ? AND status = ? AND deleted_at IS NULL", true, model.AnnouncementStatusPublished).
+		Take(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find home announcement: %w", err)
+	}
+	return &item, nil
+}
+
 func (r *AnnouncementRepository) ListAll(ctx context.Context) ([]model.Announcement, error) {
 	var items []model.Announcement
 	err := r.db.WithContext(ctx).
@@ -65,6 +80,14 @@ func (r *AnnouncementRepository) CreateWithLog(
 	logID string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if item.IsHome {
+			now := time.Now().UTC()
+			if err := tx.Model(&model.Announcement{}).
+				Where("is_home = ? AND deleted_at IS NULL", true).
+				Updates(map[string]any{"is_home": false, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("clear other home announcements: %w", err)
+			}
+		}
 		if err := tx.Create(item).Error; err != nil {
 			return fmt.Errorf("create announcement: %w", err)
 		}
@@ -83,6 +106,13 @@ func (r *AnnouncementRepository) UpdateWithLog(
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if isHome, ok := updates["is_home"].(bool); ok && isHome {
+			if err := tx.Model(&model.Announcement{}).
+				Where("is_home = ? AND id <> ? AND deleted_at IS NULL", true, id).
+				Updates(map[string]any{"is_home": false, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("clear other home announcements: %w", err)
+			}
+		}
 		result := tx.Model(&model.Announcement{}).Where("id = ? AND deleted_at IS NULL", id).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update announcement: %w", result.Error)

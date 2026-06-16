@@ -30,14 +30,15 @@ type updateManagedFileRequest struct {
 }
 
 type updateManagedFolderDescriptionRequest struct {
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	Remark           string  `json:"remark"`
-	CoverURL         *string `json:"cover_url"`
-	DirectLinkPrefix string  `json:"direct_link_prefix"`
-	CdnURL           string  `json:"cdn_url"`
-	CustomPath       string  `json:"custom_path"`
-	DownloadPolicy   *string `json:"download_policy"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	Remark            string  `json:"remark"`
+	CoverURL          *string `json:"cover_url"`
+	DirectLinkPrefix  string  `json:"direct_link_prefix"`
+	CdnURL            string  `json:"cdn_url"`
+	CustomPath        string  `json:"custom_path"`
+	DownloadPolicy    *string `json:"download_policy"`
+	HideFileExtension *string `json:"hide_file_extension"`
 }
 
 type createManagedFolderRequest struct {
@@ -139,16 +140,17 @@ func (h *ResourceManagementHandler) UpdateFolderDescription(ctx *gin.Context) {
 	}
 
 	err := h.service.UpdateFolderDescription(ctx.Request.Context(), ctx.Param("folderID"), service.UpdateManagedFolderDescriptionInput{
-		Name:             req.Name,
-		Description:      req.Description,
-		Remark:           req.Remark,
-		CoverURL:         req.CoverURL,
-		DirectLinkPrefix: req.DirectLinkPrefix,
-		CdnURL:           req.CdnURL,
-		CustomPath:       req.CustomPath,
-		DownloadPolicy:   req.DownloadPolicy,
-		OperatorID:       identity.AdminID,
-		OperatorIP:       ctx.ClientIP(),
+		Name:              req.Name,
+		Description:       req.Description,
+		Remark:            req.Remark,
+		CoverURL:          req.CoverURL,
+		DirectLinkPrefix:  req.DirectLinkPrefix,
+		CdnURL:            req.CdnURL,
+		CustomPath:        req.CustomPath,
+		DownloadPolicy:    req.DownloadPolicy,
+		HideFileExtension: req.HideFileExtension,
+		OperatorID:        identity.AdminID,
+		OperatorIP:        ctx.ClientIP(),
 	})
 	if err != nil {
 		switch {

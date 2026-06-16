@@ -58,6 +58,10 @@ export interface FolderDetailResponse {
   is_virtual?: boolean;
   /** 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹 */
   custom_path?: string;
+  /** 子文件是否隐藏后缀：原始设置值 */
+  hide_file_extension?: "inherit" | "hide" | "show";
+  /** 子文件是否隐藏后缀：解析后的最终值 */
+  hide_file_extension_resolved?: boolean;
   breadcrumbs: Array<{
     id: string;
     name: string;

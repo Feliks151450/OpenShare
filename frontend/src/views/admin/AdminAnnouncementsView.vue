@@ -20,6 +20,7 @@ interface AnnouncementItem {
   content: string;
   status: AnnouncementStatus;
   is_pinned: boolean;
+  is_home: boolean;
   created_by_id: string;
   published_at?: string;
   created_at: string;
@@ -45,6 +46,7 @@ const form = reactive({
   content: "",
   status: "published" as AnnouncementStatus,
   isPinned: false,
+  isHome: false,
 });
 
 const announcementContentTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -67,7 +69,8 @@ const formDirty = computed(() => {
     form.title.trim() !== editingItem.value.title ||
     form.content.trim() !== editingItem.value.content ||
     form.status !== editingItem.value.status ||
-    form.isPinned !== editingItem.value.is_pinned
+    form.isPinned !== editingItem.value.is_pinned ||
+    form.isHome !== editingItem.value.is_home
   );
 });
 
@@ -145,6 +148,7 @@ function openCreateEditor() {
   form.content = "";
   form.status = "published";
   form.isPinned = false;
+  form.isHome = false;
   editorOpen.value = true;
 }
 
@@ -154,6 +158,7 @@ function openEditEditor(item: AnnouncementItem) {
   form.content = item.content;
   form.status = item.status;
   form.isPinned = item.is_pinned;
+  form.isHome = item.is_home;
   editorOpen.value = true;
 }
 
@@ -175,7 +180,7 @@ async function saveAnnouncement() {
       title: form.title.trim(),
       content: form.content.trim(),
       status: form.status,
-      ...(sessionStore.isSuperAdmin ? { is_pinned: form.isPinned } : {}),
+      ...(sessionStore.isSuperAdmin ? { is_pinned: form.isPinned, is_home: form.isHome } : {}),
     };
     if (editingItem.value) {
       await httpClient.request(`/admin/announcements/${editingItem.value.id}`, {
@@ -263,6 +268,10 @@ function statusClass(status: AnnouncementStatus) {
 function pinLabel(item: AnnouncementItem) {
   return item.is_pinned ? "已置顶" : "普通公告";
 }
+
+function homeLabel(item: AnnouncementItem) {
+  return item.is_home ? "首页展示" : "非首页";
+}
 </script>
 
 <template>
@@ -301,6 +310,12 @@ function pinLabel(item: AnnouncementItem) {
                 >
                   {{ pinLabel(item) }}
                 </span>
+                <span
+                  class="rounded-lg px-2.5 py-1 text-xs font-medium"
+                  :class="item.is_home ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'"
+                >
+                  {{ homeLabel(item) }}
+                </span>
               </div>
               <div class="mt-2 flex flex-wrap gap-4 text-sm text-slate-500">
                 <span>发布时间：{{ formatDate(item.published_at) }}</span>
@@ -332,9 +347,9 @@ function pinLabel(item: AnnouncementItem) {
   <!-- 新建/编辑公告弹窗：左右分栏布局，左侧编辑区（标题 + 发布设置 + 正文），右侧 Markdown 实时预览 -->
   <Teleport to="body">
     <Transition name="modal-shell">
-    <div v-if="editorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/30 px-4 py-6">
-      <div class="mx-auto w-full max-w-5xl">
-        <SurfaceCard class="modal-card space-y-6">
+    <div v-if="editorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/30 lg:px-4 lg:py-6">
+      <div class="mx-auto h-full w-full lg:h-auto lg:max-w-5xl">
+        <SurfaceCard class="modal-card space-y-6 rounded-none lg:rounded-2xl">
           <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement Editor</p>
@@ -388,6 +403,24 @@ function pinLabel(item: AnnouncementItem) {
                     </div>
                     <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="form.isPinned ? 'bg-white text-blue-700' : 'bg-slate-100 text-slate-500'">
                       {{ form.isPinned ? '置顶' : '普通' }}
+                    </span>
+                  </button>
+
+                  <button
+                    v-if="sessionStore.isSuperAdmin"
+                    type="button"
+                    class="flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition"
+                    :class="form.isHome ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
+                    @click="form.isHome = !form.isHome"
+                  >
+                    <div>
+                      <p class="text-sm font-semibold">首页展示</p>
+                      <p class="mt-1 text-xs" :class="form.isHome ? 'text-emerald-600/80' : 'text-slate-400'">
+                        {{ form.isHome ? '在首页公告区域展示此公告' : '不在首页展示' }}
+                      </p>
+                    </div>
+                    <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="form.isHome ? 'bg-white text-emerald-700' : 'bg-slate-100 text-slate-500'">
+                      {{ form.isHome ? '展示' : '不展示' }}
                     </span>
                   </button>
                 </div>

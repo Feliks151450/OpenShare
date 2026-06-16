@@ -110,6 +110,16 @@ func DownloadPolicyString(p *bool) string {
 	return "deny"
 }
 
+func HideFileExtensionString(p *bool) string {
+	if p == nil {
+		return "inherit"
+	}
+	if *p {
+		return "hide"
+	}
+	return "show"
+}
+
 // inlinePlaybackAllowedWhenDownloadForbidden 策略禁止下载时仍允许通过本站 URL 内嵌播放音/视频，以及浏览器内预览的常见图文/CSV/PDF。
 func inlinePlaybackAllowedWhenDownloadForbidden(mimeType, fileName string) bool {
 	mt := strings.ToLower(strings.TrimSpace(mimeType))
@@ -257,6 +267,26 @@ func (s *PublicDownloadService) EffectiveDownloadAllowedForFolder(ctx context.Co
 		}
 	}
 	return true, nil
+}
+
+// EffectiveHideFileExtensionForFolder 解析文件夹的子文件是否隐藏后缀：本文件夹设置优先，否则向上查找祖先，均未设置则默认显示后缀（false）。
+func (s *PublicDownloadService) EffectiveHideFileExtensionForFolder(ctx context.Context, folder *model.Folder) (bool, error) {
+	if folder == nil {
+		return false, nil
+	}
+	if folder.HideFileExtension != nil {
+		return *folder.HideFileExtension, nil
+	}
+	chain, err := s.repository.ListFolderAncestorsFromLeaf(ctx, folder.ID)
+	if err != nil {
+		return false, err
+	}
+	for i := range chain {
+		if chain[i].HideFileExtension != nil {
+			return *chain[i].HideFileExtension, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *PublicDownloadService) PrepareDownload(ctx context.Context, fileID string) (*DownloadableFile, error) {

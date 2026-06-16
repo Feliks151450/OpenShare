@@ -22,6 +22,17 @@ func appendAllowDownloadUpdate(updates map[string]any, apply bool, allowPtr *boo
 	}
 }
 
+func appendHideFileExtensionUpdate(updates map[string]any, apply bool, hidePtr *bool) {
+	if !apply {
+		return
+	}
+	if hidePtr == nil {
+		updates["hide_file_extension"] = gorm.Expr("NULL")
+	} else {
+		updates["hide_file_extension"] = *hidePtr
+	}
+}
+
 // appendCustomPathUpdate 将 custom_path 写入更新 map。空字符串时写 NULL 避免 UNIQUE 约束冲突。
 func appendCustomPathUpdate(updates map[string]any, customPath string) {
 	if customPath == "" {
@@ -89,6 +100,8 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 	customPath string,
 	applyAllowDownload bool,
 	allowDownload *bool,
+	applyHideFileExtension bool,
+	hideFileExtension *bool,
 	operatorID string,
 	operatorIP string,
 	logID string,
@@ -107,6 +120,7 @@ func (r *ResourceManagementRepository) UpdateFolderMetadata(
 		}
 		appendCustomPathUpdate(updates, customPath)
 		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
+		appendHideFileExtensionUpdate(updates, applyHideFileExtension, hideFileExtension)
 		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update folder metadata: %w", result.Error)

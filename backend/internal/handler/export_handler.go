@@ -54,14 +54,15 @@ type downloadPolicyExport struct {
 }
 
 type GlobalExportData struct {
-	Version        int                  `json:"version"`
-	ExportedAt     string               `json:"exported_at"`
-	Announcements  interface{}          `json:"announcements"`
-	HotFiles       interface{}          `json:"hot_files"`
-	LatestFiles    interface{}          `json:"latest_files"`
-	RootFolders    interface{}          `json:"root_folders"`
-	DownloadPolicy downloadPolicyExport `json:"download_policy"`
-	FileTags       interface{}          `json:"file_tags"`
+	Version          int                  `json:"version"`
+	ExportedAt       string               `json:"exported_at"`
+	Announcements    interface{}          `json:"announcements"`
+	HomeAnnouncement interface{}          `json:"home_announcement"`
+	HotFiles         interface{}          `json:"hot_files"`
+	LatestFiles      interface{}          `json:"latest_files"`
+	RootFolders      interface{}          `json:"root_folders"`
+	DownloadPolicy   downloadPolicyExport `json:"download_policy"`
+	FileTags         interface{}          `json:"file_tags"`
 }
 
 func (h *ExportHandler) ExportGlobal(ctx *gin.Context) {
@@ -70,6 +71,12 @@ func (h *ExportHandler) ExportGlobal(ctx *gin.Context) {
 	announcements, err := h.announcement.ListPublic(ctx2)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load announcements: %v", err)})
+		return
+	}
+
+	homeAnnouncement, err := h.announcement.FindHomeAnnouncement(ctx2)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load home announcement: %v", err)})
 		return
 	}
 
@@ -104,12 +111,13 @@ func (h *ExportHandler) ExportGlobal(ctx *gin.Context) {
 	}
 
 	data := GlobalExportData{
-		Version:        1,
-		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
-		Announcements:  announcements,
-		HotFiles:       hotFiles,
-		LatestFiles:    latestFiles,
-		RootFolders:    rootFolders,
+		Version:          1,
+		ExportedAt:       time.Now().UTC().Format(time.RFC3339),
+		Announcements:    announcements,
+		HomeAnnouncement: homeAnnouncement,
+		HotFiles:         hotFiles,
+		LatestFiles:      latestFiles,
+		RootFolders:      rootFolders,
 		DownloadPolicy: downloadPolicyExport{
 			LargeDownloadConfirmBytes: policy.Download.LargeDownloadConfirmBytes,
 			WideLayoutExtensions:      policy.Download.WideLayoutExtensions,

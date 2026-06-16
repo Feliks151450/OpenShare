@@ -23,6 +23,7 @@ export interface ExportAnnouncement {
   content: string;
   status: string;
   is_pinned: boolean;
+  is_home: boolean;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -104,6 +105,7 @@ export interface GlobalExportData {
   version: number;
   exported_at: string;
   announcements: ExportAnnouncement[];
+  home_announcement: ExportAnnouncement | null;
   hot_files: ExportHotFiles;
   latest_files: ExportLatestFiles;
   root_folders: ExportPublicFolderItem[];
@@ -387,6 +389,10 @@ class StaticDataLoader {
 
   get announcements(): ExportAnnouncement[] | null {
     return this._global?.announcements ?? null;
+  }
+
+  get homeAnnouncement(): ExportAnnouncement | null {
+    return this._global?.home_announcement ?? null;
   }
 
   get hotFiles(): ExportHotFiles | null {
