@@ -19,6 +19,9 @@ const STORAGE_KEY = "openShareFavorites";
 /** 全局共享的收藏列表响应式状态 */
 const favoriteItems = ref<FavoriteItem[]>(loadFromStorage());
 
+/** 导出响应式状态供控制台 API 使用 */
+export { favoriteItems };
+
 /** 从 localStorage 加载收藏数据 */
 function loadFromStorage(): FavoriteItem[] {
   try {

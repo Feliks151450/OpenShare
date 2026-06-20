@@ -1,5 +1,6 @@
 import type { Router } from "vue-router";
 
+import { favoriteItems, type FavoriteItem } from "../composables/useFavorites";
 import { fileEffectiveDownloadHref } from "./fileDirectUrl";
 import { httpClient } from "./http/client";
 import { getHomeConsoleHooks, type HomeListSortDirection, type HomeListSortMode, type HomeListViewMode } from "./homeConsoleBridge";
@@ -11,17 +12,6 @@ import {
 import { staticDataLoader } from "./staticDataLoader";
 
 export type { OpenSharePublicFileInfo };
-
-/** 收藏项类型 */
-export interface FavoriteItem {
-  /** 资源 ID */
-  id: string;
-  /** 资源类型：文件或文件夹 */
-  kind: "file" | "folder";
-}
-
-/** localStorage 收藏存储 key */
-const FAVORITES_STORAGE_KEY = "openShareFavorites";
 
 declare global {
   interface Window {
@@ -122,34 +112,6 @@ function persistHomeSortMode(mode: HomeListSortMode) {
 
 function persistHomeSortDirection(direction: HomeListSortDirection) {
   window.localStorage.setItem("public-home-sort-direction", direction);
-}
-
-/** 从 localStorage 加载收藏数据 */
-function loadFavorites(): FavoriteItem[] {
-  try {
-    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item: unknown) => {
-        if (item && typeof item === "object" && "id" in item && "kind" in item) {
-          const obj = item as { id: unknown; kind: unknown };
-          if (typeof obj.id === "string" && (obj.kind === "file" || obj.kind === "folder")) {
-            return { id: obj.id, kind: obj.kind };
-          }
-        }
-        return null;
-      })
-      .filter((item): item is FavoriteItem => item !== null);
-  } catch {
-    return [];
-  }
-}
-
-/** 将收藏数据持久化到 localStorage */
-function saveFavorites(items: FavoriteItem[]) {
-  localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(items));
 }
 
 export function mountOpenShareConsole(router: Router): void {
@@ -290,12 +252,12 @@ export function mountOpenShareConsole(router: Router): void {
 
   const favorites: OpenShareConsoleFavorites = {
     list() {
-      return loadFavorites();
+      return [...favoriteItems.value];
     },
     has(id) {
       const trimmed = String(id ?? "").trim();
       if (!trimmed) return false;
-      return loadFavorites().some((item) => item.id === trimmed);
+      return favoriteItems.value.some((item) => item.id === trimmed);
     },
     add(id, kind) {
       const trimmed = String(id ?? "").trim();
@@ -307,22 +269,18 @@ export function mountOpenShareConsole(router: Router): void {
         console.warn("[OpenShare.favorites.add] kind 必须为 file 或 folder");
         return false;
       }
-      const items = loadFavorites();
-      if (items.some((item) => item.id === trimmed)) {
+      if (favoriteItems.value.some((item) => item.id === trimmed)) {
         return true; // 已存在，视为成功
       }
-      items.push({ id: trimmed, kind });
-      saveFavorites(items);
+      favoriteItems.value.push({ id: trimmed, kind });
       return true;
     },
     remove(id) {
       const trimmed = String(id ?? "").trim();
       if (!trimmed) return false;
-      const items = loadFavorites();
-      const index = items.findIndex((item) => item.id === trimmed);
+      const index = favoriteItems.value.findIndex((item) => item.id === trimmed);
       if (index < 0) return false;
-      items.splice(index, 1);
-      saveFavorites(items);
+      favoriteItems.value.splice(index, 1);
       return true;
     },
     toggle(id, kind) {
@@ -335,14 +293,12 @@ export function mountOpenShareConsole(router: Router): void {
         console.warn("[OpenShare.favorites.toggle] kind 必须为 file 或 folder");
         return false;
       }
-      const items = loadFavorites();
-      const index = items.findIndex((item) => item.id === trimmed);
+      const index = favoriteItems.value.findIndex((item) => item.id === trimmed);
       if (index >= 0) {
-        items.splice(index, 1);
+        favoriteItems.value.splice(index, 1);
       } else {
-        items.push({ id: trimmed, kind });
+        favoriteItems.value.push({ id: trimmed, kind });
       }
-      saveFavorites(items);
       return true;
     },
     set(items) {
@@ -359,13 +315,13 @@ export function mountOpenShareConsole(router: Router): void {
           return typeof obj.id === "string" && (obj.kind === "file" || obj.kind === "folder");
         })
         .map((item) => ({ id: (item as FavoriteItem).id, kind: (item as FavoriteItem).kind }));
-      saveFavorites(validated);
+      favoriteItems.value = validated;
     },
     clear() {
-      saveFavorites([]);
+      favoriteItems.value = [];
     },
     count() {
-      return loadFavorites().length;
+      return favoriteItems.value.length;
     },
   };
 
