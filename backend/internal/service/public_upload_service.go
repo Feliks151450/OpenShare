@@ -25,6 +25,7 @@ var (
 	ErrUploadTooLarge       = errors.New("upload too large")
 	ErrUploadEmptyFile      = errors.New("upload file is empty")
 	ErrUploadNameConflict   = errors.New("upload name conflict")
+	ErrFileIDConflict       = errors.New("file_id already exists")
 	ErrReceiptCodeGenerate  = errors.New("failed to generate receipt code")
 	ErrUploadFolderRequired = errors.New("upload target folder is required")
 	ErrUploadFolderNotFound = errors.New("upload target folder not found")
@@ -48,12 +49,14 @@ type PublicUploadInput struct {
 	UploaderIP  string
 	Files       []PublicUploadFileInput
 	Overwrite   bool
+	OverwriteID bool
 }
 
 type PublicUploadFileInput struct {
 	Name         string
 	RelativePath string
 	File         io.Reader
+	ID           string
 }
 
 type PublicUploadResult struct {
@@ -171,6 +174,7 @@ func (s *PublicUploadService) CreateSubmission(ctx context.Context, input Public
 			StagingPath:  stagedFile.DiskPath,
 			Status:       model.SubmissionStatusPending,
 			UploaderIP:   normalized.UploaderIP,
+			FileInputID:  entry.ID,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
@@ -185,7 +189,7 @@ func (s *PublicUploadService) CreateSubmission(ctx context.Context, input Public
 	}
 
 	if canDirectPublish {
-		result, publishErr := s.publishDirectUploadBatch(ctx, rootFolder, submissions, actor.AdminID, normalized.UploaderIP, now, normalized.Overwrite)
+		result, publishErr := s.publishDirectUploadBatch(ctx, rootFolder, submissions, actor.AdminID, normalized.UploaderIP, now, normalized.Overwrite, normalized.OverwriteID)
 		if publishErr != nil {
 			s.cleanupStagedSubmissions(submissions)
 			return nil, publishErr
@@ -222,6 +226,7 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 	operatorIP string,
 	reviewedAt time.Time,
 	overwrite bool,
+	overwriteID bool,
 ) (*PublicUploadResult, error) {
 	if rootFolder == nil || rootFolder.SourcePath == nil || strings.TrimSpace(*rootFolder.SourcePath) == "" {
 		return nil, ErrUploadFolderNotFound
@@ -267,6 +272,36 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 				if existingID != "" {
 					replaced = true
 				}
+			}
+		}
+
+		// 指定 file_id 冲突处理
+		if submission.FileInputID != "" && !replaced {
+			exists, existsErr := s.repository.FileIDExists(ctx, submission.FileInputID)
+			if existsErr != nil {
+				return nil, fmt.Errorf("check file id existence: %w", existsErr)
+			}
+			if exists {
+				if !overwriteID {
+					return nil, ErrFileIDConflict
+				}
+				// 覆盖模式：更新现有文件元数据
+				oldName, oldFolderPath, updateErr := s.repository.UpdateExistingFileByID(
+					ctx, submission.FileInputID, &submission, reviewedAt,
+				)
+				if updateErr != nil {
+					return nil, fmt.Errorf("update existing file by id: %w", updateErr)
+				}
+				// 删除旧的物理文件（如果名称不同）
+				if oldName != "" && oldFolderPath != "" && oldName != submission.Name {
+					oldPath := filepath.Join(oldFolderPath, filepath.Base(oldName))
+					if _, statErr := os.Stat(oldPath); statErr == nil {
+						if rmErr := s.storage.RemoveManagedFilePermanently(oldPath); rmErr != nil {
+							return nil, fmt.Errorf("remove old file for id overwrite: %w", rmErr)
+						}
+					}
+				}
+				replaced = true
 			}
 		}
 

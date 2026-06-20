@@ -168,6 +168,7 @@ type Submission struct {
 	Status       SubmissionStatus `gorm:"column:status;type:text;not null;default:'pending';index:idx_submissions_status_created_at"`
 	ReviewReason string           `gorm:"column:review_reason;type:text;not null;default:''"`
 	UploaderIP   string           `gorm:"column:uploader_ip;type:text;not null;default:''"`
+	FileInputID  string           `gorm:"column:file_input_id;type:text;not null;default:''"`
 	ReviewerID   *EntityID        `gorm:"column:reviewer_id;type:text;index:idx_submissions_reviewer_id_reviewed_at"`
 	ReviewedAt   *time.Time       `gorm:"column:reviewed_at;type:datetime;index:idx_submissions_reviewer_id_reviewed_at,sort:desc;index:idx_submissions_reviewed_at,sort:desc"`
 	CreatedAt    time.Time        `gorm:"column:created_at;autoCreateTime;index:idx_submissions_status_created_at,sort:desc"`

@@ -29,6 +29,7 @@ const (
 
 type uploadManifestEntry struct {
 	RelativePath string `json:"relative_path"`
+	ID           string `json:"id"`
 }
 
 type parsedPublicUploadRequest struct {
@@ -78,17 +79,19 @@ func (h *PublicUploadHandler) parseSubmissionRequest(ctx *gin.Context) (*parsedP
 			Name:         fileHeader.Filename,
 			RelativePath: manifest[index].RelativePath,
 			File:         file,
+			ID:           manifest[index].ID,
 		})
 	}
 
 	return &parsedPublicUploadRequest{
 		input: service.PublicUploadInput{
-			Description: ctx.PostForm("description"),
-			ReceiptCode: readPublicReceiptCode(ctx),
-			FolderID:    ctx.PostForm("folder_id"),
-			UploaderIP:  ctx.ClientIP(),
-			Files:       files,
-			Overwrite:   ctx.PostForm("overwrite") == "1",
+			Description:  ctx.PostForm("description"),
+			ReceiptCode:  readPublicReceiptCode(ctx),
+			FolderID:     ctx.PostForm("folder_id"),
+			UploaderIP:   ctx.ClientIP(),
+			Files:        files,
+			Overwrite:    ctx.PostForm("overwrite") == "1",
+			OverwriteID:  ctx.PostForm("overwrite_id") == "1",
 		},
 		closers: closers,
 	}, nil

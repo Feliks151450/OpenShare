@@ -205,6 +205,82 @@ TypeScript 类型见 **`frontend/src/lib/openSharePublicFileInfo.ts`**（`OpenSh
 
 ---
 
+## `OpenShare.favorites`
+
+基于 **localStorage** 的收藏管理，浏览器本地存储，不涉及后端 API。
+
+**存储 key**：`openShareFavorites`  
+**数据格式**：`[{ id: string, kind: "file" | "folder" }]`
+
+### `list()`
+
+获取所有收藏项。
+
+- **返回**：`FavoriteItem[]`，每项包含 `id`（资源 ID）和 `kind`（`"file"` 或 `"folder"`）。
+
+### `has(id)`
+
+判断某个资源是否已收藏。
+
+- **参数**：`id`：资源 ID 字符串。
+- **返回**：`boolean`。
+
+### `add(id, kind)`
+
+添加收藏。
+
+- **参数**：
+  - `id`：资源 ID 字符串（必填）。
+  - `kind`：`"file"` 或 `"folder"`（必填）。
+- **返回**：成功为 `true`；参数无效返回 `false` 并 `console.warn`；已存在视为成功。
+
+### `remove(id)`
+
+移除收藏。
+
+- **参数**：`id`：资源 ID 字符串。
+- **返回**：成功移除返回 `true`；不存在返回 `false`。
+
+### `toggle(id, kind)`
+
+切换收藏状态：已收藏则取消，未收藏则添加。
+
+- **参数**：同 `add`。
+- **返回**：`boolean`，操作后的新状态（`true` 表示已收藏）。
+
+### `set(items)`
+
+一次性设置整个收藏列表（覆盖现有内容）。
+
+- **参数**：`items`：`FavoriteItem[]`，每项包含 `id`（资源 ID）和 `kind`（`"file"` 或 `"folder"`）。
+- **返回**：无。
+
+**示例**：
+
+```js
+// 批量设置收藏
+OpenShare.favorites.set([
+  { id: "file-1", kind: "file" },
+  { id: "folder-1", kind: "folder" },
+  { id: "file-2", kind: "file" }
+]);
+
+// 覆盖为单个收藏
+OpenShare.favorites.set([{ id: "file-1", kind: "file" }]);
+```
+
+### `clear()`
+
+清空所有收藏。无返回值。
+
+### `count()`
+
+获取收藏数量。
+
+- **返回**：`number`。
+
+---
+
 ## 使用示例（控制台）
 
 ```js
@@ -232,6 +308,22 @@ OpenShare.nav.back();
 OpenShare.home.setListView("table");
 OpenShare.home.setSortMode("download");
 OpenShare.home.setSortDirection("desc");
+
+// 收藏管理
+OpenShare.favorites.list();                    // 获取所有收藏
+OpenShare.favorites.has("YOUR_FILE_ID");       // 判断是否已收藏
+OpenShare.favorites.add("YOUR_FILE_ID", "file");      // 收藏文件
+OpenShare.favorites.add("YOUR_FOLDER_ID", "folder");  // 收藏文件夹
+OpenShare.favorites.remove("YOUR_FILE_ID");    // 取消收藏
+OpenShare.favorites.toggle("YOUR_FILE_ID", "file");   // 切换收藏状态
+OpenShare.favorites.count();                   // 收藏数量
+OpenShare.favorites.clear();                   // 清空所有收藏
+
+// 批量设置收藏（覆盖现有内容）
+OpenShare.favorites.set([
+  { id: "YOUR_FILE_ID", kind: "file" },
+  { id: "YOUR_FOLDER_ID", kind: "folder" }
+]);
 ```
 
 ---
@@ -700,8 +792,11 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 | `files` | file[] | 上传文件列表 |
 | `folder_id` | string | 目标目录 ID |
 | `description` | string | 资料简介（可选） |
-| `manifest` | string (JSON) | 文件路径清单，格式 `[{ "relative_path": "subdir/file.txt" }]` |
+| `manifest` | string (JSON) | 文件路径清单，格式 `[{ "relative_path": "subdir/file.txt", "id": "custom-id" }]` |
 | `overwrite` | string | 设为 `"1"` 时覆盖同名文件（仅管理员直接上传生效，不产生新 DB 记录） |
+| `overwrite_id` | string | 设为 `"1"` 时允许覆盖指定 `file_id` 的现有文件（仅管理员直接上传生效） |
+
+> **指定 file_id**：manifest 中可为每个文件指定 `id` 字段，上传后该文件的 `file_id` 将使用指定值。若指定的 `id` 已存在，需同时设置 `overwrite_id=1` 才能覆盖，否则返回 409 错误。
 
 管理员（具有 `submission_moderation` 权限或超管）上传时直接通过审核，`status` 返回 `"approved"`；访客上传进入审核池。
 
@@ -776,6 +871,21 @@ curl -X POST https://<BASE_URL>/api/public/submissions \
   -F "folder_id=<FOLDER_ID>" \
   -F "files=@test.pdf" \
   -F "overwrite=1"
+
+# 指定 file_id 上传
+curl -X POST https://<BASE_URL>/api/public/submissions \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "folder_id=<FOLDER_ID>" \
+  -F "files=@test.pdf" \
+  -F 'manifest=[{"relative_path":"test.pdf","id":"custom-file-id-001"}]'
+
+# 覆盖指定 file_id 的现有文件
+curl -X POST https://<BASE_URL>/api/public/submissions \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "folder_id=<FOLDER_ID>" \
+  -F "files=@test.pdf" \
+  -F 'manifest=[{"relative_path":"test.pdf","id":"existing-file-id"}]' \
+  -F "overwrite_id=1"
 
 # 列出所有托管文件
 curl -s https://<BASE_URL>/api/admin/resources/files \

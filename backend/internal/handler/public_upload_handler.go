@@ -68,6 +68,8 @@ func (h *PublicUploadHandler) CreateSubmission(ctx *gin.Context) {
 			ctx.JSON(http.StatusConflict, gin.H{"error": "receipt code already exists"})
 		case errors.Is(err, service.ErrUploadNameConflict):
 			ctx.JSON(http.StatusConflict, gin.H{"error": "file or folder name already exists"})
+		case errors.Is(err, service.ErrFileIDConflict):
+			ctx.JSON(http.StatusConflict, gin.H{"error": "file_id already exists"})
 		case errors.Is(err, service.ErrUploadTooLarge):
 			ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "total upload size exceeds limit"})
 		case errors.Is(err, service.ErrUploadEmptyFile):

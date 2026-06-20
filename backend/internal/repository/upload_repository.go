@@ -145,6 +145,75 @@ func (r *UploadRepository) UpdateExistingFileMetadata(
 	return existingID, err
 }
 
+// FileIDExists checks if a file with the given ID already exists.
+func (r *UploadRepository) FileIDExists(ctx context.Context, fileID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.File{}).
+		Where("id = ?", fileID).
+		Count(&count).
+		Error
+	if err != nil {
+		return false, fmt.Errorf("check file id existence: %w", err)
+	}
+	return count > 0, nil
+}
+
+// UpdateExistingFileByID updates an existing file's metadata by its ID.
+// Returns the old file's name and folder source path for disk cleanup, or empty strings if not found.
+func (r *UploadRepository) UpdateExistingFileByID(
+	ctx context.Context,
+	fileID string,
+	submission *model.Submission,
+	now time.Time,
+) (oldName string, oldFolderPath string, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var f model.File
+		if err := tx.Select("id, folder_id, name, size").
+			Where("id = ?", fileID).
+			Take(&f).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return fmt.Errorf("find existing file: %w", err)
+		}
+
+		oldName = f.Name
+		sizeDelta := submission.Size - f.Size
+		updates := map[string]any{
+			"name":        submission.Name,
+			"description": submission.Description,
+			"extension":   submission.Extension,
+			"mime_type":   submission.MimeType,
+			"size":        submission.Size,
+			"updated_at":  now,
+		}
+		if err := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update existing file: %w", err)
+		}
+		if sizeDelta != 0 {
+			if err := model.AdjustFolderStatsTx(tx, f.FolderID, sizeDelta, 0, 0); err != nil {
+				return fmt.Errorf("adjust folder stats: %w", err)
+			}
+		}
+
+		// 获取文件夹的 source_path 用于磁盘清理
+		var folder model.Folder
+		if err := tx.Select("id, source_path").
+			Where("id = ?", f.FolderID).
+			Take(&folder).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("find folder for file: %w", err)
+			}
+		} else if folder.SourcePath != nil {
+			oldFolderPath = *folder.SourcePath
+		}
+
+		return nil
+	})
+	return oldName, oldFolderPath, err
+}
+
 func (r *UploadRepository) CreateApprovedUploadBatch(
 	ctx context.Context,
 	rootFolder *model.Folder,

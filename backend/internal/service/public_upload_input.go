@@ -15,6 +15,7 @@ type normalizedUploadInput struct {
 	UploaderIP  string
 	Files       []normalizedUploadFile
 	Overwrite   bool
+	OverwriteID bool
 }
 
 type normalizedUploadFile struct {
@@ -23,6 +24,7 @@ type normalizedUploadFile struct {
 	RelativeDir  string
 	Extension    string
 	File         io.Reader
+	ID           string
 }
 
 func (s *PublicUploadService) normalizeInput(input PublicUploadInput) (*normalizedUploadInput, error) {
@@ -68,6 +70,7 @@ func (s *PublicUploadService) normalizeInput(input PublicUploadInput) (*normaliz
 			RelativeDir:  relativeDir,
 			Extension:    extension,
 			File:         item.File,
+			ID:           item.ID,
 		})
 	}
 
@@ -78,5 +81,6 @@ func (s *PublicUploadService) normalizeInput(input PublicUploadInput) (*normaliz
 		UploaderIP:  strings.TrimSpace(input.UploaderIP),
 		Files:       files,
 		Overwrite:   input.Overwrite,
+		OverwriteID: input.OverwriteID,
 	}, nil
 }

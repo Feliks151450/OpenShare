@@ -12,6 +12,17 @@ import { staticDataLoader } from "./staticDataLoader";
 
 export type { OpenSharePublicFileInfo };
 
+/** 收藏项类型 */
+export interface FavoriteItem {
+  /** 资源 ID */
+  id: string;
+  /** 资源类型：文件或文件夹 */
+  kind: "file" | "folder";
+}
+
+/** localStorage 收藏存储 key */
+const FAVORITES_STORAGE_KEY = "openShareFavorites";
+
 declare global {
   interface Window {
     OpenShare?: OpenShareConsoleApi;
@@ -24,6 +35,8 @@ export type OpenShareConsoleApi = {
   runtime: "spa";
   nav: OpenShareConsoleNavSpa;
   home: OpenShareConsoleHomeSpa;
+  /** 收藏管理（基于 localStorage，浏览器本地） */
+  favorites: OpenShareConsoleFavorites;
   /** CDN 静态数据加载器：可配置预导出 JSON 直链，替代部分公开 API 请求 */
   staticData: typeof staticDataLoader;
 };
@@ -68,6 +81,26 @@ export type OpenShareConsoleHomeSpa = {
   setSortDirection(direction: HomeListSortDirection): boolean;
 };
 
+/** 收藏管理 API */
+export type OpenShareConsoleFavorites = {
+  /** 获取所有收藏项 */
+  list(): FavoriteItem[];
+  /** 判断某个资源是否已收藏 */
+  has(id: string): boolean;
+  /** 添加收藏 */
+  add(id: string, kind: "file" | "folder"): boolean;
+  /** 移除收藏 */
+  remove(id: string): boolean;
+  /** 切换收藏状态：已收藏则取消，未收藏则添加 */
+  toggle(id: string, kind: "file" | "folder"): boolean;
+  /** 一次性设置整个收藏列表（覆盖现有内容） */
+  set(items: FavoriteItem[]): void;
+  /** 清空所有收藏 */
+  clear(): void;
+  /** 收藏数量 */
+  count(): number;
+};
+
 async function navigate(router: Router, loc: Parameters<Router["push"]>[0], opts?: ConsoleNavOpts) {
   const pending = opts?.replace ? router.replace(loc) : router.push(loc);
   await pending.catch((err: unknown) => {
@@ -89,6 +122,34 @@ function persistHomeSortMode(mode: HomeListSortMode) {
 
 function persistHomeSortDirection(direction: HomeListSortDirection) {
   window.localStorage.setItem("public-home-sort-direction", direction);
+}
+
+/** 从 localStorage 加载收藏数据 */
+function loadFavorites(): FavoriteItem[] {
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item: unknown) => {
+        if (item && typeof item === "object" && "id" in item && "kind" in item) {
+          const obj = item as { id: unknown; kind: unknown };
+          if (typeof obj.id === "string" && (obj.kind === "file" || obj.kind === "folder")) {
+            return { id: obj.id, kind: obj.kind };
+          }
+        }
+        return null;
+      })
+      .filter((item): item is FavoriteItem => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** 将收藏数据持久化到 localStorage */
+function saveFavorites(items: FavoriteItem[]) {
+  localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(items));
 }
 
 export function mountOpenShareConsole(router: Router): void {
@@ -227,11 +288,93 @@ export function mountOpenShareConsole(router: Router): void {
     },
   };
 
+  const favorites: OpenShareConsoleFavorites = {
+    list() {
+      return loadFavorites();
+    },
+    has(id) {
+      const trimmed = String(id ?? "").trim();
+      if (!trimmed) return false;
+      return loadFavorites().some((item) => item.id === trimmed);
+    },
+    add(id, kind) {
+      const trimmed = String(id ?? "").trim();
+      if (!trimmed) {
+        console.warn("[OpenShare.favorites.add] 需要有效的 id");
+        return false;
+      }
+      if (kind !== "file" && kind !== "folder") {
+        console.warn("[OpenShare.favorites.add] kind 必须为 file 或 folder");
+        return false;
+      }
+      const items = loadFavorites();
+      if (items.some((item) => item.id === trimmed)) {
+        return true; // 已存在，视为成功
+      }
+      items.push({ id: trimmed, kind });
+      saveFavorites(items);
+      return true;
+    },
+    remove(id) {
+      const trimmed = String(id ?? "").trim();
+      if (!trimmed) return false;
+      const items = loadFavorites();
+      const index = items.findIndex((item) => item.id === trimmed);
+      if (index < 0) return false;
+      items.splice(index, 1);
+      saveFavorites(items);
+      return true;
+    },
+    toggle(id, kind) {
+      const trimmed = String(id ?? "").trim();
+      if (!trimmed) {
+        console.warn("[OpenShare.favorites.toggle] 需要有效的 id");
+        return false;
+      }
+      if (kind !== "file" && kind !== "folder") {
+        console.warn("[OpenShare.favorites.toggle] kind 必须为 file 或 folder");
+        return false;
+      }
+      const items = loadFavorites();
+      const index = items.findIndex((item) => item.id === trimmed);
+      if (index >= 0) {
+        items.splice(index, 1);
+      } else {
+        items.push({ id: trimmed, kind });
+      }
+      saveFavorites(items);
+      return true;
+    },
+    set(items) {
+      if (!Array.isArray(items)) {
+        console.warn("[OpenShare.favorites.set] 参数必须为数组");
+        return;
+      }
+      const validated = items
+        .filter((item) => {
+          if (!item || typeof item !== "object" || !("id" in item) || !("kind" in item)) {
+            return false;
+          }
+          const obj = item as { id: unknown; kind: unknown };
+          return typeof obj.id === "string" && (obj.kind === "file" || obj.kind === "folder");
+        })
+        .map((item) => ({ id: (item as FavoriteItem).id, kind: (item as FavoriteItem).kind }));
+      saveFavorites(validated);
+    },
+    clear() {
+      saveFavorites([]);
+    },
+    count() {
+      return loadFavorites().length;
+    },
+  };
+
   window.OpenShare = {
     version: "1.0",
     runtime: "spa",
     nav,
     home,
+    favorites,
     staticData: staticDataLoader,
   };
 }
