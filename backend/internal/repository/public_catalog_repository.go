@@ -227,12 +227,12 @@ func (r *PublicCatalogRepository) FindPublicFolderByID(ctx context.Context, fold
 }
 
 // FindFolderByParentAndName 根据父文件夹 ID 和名称查找子文件夹。
-// parentID 为 nil 时查找根目录（排除 hide_public_catalog 的托管根）。
+// parentID 为 nil 时查找根目录（不过滤 hide_public_catalog，与直链直达策略一致）。
 // name 匹配为精确匹配（区分大小写，与 SQLite 默认行为一致）。
 func (r *PublicCatalogRepository) FindFolderByParentAndName(ctx context.Context, parentID *string, name string) (*model.Folder, error) {
 	query := r.db.WithContext(ctx).Model(&model.Folder{})
 	if parentID == nil {
-		query = query.Where("parent_id IS NULL AND hide_public_catalog = ?", false)
+		query = query.Where("parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", *parentID)
 	}
