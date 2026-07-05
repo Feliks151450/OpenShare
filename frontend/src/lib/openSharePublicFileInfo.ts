@@ -80,10 +80,10 @@ function toEffectiveAbsoluteHref(effectiveHref: string): string {
 export function buildOpenSharePublicFileInfo(
   payload: PublicFileDetailPayload,
   resolveSiteDownloadHref: (fileId: string) => string,
-  resolveEffectiveDownloadHref: (fileId: string, playbackUrl?: string | null, folderDirect?: string | null) => string,
+  resolveEffectiveDownloadHref: (fileId: string, playbackUrl?: string | null, folderDirect?: string | null, folderPath?: string | null, fileName?: string | null) => string,
 ): OpenSharePublicFileInfo {
   const id = String(payload.id ?? "").trim();
-  const eff = resolveEffectiveDownloadHref(id, payload.playback_url, payload.folder_direct_download_url).trim();
+  const eff = resolveEffectiveDownloadHref(id, payload.playback_url, payload.folder_direct_download_url, payload.path, payload.name).trim();
   return {
     id,
     name: String(payload.name ?? ""),

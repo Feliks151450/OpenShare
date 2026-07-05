@@ -756,6 +756,55 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 
 404：未找到对应路径。
 
+### 基于文件夹层级路径的下载直链
+
+#### `GET /dl/*path`
+
+通过文件夹层级路径直接下载文件或打包下载文件夹，无需知道资源的 UUID。路径由文件夹名称逐级拼接，最后一段为文件名或文件夹名。
+
+**路径参数**：`*path` — 文件夹层级路径，如 `课程/数学/笔记.pdf`。
+
+**查询参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `inline` | `string` | 可选，设为 `1` 时对支持的文件类型（视频/图片/PDF/文本等）以内嵌方式返回（`Content-Disposition: inline`） |
+
+**行为**：
+
+- 路径段按 `/` 分割，前 N-1 段逐级匹配子文件夹名称，最后一段优先匹配文件名，其次匹配文件夹名
+- **文件路径**：复用 `/api/public/files/:fileID/download` 的完整下载逻辑（CDN 重定向 / 服务端代理 / 本地流式），支持 `?inline=1`
+- **文件夹路径**：打包为 ZIP 下载（与 `GET /api/public/folders/:folderID/download` 行为一致）
+- 路径中的中文、空格等字符需 URL 编码
+- 文件夹名称匹配区分大小写
+- 下载计数正常记录
+- 隐藏的托管根目录不会出现在路径解析中
+
+**示例**：
+
+```bash
+# 下载文件（文件夹 "课程/数学" 下的 "笔记.pdf"）
+curl -O https://example.com/dl/%E8%AF%BE%E7%A8%8B/%E6%95%B0%E5%AD%A6/%E7%AC%94%E8%AE%B0.pdf
+
+# 英文路径
+curl -O https://example.com/dl/docs/report.pdf
+
+# 内嵌预览
+curl "https://example.com/dl/docs/report.pdf?inline=1"
+
+# 打包下载文件夹
+curl -O https://example.com/dl/docs/templates
+```
+
+**错误**：
+
+| 状态码 | 含义 |
+|--------|------|
+| 400 | 路径为空或编码无效 |
+| 404 | 路径不存在（文件夹或文件名不匹配） |
+| 403 | 下载权限被禁止 |
+| 410 | 文件不可用 |
+
 ### 公告
 
 #### `GET /api/public/announcements`

@@ -89,7 +89,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		moderation:         handler.NewModerationHandler(services.moderation),
 		operationLog:       handler.NewOperationLogHandler(services.operationLog),
 		publicCatalog:      handler.NewPublicCatalogHandler(services.publicCatalog, services.systemSetting),
-		publicDownload:     handler.NewPublicDownloadHandler(services.publicDownload),
+		publicDownload:     handler.NewPublicDownloadHandler(services.publicDownload, services.publicCatalog),
 		publicReceipt:      handler.NewPublicReceiptHandler(services.publicReceipt),
 		publicSubmission:   handler.NewPublicSubmissionHandler(services.publicSubmission),
 		publicUpload:       handler.NewPublicUploadHandler(services.publicUpload),

@@ -225,3 +225,42 @@ func (r *PublicCatalogRepository) FindPublicFolderByID(ctx context.Context, fold
 
 	return &folder, nil
 }
+
+// FindFolderByParentAndName 根据父文件夹 ID 和名称查找子文件夹。
+// parentID 为 nil 时查找根目录（排除 hide_public_catalog 的托管根）。
+// name 匹配为精确匹配（区分大小写，与 SQLite 默认行为一致）。
+func (r *PublicCatalogRepository) FindFolderByParentAndName(ctx context.Context, parentID *string, name string) (*model.Folder, error) {
+	query := r.db.WithContext(ctx).Model(&model.Folder{})
+	if parentID == nil {
+		query = query.Where("parent_id IS NULL AND hide_public_catalog = ?", false)
+	} else {
+		query = query.Where("parent_id = ?", *parentID)
+	}
+	query = query.Where("name = ?", name)
+
+	var folder model.Folder
+	if err := query.Take(&folder).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find folder by parent and name: %w", err)
+	}
+	return &folder, nil
+}
+
+// FindFileByFolderAndName 根据文件夹 ID 和文件名查找文件。
+// name 为精确匹配（含扩展名，如 "report.pdf"）。
+func (r *PublicCatalogRepository) FindFileByFolderAndName(ctx context.Context, folderID string, name string) (*model.File, error) {
+	var file model.File
+	err := r.db.WithContext(ctx).
+		Where("folder_id = ? AND name = ?", folderID, name).
+		Take(&file).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find file by folder and name: %w", err)
+	}
+	return &file, nil
+}

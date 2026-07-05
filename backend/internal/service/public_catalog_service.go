@@ -23,7 +23,7 @@ var (
 var customPathPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*(/[a-zA-Z][a-zA-Z0-9_-]*)*$`)
 
 // reservedPaths 与现有路由冲突的路径前缀。
-var reservedPaths = []string{"upload", "admin", "files", "api", "public", "healthz"}
+var reservedPaths = []string{"upload", "admin", "files", "api", "public", "healthz", "dl"}
 
 // ValidateCustomPath 校验 custom_path 格式并检查是否与保留路由冲突。
 func ValidateCustomPath(customPath string) error {
@@ -397,6 +397,71 @@ func (s *PublicCatalogService) ResolveCustomPathFull(ctx context.Context, custom
 			Extension: strings.TrimSpace(file.Extension),
 		}, nil
 	}
+	return nil, nil
+}
+
+// PathResolveResult 基于文件夹层级路径的解析结果。
+type PathResolveResult struct {
+	// Type 为 "file" 或 "folder"。
+	Type     string `json:"type"`
+	FileID   string `json:"file_id,omitempty"`
+	FolderID string `json:"folder_id,omitempty"`
+	Name     string `json:"name"`
+}
+
+// ResolvePathSegments 根据文件夹层级路径逐级解析到文件或文件夹。
+// segments 为按 "/" 分割的路径段，如 ["课程", "数学", "笔记.pdf"]。
+// 解析逻辑：从根目录开始，前 N-1 段逐级匹配子文件夹名称，
+// 最后一段同时尝试匹配文件名和文件夹名（文件优先）。
+func (s *PublicCatalogService) ResolvePathSegments(ctx context.Context, segments []string) (*PathResolveResult, error) {
+	if len(segments) == 0 {
+		return nil, nil
+	}
+
+	// 逐级查找中间的文件夹段
+	var parentID *string
+	for i := 0; i < len(segments)-1; i++ {
+		folder, err := s.repository.FindFolderByParentAndName(ctx, parentID, segments[i])
+		if err != nil {
+			return nil, fmt.Errorf("resolve path segment %q: %w", segments[i], err)
+		}
+		if folder == nil {
+			return nil, nil // 路径不存在
+		}
+		id := folder.ID
+		parentID = &id
+	}
+
+	// 最后一段：优先查找文件，再查找文件夹
+	lastSegment := segments[len(segments)-1]
+
+	if parentID != nil {
+		file, err := s.repository.FindFileByFolderAndName(ctx, *parentID, lastSegment)
+		if err != nil {
+			return nil, fmt.Errorf("resolve file %q: %w", lastSegment, err)
+		}
+		if file != nil {
+			return &PathResolveResult{
+				Type:   "file",
+				FileID: file.ID,
+				Name:   file.Name,
+			}, nil
+		}
+	}
+
+	// 查找文件夹
+	folder, err := s.repository.FindFolderByParentAndName(ctx, parentID, lastSegment)
+	if err != nil {
+		return nil, fmt.Errorf("resolve folder %q: %w", lastSegment, err)
+	}
+	if folder != nil {
+		return &PathResolveResult{
+			Type:     "folder",
+			FolderID: folder.ID,
+			Name:     folder.Name,
+		}, nil
+	}
+
 	return nil, nil
 }
 

@@ -1,13 +1,24 @@
-/** 文件下载/播放地址：playback_url（CDN/直链） > 文件夹直链前缀拼接 > 本站下载接口 */
+/** 文件下载/播放地址：playback_url（CDN/直链） > 文件夹直链前缀拼接 > 基于路径的直链 > 本站下载接口 */
 export function fileEffectiveDownloadHref(
   fileId: string,
   playbackUrl?: string | null,
   folderDirectDownloadUrl?: string | null,
+  /** 文件所属目录路径（如 "课程/数学"），来自 API 的 path 字段 */
+  folderPath?: string | null,
+  /** 文件名（含扩展名，如 "笔记.pdf"），来自 API 的 name 字段 */
+  fileName?: string | null,
 ): string {
   const p = (playbackUrl ?? "").trim();
   if (p) return p;
   const f = (folderDirectDownloadUrl ?? "").trim();
   if (f) return f;
+  // 优先使用基于文件夹层级路径的下载直链
+  const dir = (folderPath ?? "").trim();
+  const name = (fileName ?? "").trim();
+  if (dir || name) {
+    const fullPath = dir ? `${dir}/${name}` : name;
+    return `/dl/${encodeURI(fullPath)}`;
+  }
   return `/api/public/files/${encodeURIComponent(fileId)}/download`;
 }
 

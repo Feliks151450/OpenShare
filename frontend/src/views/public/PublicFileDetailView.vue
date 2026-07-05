@@ -350,7 +350,7 @@ const videoPoster = computed(() => {
 
 const downloadActionsAllowed = computed(() => detail.value?.download_allowed !== false);
 
-/** 播放器与「复制下载直链」：playback_url > 文件夹前缀直链 > 本站下载接口 */
+/** 播放器与「复制下载直链」：playback_url > 文件夹前缀直链 > 基于路径的直链 > 本站下载接口 */
 const mediaSourceURL = computed(() => {
   if (!detail.value) {
     return backendDownloadPath.value;
@@ -359,6 +359,8 @@ const mediaSourceURL = computed(() => {
     fileID.value,
     detail.value.playback_url,
     detail.value.folder_direct_download_url,
+    detail.value.path,
+    detail.value.name,
   );
 });
 

@@ -43,6 +43,8 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 
 	api := engine.Group("/api")
 	registerPublicRoutes(api, handlers)
+	// 基于文件夹层级路径的下载直链，注册在顶层以获得更短的 /dl/*path 路径
+	engine.GET("/dl/*path", handlers.publicDownload.DownloadByPath)
 	registerAdminRoutes(api, handlers)
 	webui.Register(engine, newCustomPathHTMLHandler(services.publicCatalog, services.publicDownload))
 
