@@ -690,12 +690,15 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
   "download_allowed": true,
   "download_policy": "inherit|allow|deny",
   "custom_path": "doc/report",
+  "download_path": "cdn/icon",
   "size": 123456,
   "uploaded_at": "ISO8601",
   "download_count": 10,
   "tags": [...]
 }
 ```
+
+> `path` 为展示用路径（段间带空格，如 `"cdn / icon"`）；`download_path` 为下载直链拼接用路径（无空格，如 `"cdn/icon"`），对应 `GET /dl/*path` 接口。
 
 #### `GET /api/public/files/:fileID/download`
 

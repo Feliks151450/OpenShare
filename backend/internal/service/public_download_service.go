@@ -72,6 +72,9 @@ type PublicFileDetail struct {
 	Tags           []PublicFileTag `json:"tags"`
 	// CustomPath 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件。
 	CustomPath string `json:"custom_path"`
+	// DownloadPath 基于文件夹层级的下载路径（不含展示用空格），如 "cdn/icon"。
+	// 与 Path 不同，Path 是展示用路径（"cdn / icon"）。
+	DownloadPath string `json:"download_path"`
 }
 
 type BatchDownloadFile struct {
@@ -399,6 +402,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 	if err != nil {
 		return nil, fmt.Errorf("build public file path: %w", err)
 	}
+	rawPath := s.buildRawPath(ctx, file)
 
 	storagePath := ""
 	if resolvedStorage, err := s.resolveManagedFilePath(ctx, file); err == nil {
@@ -440,6 +444,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		DownloadCount:           file.DownloadCount,
 		Tags:                    tags,
 		CustomPath:              strings.TrimSpace(file.CustomPath),
+		DownloadPath:            rawPath,
 	}, nil
 }
 
@@ -538,6 +543,60 @@ func (s *PublicDownloadService) buildFilePath(ctx context.Context, file *model.F
 		return "主页根目录", nil
 	}
 	return strings.Join(segments, " / "), nil
+}
+
+// buildRawPath 构建基于文件夹层级的原始路径（用 "/" 连接，不含展示空格），用于下载直链拼接。
+func (s *PublicDownloadService) buildRawPath(ctx context.Context, file *model.File) string {
+	if file.FolderID == nil || strings.TrimSpace(*file.FolderID) == "" {
+		return ""
+	}
+
+	folderIDs := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	currentID := strings.TrimSpace(*file.FolderID)
+
+	for currentID != "" {
+		if _, ok := seen[currentID]; ok {
+			break
+		}
+		seen[currentID] = struct{}{}
+		folderIDs = append(folderIDs, currentID)
+
+		folders, err := s.repository.ListManagedFoldersByIDs(ctx, []string{currentID})
+		if err != nil || len(folders) == 0 || folders[0].ParentID == nil {
+			break
+		}
+		currentID = strings.TrimSpace(*folders[0].ParentID)
+	}
+
+	folders, err := s.repository.ListManagedFoldersByIDs(ctx, folderIDs)
+	if err != nil {
+		return ""
+	}
+
+	byID := make(map[string]repository.ManagedFolderNode, len(folders))
+	for _, folder := range folders {
+		byID[folder.ID] = folder
+	}
+
+	segments := make([]string, 0, len(folderIDs))
+	currentID = strings.TrimSpace(*file.FolderID)
+	for currentID != "" {
+		folder, ok := byID[currentID]
+		if !ok {
+			break
+		}
+		segments = append([]string{folder.Name}, segments...)
+		if folder.ParentID == nil {
+			break
+		}
+		currentID = strings.TrimSpace(*folder.ParentID)
+	}
+
+	if len(segments) == 0 {
+		return ""
+	}
+	return strings.Join(segments, "/")
 }
 
 func optionalString(value *string) string {

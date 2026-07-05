@@ -6,6 +6,8 @@ export interface PublicFileDetailPayload {
   extension: string;
   folder_id: string;
   path: string;
+  /** 基于文件夹层级的下载路径（不含展示空格），如 "cdn/icon" */
+  download_path?: string;
   /** 托管磁盘绝对路径（可解析时为非空） */
   storage_path?: string;
   description?: string;
@@ -83,7 +85,7 @@ export function buildOpenSharePublicFileInfo(
   resolveEffectiveDownloadHref: (fileId: string, playbackUrl?: string | null, folderDirect?: string | null, folderPath?: string | null, fileName?: string | null) => string,
 ): OpenSharePublicFileInfo {
   const id = String(payload.id ?? "").trim();
-  const eff = resolveEffectiveDownloadHref(id, payload.playback_url, payload.folder_direct_download_url, payload.path, payload.name).trim();
+  const eff = resolveEffectiveDownloadHref(id, payload.playback_url, payload.folder_direct_download_url, payload.download_path, payload.name).trim();
   return {
     id,
     name: String(payload.name ?? ""),

@@ -105,6 +105,8 @@ interface FileDetailResponse {
   playback_fallback_url?: string;
   /** 自定义访问路径，如 "doc/report" 对应 /doc/report 访问该文件 */
   custom_path?: string;
+  /** 基于文件夹层级的下载路径（不含展示空格），如 "cdn/icon" */
+  download_path?: string;
   size: number;
   uploaded_at: string;
   download_count: number;
@@ -359,7 +361,7 @@ const mediaSourceURL = computed(() => {
     fileID.value,
     detail.value.playback_url,
     detail.value.folder_direct_download_url,
-    detail.value.path,
+    detail.value.download_path,
     detail.value.name,
   );
 });
