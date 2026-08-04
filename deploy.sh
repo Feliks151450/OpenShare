@@ -11,7 +11,7 @@ LOG_DIR="$DATA_DIR/logs"
 
 # 默认内嵌前端（单端口），传 --separated 使用前后端分离（需额外部署 Nginx/Caddy）
 MODE="embedded"
-DAEMON=false
+DAEMON=true
 for arg in "$@"; do
   case "$arg" in
     --separated) MODE="separated" ;;

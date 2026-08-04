@@ -55,7 +55,7 @@ import {
   markdownCatalogNavigateInitialPresentation,
   type MarkdownCatalogConfirmPresentation,
 } from "../../lib/markdownCatalogNavigateDisplay";
-import { markdownRoutePublicFileDetailId, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
+import { markdownRoutePublicFileDetailId, markdownRouteSeekSeconds, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
@@ -1176,6 +1176,11 @@ function dismissMarkdownCatalogNavigateConfirm(ok: boolean) {
 function interceptHomeMarkdownFilePanelPeek(route: RouteLocationRaw): boolean {
   const fileId = markdownRoutePublicFileDetailId(route);
   if (!fileId) {
+    return false;
+  }
+  // 带 `?t=` 的时间戳链接：不开侧栏预览，交给 router.push 整页跳到 /files/<id>?t=，
+  // 否则侧栏详情读不到该时间戳（面板形态不跟随地址栏 t）
+  if (markdownRouteSeekSeconds(route) != null) {
     return false;
   }
   if (!isViewportTailwindXlMin()) {

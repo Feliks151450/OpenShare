@@ -64,7 +64,7 @@
 
 **SPA**：内部使用路由名 **`public-home`** 与对应 `query`。
 
-**只读**：改写 `location.hash`；若 `replace: true`，则 `history.replaceState` 后触发内部 **`bootstrapRoute()`**（不会在 `readonly` 下重复触发两次 `hashchange`）。
+**只读**：改写 `location.hash`；若 `replace: true`，则 `history.replaceState` 后触发内部 **`bootstrapRoute()`**
 
 ---
 
@@ -296,7 +296,7 @@ await OpenShare.nav.goHome();
 await OpenShare.nav.goFile("YOUR_FILE_ID", { t: 120.5 });
 await OpenShare.nav.goFile("YOUR_FILE_ID", { replace: true });
 
-await OpenShare.nav.goUpload(); // SPA 可用；readonly 中为 no-op + 首次 warn
+await OpenShare.nav.goUpload(); // SPA 可用；
 
 await OpenShare.nav.leaveFileTowardFolder();
 
@@ -332,7 +332,7 @@ OpenShare.favorites.set([
 
 在 **公开文件详情页**（简介、Markdown 文件预览、NetCDF 结构化摘要预览）以及 **首页当前文件夹简介**（含站内编辑简介时的预览区域）中，正文为简单 Markdown；其中 **站内超链接**在用户 **普通左键单击**时会 **走站内路由**，避免整页刷新；**按住 Ctrl／Cmd（新标签）、中键、`mailto:`、`tel:`、`http(s):` 外链**等保持浏览器默认。
 
-链接目标先按 **`new URL(链接, 当前页的 location.href)`** 解析为绝对地址，再在 **与同页同源**（含 **`file://` 静态页与同源规则**）前提下匹配下文路径；语义实现见 **`frontend/src/lib/publicMarkdownLinks.ts`**（SPA）与只读 **`readonly.js`** 内 **`tryMarkdownHrefToReadonlyHashRoute`**（需与 SPA 对齐时一并改两处）。
+链接目标先按 **`new URL(链接, 当前页的 location.href)`** 解析为绝对地址，再在 **与同页同源**（含 **`file://` 静态页与同源规则**）前提下匹配下文路径；语义实现见 **`frontend/src/lib/publicMarkdownLinks.ts`**（SPA）
 
 ### 可识别为站内跳转的写法（示例）
 

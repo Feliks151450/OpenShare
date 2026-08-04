@@ -155,6 +155,28 @@ export function markdownRoutePublicFileDetailId(route: RouteLocationRaw): string
   return id || null;
 }
 
+/**
+ * 若解析结果带 `?t=`（视频时间戳，单位秒，可为小数），返回秒数；否则返回 null。
+ *
+ * 与 B 站等站点一致：`/files/<id>?t=2483.8` 表示从该秒数开始播放。
+ * 详情页用它判断「同文件原地 seek」还是「整页跳转到目标文件」。
+ */
+export function markdownRouteSeekSeconds(route: RouteLocationRaw): number | null {
+  if (typeof route !== "object" || route === null || !("query" in route)) {
+    return null;
+  }
+  const raw = (route as { query?: Record<string, unknown> }).query?.t;
+  if (raw == null || raw === "") {
+    return null;
+  }
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const seconds = parseFloat(String(first));
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return null;
+  }
+  return seconds;
+}
+
 /** 站内 Markdown 导航可选项（相对路径基准、劫持 push）。 */
 export type MarkdownRouterNavOptions = {
   resolutionBaseHref?: string;

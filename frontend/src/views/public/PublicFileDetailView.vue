@@ -48,7 +48,7 @@ import {
   markdownCatalogNavigateInitialPresentation,
   type MarkdownCatalogConfirmPresentation,
 } from "../../lib/markdownCatalogNavigateDisplay";
-import { onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
+import { onMarkdownLinkClickCapture, isViewportTailwindXlMin, markdownRouteSeekSeconds } from "../../lib/publicMarkdownLinks";
 import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
 import { useFavorites } from "../../composables/useFavorites";
 /** 递归嵌套「右侧预览」，避免与同名默认导出循环引用告警 */
@@ -251,6 +251,40 @@ function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
     if (!nextId) {
       return false;
     }
+    // 链接上的 `?t=`（秒）：指向当前文件则原地跳播，指向其它文件则整页跳转过去
+    const seekSeconds = markdownRouteSeekSeconds(routeRaw);
+
+    // 1) 指向「当前正在看的这个文件」：不做路由跳转，直接操作播放器
+    if (nextId === fileID.value.trim()) {
+      if (seekSeconds == null) {
+        return true;
+      }
+      if (!isVideo.value) {
+        toastWarning("该文件不是视频，时间戳链接无效。");
+        return true;
+      }
+      seekVideoToSeconds(seekSeconds, { autoplay: true });
+      // 整页形态下同步地址栏，保证当前时间点的链接可直接分享。
+      // 这里刻意用 history.replaceState 而不是 router.replace：后者会触发路由全局
+      // scrollBehavior（return { top: 0 }）把页面滚回顶部，破坏「原地跳播」体验。
+      if (seekFollowsRouteQuery.value && typeof window !== "undefined") {
+        const nextT = formatTimestampParam(seekSeconds);
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set("t", nextT);
+          window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+        } catch {
+          /* 地址栏同步失败不影响跳播 */
+        }
+      }
+      toastSuccess(`已跳转到 ${formatSecondsClock(seekSeconds)}`);
+      return true;
+    }
+
+    // 2) 指向其它文件且带时间戳：不走侧边预览抽屉，交给 router.push 整页打开 /files/<id>?t=
+    if (seekSeconds != null) {
+      return false;
+    }
 
     if (props.panelPresentation) {
       if (!isViewportTailwindXlMin()) {
@@ -264,9 +298,6 @@ function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
       return false;
     }
 
-    if (nextId === fileID.value.trim()) {
-      return true;
-    }
     if (!isViewportTailwindXlMin()) {
       return false;
     }
@@ -630,18 +661,73 @@ function onVideoPlaybackError() {
   }
 }
 
+/**
+ * 抽屉 / 首页侧栏形态下不读地址栏的 `?t=`。
+ * 否则在 `/files/A?t=2483.8` 上打开文件 B 的预览抽屉时，B 的视频会被父页面的时间戳错误 seek。
+ */
+const seekFollowsRouteQuery = computed(
+  () => !props.panelPresentation && !(props.overrideFileId ?? "").trim(),
+);
+
+/** 视频元数据尚未就绪时暂存的目标秒数，等 loadedmetadata 后再应用 */
+const pendingSeekSeconds = ref<number | null>(null);
+/** 与 pendingSeekSeconds 配套：暂存的 seek 是否需要自动播放 */
+let pendingSeekAutoplay = false;
+
+/**
+ * 跳转到指定秒数（只动 currentTime，不滚动页面）。
+ * 视频元素还没出现或元数据未就绪时先暂存，由 onVideoLoadedMetadata 补应用；
+ * autoplay 为真且当前处于暂停状态时自动开始播放（与 B 站时间戳链接体验一致）。
+ */
+function seekVideoToSeconds(seconds: number, options?: { autoplay?: boolean }) {
+  const autoplay = options?.autoplay ?? false;
+  const el = videoRef.value;
+  if (!el || el.readyState < HTMLMediaElement.HAVE_METADATA) {
+    pendingSeekSeconds.value = seconds;
+    pendingSeekAutoplay = autoplay;
+    return;
+  }
+  const dur = el.duration;
+  const end = Number.isFinite(dur) && dur > 0 ? dur : Number.POSITIVE_INFINITY;
+  el.currentTime = Math.min(Math.max(0, seconds), Math.max(0, end - 0.05));
+  if (autoplay && el.paused) {
+    void el.play();
+    videoPlaying.value = true;
+  }
+}
+
+/** 元数据就绪后应用 seek：优先用暂存值（同页时间戳链接），否则读地址栏 `?t=` */
 function applySeekFromRouteQuery() {
   const el = videoRef.value;
   if (!el) {
+    return;
+  }
+  const pending = pendingSeekSeconds.value;
+  if (pending != null) {
+    const autoplay = pendingSeekAutoplay;
+    pendingSeekSeconds.value = null;
+    pendingSeekAutoplay = false;
+    seekVideoToSeconds(pending, { autoplay });
+    return;
+  }
+  if (!seekFollowsRouteQuery.value) {
     return;
   }
   const t = parseTimestampQuery(route.query.t);
   if (t == null) {
     return;
   }
-  const dur = el.duration;
-  const end = Number.isFinite(dur) && dur > 0 ? dur : Number.POSITIVE_INFINITY;
-  el.currentTime = Math.min(Math.max(0, t), Math.max(0, end - 0.05));
+  seekVideoToSeconds(t);
+}
+
+/** 秒数格式化为 `41:23` / `1:02:03`，用于时间戳跳转提示 */
+function formatSecondsClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
 }
 
 function onVideoLoadedMetadata() {
