@@ -92,9 +92,11 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 }
 
 // DownloadByPath 根据文件夹层级路径下载文件或打包下载文件夹。
-// URL 格式：/api/public/dl/文件夹/子文件夹/文件名.pdf
+// URL 格式：/dl/文件夹/子文件夹/文件名.pdf
 // 路径段按 "/" 分割，逐级匹配文件夹名称，最后一段匹配文件名或文件夹名。
 // 支持 ?inline=1 参数对支持的文件类型以内嵌方式返回。
+// 也支持 HEAD 探测：文件 HEAD 返回元数据（Content-Length/Accept-Ranges）但不写响应体、不计下载次数；
+// 文件夹 HEAD 不可低成本实现（需遍历子文件、构造 ZIP、批量计数），因此返回 405 Method Not Allowed。
 func (h *PublicDownloadHandler) DownloadByPath(ctx *gin.Context) {
 	rawPath := strings.TrimPrefix(ctx.Param("path"), "/")
 	if rawPath == "" {
@@ -134,8 +136,13 @@ func (h *PublicDownloadHandler) DownloadByPath(ctx *gin.Context) {
 		return
 	}
 
-	// 文件夹：打包下载为 ZIP
+	// 文件夹：HEAD 无法低成本提供等价的元数据，且会触发遍历/压缩/批量计数，对外直接返回 405。
 	if result.Type == "folder" {
+		if ctx.Request.Method == http.MethodHead {
+			ctx.Header("Allow", "GET, OPTIONS")
+			ctx.Status(http.StatusMethodNotAllowed)
+			return
+		}
 		h.downloadFolderByID(ctx, result.FolderID, result.Name)
 		return
 	}
@@ -193,7 +200,8 @@ func (h *PublicDownloadHandler) downloadFileByID(ctx *gin.Context, fileID string
 	if shouldRecord && wantInlineEmbed && inlineDisposition && service.InlineEmbedDispositionAllowed(download.MimeType, download.FileName) {
 		shouldRecord = false
 	}
-	if shouldRecord {
+	// HEAD 探测不写响应体，也不计下载次数，避免媒体客户端预检污染统计。
+	if shouldRecord && ctx.Request.Method != http.MethodHead {
 		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
 			return
@@ -256,8 +264,14 @@ func (h *PublicDownloadHandler) downloadFolderByID(ctx *gin.Context, folderID st
 }
 
 // proxyDownload 反向代理上游 URL，透传 Range/If-Range 头，原样返回上游响应。
+// /dl/* 要求对任意来源开放 CORS，因此上游返回的 Access-Control-* 头必须被过滤，
+// 否则会覆盖 PublicDownloadCORS 写入的 * 策略。
 func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *service.DownloadableFile) {
-	proxyReq, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodGet, download.ProxyURL, nil)
+	upstreamMethod := http.MethodGet
+	if ctx.Request.Method == http.MethodHead {
+		upstreamMethod = http.MethodHead
+	}
+	proxyReq, err := http.NewRequestWithContext(ctx.Request.Context(), upstreamMethod, download.ProxyURL, nil)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
 		return
@@ -279,7 +293,7 @@ func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *servic
 	}
 	defer resp.Body.Close()
 
-	// 透传上游响应头（跳过 hop-by-hop 头）
+	// 透传上游响应头（跳过 hop-by-hop 头与 CORS 相关头）
 	hopByHop := map[string]bool{
 		"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
 		"Proxy-Authorization": true, "Te": true, "Trailer": true,
@@ -288,6 +302,11 @@ func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *servic
 	upstreamHasContentDisp := false
 	for key, values := range resp.Header {
 		if hopByHop[key] {
+			continue
+		}
+		// /dl/* 公开 CORS 策略由 PublicDownloadCORS 中间件统一写入，
+		// 上游返回的 Access-Control-* 头必须丢弃，避免破坏跨域策略。
+		if isCORSHeader(key) {
 			continue
 		}
 		for _, v := range values {
@@ -304,7 +323,23 @@ func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *servic
 	}
 
 	ctx.Status(resp.StatusCode)
+	// HEAD 请求不复制响应体，仅透传元数据
+	if upstreamMethod == http.MethodHead {
+		return
+	}
 	io.Copy(ctx.Writer, resp.Body)
+}
+
+// isCORSHeader 判断响应头是否为跨域相关头，命中后由 PublicDownloadCORS 统一处理。
+func isCORSHeader(key string) bool {
+	if len(key) < 15 {
+		return false
+	}
+	prefix := strings.ToLower(key[:15])
+	if prefix != "access-control-" {
+		return false
+	}
+	return true
 }
 
 func (h *PublicDownloadHandler) DownloadFolder(ctx *gin.Context) {

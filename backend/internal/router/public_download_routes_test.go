@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -239,6 +240,177 @@ func TestPublicFolderDownloadStreamsZip(t *testing.T) {
 
 	assertEventuallyDownloadCount(t, db, rootFile.ID, 1)
 	assertEventuallyDownloadCount(t, db, nestedFile.ID, 1)
+}
+
+// TestPublicDownloadByPathServesFileWithPublicCORS 验证 /dl/* 对未进白名单的 Origin 仍返回 ACAO=* 与完整公开头。
+func TestPublicDownloadByPathServesFileWithPublicCORS(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "下载资料")
+	content := []byte("download-content")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "lecture.pdf", content)
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/dl/"+folder.Name+"/"+file.Name, nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected ACAO=*, got %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("expected no Allow-Credentials, got %q", got)
+	}
+	expose := recorder.Header().Get("Access-Control-Expose-Headers")
+	for _, want := range []string{"Content-Disposition", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if !strings.Contains(expose, want) {
+			t.Fatalf("expected Expose-Headers to contain %q, got %q", want, expose)
+		}
+	}
+	if recorder.Body.String() != string(content) {
+		t.Fatalf("unexpected response body %q", recorder.Body.String())
+	}
+	assertEventuallyDownloadCount(t, db, file.ID, 1)
+}
+
+// TestPublicDownloadByPathOptionsPreflight 验证 OPTIONS 预检对未进白名单的 Origin 返回 204 与公开头。
+func TestPublicDownloadByPathOptionsPreflight(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "下载资料")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "lecture.pdf", []byte("body"))
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodOptions, "/dl/"+folder.Name+"/"+file.Name, nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	request.Header.Set("Access-Control-Request-Method", "GET")
+	request.Header.Set("Access-Control-Request-Headers", "range, if-range")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected ACAO=*, got %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "GET") || !strings.Contains(got, "HEAD") {
+		t.Fatalf("expected Allow-Methods to include GET and HEAD, got %q", got)
+	}
+}
+
+// TestPublicDownloadByPathHEADReturnsMetadataWithoutCounting 验证文件 HEAD 返回 Content-Length/Accept-Ranges，
+// 不写响应体，且不增加 DownloadCount。
+func TestPublicDownloadByPathHEADReturnsMetadataWithoutCounting(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "下载资料")
+	content := []byte("download-content")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "lecture.pdf", content)
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodHead, "/dl/"+folder.Name+"/"+file.Name, nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Length"); got != strconv.FormatInt(int64(len(content)), 10) {
+		t.Fatalf("expected Content-Length=%d, got %q", len(content), got)
+	}
+	if got := recorder.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("expected Accept-Ranges=bytes, got %q", got)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("expected empty body for HEAD, got %d bytes", recorder.Body.Len())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected ACAO=*, got %q", got)
+	}
+
+	var stored model.File
+	if err := db.Where("id = ?", file.ID).Take(&stored).Error; err != nil {
+		t.Fatalf("reload file failed: %v", err)
+	}
+	if stored.DownloadCount != 0 {
+		t.Fatalf("expected HEAD to leave download_count=0, got %d", stored.DownloadCount)
+	}
+}
+
+// TestPublicDownloadByPathHEADOnFolderReturns405 验证文件夹 HEAD 返回 405，且不触发批量计数。
+func TestPublicDownloadByPathHEADOnFolderReturns405(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "课程资料")
+	// 子文件用于验证不发生 RecordBatchDownload
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "chapter.pdf", []byte("body"))
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodHead, "/dl/"+folder.Name, nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Allow"); got == "" {
+		t.Fatal("expected Allow header to be set for folder HEAD")
+	}
+
+	var stored model.File
+	if err := db.Where("id = ?", file.ID).Take(&stored).Error; err != nil {
+		t.Fatalf("reload file failed: %v", err)
+	}
+	if stored.DownloadCount != 0 {
+		t.Fatalf("expected folder HEAD not to bump download_count, got %d", stored.DownloadCount)
+	}
+}
+
+// TestPublicDownloadByPathReturnsPublicCORSOnNotFound 验证 404 错误仍携带公开 CORS 头。
+func TestPublicDownloadByPathReturnsPublicCORSOnNotFound(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/dl/不存在的目录/文件.pdf", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected ACAO=* on 404, got %q", got)
+	}
+}
+
+// TestPublicDownloadAPIRemainsWhitelistOnly 验证 /api/public/* 的 CORS 仍走白名单，不会被公开策略扩散。
+func TestPublicDownloadAPIRemainsWhitelistOnly(t *testing.T) {
+	cfg := newRouterTestConfig(t)
+	db := newRouterTestDB(t)
+	folder := createPublicDownloadFolder(t, db, nil, "下载资料")
+	file := createRepositoryFileForDownload(t, cfg, db, folder, "lecture.pdf", []byte("body"))
+	engine := New(db, cfg, newRouterSessionManager(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/public/files/"+file.ID+"/download", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got == "*" {
+		t.Fatalf("expected /api/* NOT to expose ACAO=*, got %q", got)
+	}
 }
 
 func TestPublicNetCDFDumpRejectsNonNcExtension(t *testing.T) {

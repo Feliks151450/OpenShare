@@ -808,6 +808,21 @@ curl -O https://example.com/dl/docs/templates
 | 403 | 下载权限被禁止 |
 | 410 | 文件不可用 |
 
+**CORS**：
+
+- 对任意来源返回 `Access-Control-Allow-Origin: *`，允许 `GET` / `HEAD` / `OPTIONS`；
+- 允许请求头 `Range`、`If-Range`；
+- 通过 `Access-Control-Expose-Headers` 暴露 `Content-Disposition`、`Content-Length`、`Content-Range`、`Accept-Ranges`，便于前端 `fetch` 读取文件名与分块信息；
+- 预检（`OPTIONS`）来自任意 Origin 均返回 204；
+- **不使用 Cookie**：请求**不得**携带 Cookie 或 `credentials: 'include'`，响应**不**返回 `Access-Control-Allow-Credentials`；
+- 当文件以 302 跳转到外部 CDN 时，最终 CDN 也必须返回兼容的 CORS 头，否则跨域下载会失败；
+- 其余 `/api/*` 接口仍按 `cors.allowed_origins` 白名单访问，不会被该策略扩散。
+
+**`HEAD /dl/*path`**：
+
+- 文件 HEAD：返回 `Content-Length`、`Accept-Ranges: bytes` 等元数据，不写响应体，**不**计入下载次数。
+- 文件夹 HEAD：返回 405 `Method Not Allowed`，并设置 `Allow: GET, OPTIONS`；若需要确认 ZIP 体积，请改用 `GET`。
+
 ### 公告
 
 #### `GET /api/public/announcements`
