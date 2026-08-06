@@ -1,16 +1,16 @@
 # Graph Report - OpenShare  (2026-08-07)
 
 ## Corpus Check
-- 229 files · ~356,628 words
+- 229 files · ~356,624 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2286 nodes · 3593 edges · 220 communities (158 shown, 62 thin omitted)
+- 2286 nodes · 3593 edges · 218 communities (157 shown, 61 thin omitted)
 - Extraction: 75% EXTRACTED · 25% INFERRED · 0% AMBIGUOUS · INFERRED: 900 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `09dd6943`
+- Built from commit: `ad688d83`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -141,8 +141,8 @@
 - [[_COMMUNITY_Community 123|Community 123]]
 - [[_COMMUNITY_Community 124|Community 124]]
 - [[_COMMUNITY_Community 125|Community 125]]
-- [[_COMMUNITY_Community 126|Community 126]]
 - [[_COMMUNITY_Community 127|Community 127]]
+- [[_COMMUNITY_Community 129|Community 129]]
 - [[_COMMUNITY_Community 130|Community 130]]
 - [[_COMMUNITY_Community 131|Community 131]]
 - [[_COMMUNITY_Community 132|Community 132]]
@@ -151,8 +151,8 @@
 - [[_COMMUNITY_Community 135|Community 135]]
 - [[_COMMUNITY_Community 136|Community 136]]
 - [[_COMMUNITY_Community 137|Community 137]]
-- [[_COMMUNITY_Community 138|Community 138]]
 - [[_COMMUNITY_Community 139|Community 139]]
+- [[_COMMUNITY_Community 140|Community 140]]
 - [[_COMMUNITY_Community 141|Community 141]]
 - [[_COMMUNITY_Community 142|Community 142]]
 - [[_COMMUNITY_Community 143|Community 143]]
@@ -164,15 +164,15 @@
 - [[_COMMUNITY_Community 149|Community 149]]
 - [[_COMMUNITY_Community 150|Community 150]]
 - [[_COMMUNITY_Community 151|Community 151]]
-- [[_COMMUNITY_Community 152|Community 152]]
-- [[_COMMUNITY_Community 153|Community 153]]
+- [[_COMMUNITY_Community 154|Community 154]]
+- [[_COMMUNITY_Community 155|Community 155]]
 - [[_COMMUNITY_Community 156|Community 156]]
 - [[_COMMUNITY_Community 157|Community 157]]
 - [[_COMMUNITY_Community 158|Community 158]]
 - [[_COMMUNITY_Community 159|Community 159]]
 - [[_COMMUNITY_Community 160|Community 160]]
-- [[_COMMUNITY_Community 161|Community 161]]
-- [[_COMMUNITY_Community 162|Community 162]]
+- [[_COMMUNITY_Community 194|Community 194]]
+- [[_COMMUNITY_Community 195|Community 195]]
 - [[_COMMUNITY_Community 196|Community 196]]
 - [[_COMMUNITY_Community 197|Community 197]]
 - [[_COMMUNITY_Community 198|Community 198]]
@@ -195,8 +195,6 @@
 - [[_COMMUNITY_Community 215|Community 215]]
 - [[_COMMUNITY_Community 216|Community 216]]
 - [[_COMMUNITY_Community 217|Community 217]]
-- [[_COMMUNITY_Community 218|Community 218]]
-- [[_COMMUNITY_Community 219|Community 219]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `string` - 80 edges
@@ -227,7 +225,7 @@
 - **CDN staticData export + load pipeline** — api_admin_export_endpoints, api_openshare_staticdata, readme_feature_cdn_mode, readme_feature_virtual_folders, api_get_public_announcements, api_get_public_files_hot, api_get_public_files_latest [INFERRED 0.85]
 - **Public direct-download path surface (CORS-open)** — api_get_dl_path, api_get_public_files_id_download, api_get_public_folders_id_download, rationale_cors_allow_credentials, memory_cors_dl_origin_issue, readme_feature_dl_path [INFERRED 0.90]
 
-## Communities (220 total, 62 thin omitted)
+## Communities (218 total, 61 thin omitted)
 
 ### Community 0 - "Frontend Home View"
 Cohesion: 0.01
@@ -270,144 +268,144 @@ Cohesion: 0.13
 Nodes (32): createPublicTestFolder(), TestPublicSubmissionLookupStillWorksAfterFileDeletion(), TestPublicUploadAllowsNamesThatDifferOnlyByCase(), TestPublicUploadAllowsSameFolderNameInDifferentDirectories(), TestPublicUploadRejectsDuplicateNamesWithinBatch(), TestPublicUploadRejectsWhenSameFolderAlreadyExistsInTargetDirectory(), TestPublicUploadDirectPublishesForSubmissionModerationAdmin(), TestPublicUploadIgnoresCustomReceiptCodeField() (+24 more)
 
 ### Community 10 - "Public Upload Route Tests"
-Cohesion: 0.06
-Nodes (18): AdminSession, Announcement, AnnouncementStatus, ApiToken, DailyStat, Feedback, FeedbackStatus, FileDailyDownload (+10 more)
+Cohesion: 0.1
+Nodes (23): string, NewPublicDownloadRepository(), TestRescanManagedDirectoryMirrorsFilesystemAndPreservesHistoricalDownloadStats(), TestUnmanageManagedDirectoryRequiresSuperAdminPasswordKeepsSourceDirectoryAndCleansManagedData(), createImportFixture(), newImportRouteEnv(), TestFolderTree(), TestImportDirectoryBrowser() (+15 more)
 
 ### Community 11 - "Public Catalog Repository & Visibility"
 Cohesion: 0.1
 Nodes (11): OpenedFile, ScannedEntry, Service, generateStoredName(), isCrossDeviceRenameErr(), moveDirTreeCrossDevice(), MoveRegularFile(), NewService() (+3 more)
 
 ### Community 12 - "Storage Service & Trash Volume"
-Cohesion: 0.18
-Nodes (27): adminAccess, createAnnouncementForTest(), TestAdminAnnouncementCreateAllowsPinnedForSuperAdmin(), TestAdminAnnouncementCreateRejectsPinnedForNormalAdmin(), TestPublicAnnouncementsPrioritizePinnedItems(), announcementSeed, createRouterTestAdmin(), createRouterTestAdminWithAccess() (+19 more)
-
-### Community 13 - "API Endpoint Definitions"
 Cohesion: 0.09
 Nodes (30): Admin export endpoints (global + per-directory JSON), Admin resources files endpoints (CRUD/move/tags), Admin resources folders endpoints (CRUD/visibility/cdn/order), GET /dl/*path (folder-hierarchy direct download), GET /api/public/announcements, GET /api/public/download-policy, GET /api/public/file-tags, GET /api/public/files/hot (+22 more)
 
-### Community 15 - "Admin Admins UI"
+### Community 14 - "Static Data Loader (Lib)"
 Cohesion: 0.1
 Nodes (7): FileOrderEntry, createOperationLogTx(), NewResourceManagementRepository(), appendAllowDownloadUpdate(), appendCustomPathUpdate(), appendHideFileExtensionUpdate(), ResourceManagementRepository
 
-### Community 16 - "Public Upload Handler"
-Cohesion: 0.14
-Nodes (8): NewID(), BuildManagedFilePath(), NormalizeManagedFileName(), folderSourcePath(), modelValue(), normalizeTrimmedString(), resolveNewFolderSourcePath(), ResourceManagementService
+### Community 15 - "Admin Admins UI"
+Cohesion: 0.16
+Nodes (23): date, CORS(), PublicDownloadCORS(), TestPublicDownloadCORS_GETAndHEADAllowAnyOrigin(), TestPublicDownloadCORS_OnlyAppliesToDLPath(), TestPublicDownloadCORS_OptionsPreflight(), TestPublicDownloadCORSPreventsWhitelistOverwrite(), newCustomPathHTMLHandler() (+15 more)
 
-### Community 17 - "Database Model Entities"
+### Community 16 - "Public Upload Handler"
 Cohesion: 0.08
 Nodes (13): canCreateAdmin, creating, deletePassword, deleteSubmitting, error, form, loaded, loading (+5 more)
 
-### Community 18 - "API Token & Resource Handlers"
+### Community 17 - "Database Model Entities"
 Cohesion: 0.1
 Nodes (16): parsedPublicUploadRequest, readPublicReceiptCode(), writePublicReceiptCode(), NewPublicReceiptHandler(), NewPublicUploadHandler(), closeClosers(), extractUploadFiles(), requestBodyLimit() (+8 more)
 
+### Community 18 - "API Token & Resource Handlers"
+Cohesion: 0.08
+Nodes (15): AdminSession, Announcement, AnnouncementStatus, ApiToken, DailyStat, FeedbackStatus, FileDailyDownload, FileTag (+7 more)
+
 ### Community 19 - "Admin Session & HTTP Client"
-Cohesion: 0.13
-Nodes (22): normalizedSearchQuery, effectiveFileCoverURL(), normalizeManagedRemark(), scoredSearchCandidate, bestFieldMatchScore(), collapseSearchWhitespace(), defaultSearchPolicy(), downloadCountBias() (+14 more)
+Cohesion: 0.17
+Nodes (22): adminAccess, createAnnouncementForTest(), TestAdminAnnouncementCreateAllowsPinnedForSuperAdmin(), TestAdminAnnouncementCreateRejectsPinnedForNormalAdmin(), TestPublicAnnouncementsPrioritizePinnedItems(), announcementSeed, createRouterTestAdmin(), createRouterTestAdminWithAccess() (+14 more)
 
 ### Community 20 - "Markdown Library"
 Cohesion: 0.1
 Nodes (12): NewOperationLogHandler(), OperationLogHandler, fileFolderID(), NewPublicCatalogHandler(), parseIntQuery(), PublicCatalogHandler, NewSearchHandler(), SearchHandler (+4 more)
 
 ### Community 21 - "Resource Management Repository"
-Cohesion: 0.14
-Nodes (17): Admin, DefaultAdminPermissions(), normalizeAdminPermission(), NormalizeAdminPermissions(), NormalizeAdminRole(), NormalizeAdminStatus(), ParseAdminPermissions(), TestAdminHasPermission() (+9 more)
+Cohesion: 0.13
+Nodes (21): normalizedSearchQuery, effectiveFileCoverURL(), scoredSearchCandidate, bestFieldMatchScore(), collapseSearchWhitespace(), defaultSearchPolicy(), downloadCountBias(), normalizeSearchField() (+13 more)
 
 ### Community 22 - "Import Helpers Service"
+Cohesion: 0.27
+Nodes (23): newRouterSessionManager(), newRouterTestDB(), assertEventuallyDownloadCount(), assertEventuallyRecentFileHotDownloads(), createPublicDownloadFolder(), createRepositoryFileForDownload(), TestPublicBatchDownloadStreamsZip(), TestPublicDownloadAPIRemainsWhitelistOnly() (+15 more)
+
+### Community 23 - "Session Manager"
 Cohesion: 0.1
 Nodes (14): CustomPathResolveResult, normalizedPublicFolderFileListInput, PathResolveResult, NewPublicCatalogService(), normalizePublicFolderFileListInput(), resolvePublicFileSort(), PublicCatalogService, PublicFileFeedResult (+6 more)
 
-### Community 23 - "Session Manager"
+### Community 24 - "File Tags & Directory Cache"
 Cohesion: 0.14
 Nodes (3): ApiTokenHandler, ResourceManagementHandler, GetAdminIdentity()
 
-### Community 24 - "File Tags & Directory Cache"
+### Community 25 - "Public Download Handler"
 Cohesion: 0.09
 Nodes (7): dedupeNonEmpty(), NewFileTagRepository(), fileTagJoinRow, FileTagRepository, NewGuestKeyAssignmentRepository(), GuestKeyAssignmentRepository, PublicFileTagRow
 
-### Community 25 - "Public Download Handler"
+### Community 26 - "Announcement Service"
+Cohesion: 0.14
+Nodes (17): Admin, DefaultAdminPermissions(), normalizeAdminPermission(), NormalizeAdminPermissions(), NormalizeAdminRole(), NormalizeAdminStatus(), ParseAdminPermissions(), TestAdminHasPermission() (+9 more)
+
+### Community 27 - "Admin Announcements UI"
 Cohesion: 0.1
 Nodes (23): code:json ({), code:json ({), code:json ({), code:json ({), code:json ({), code:json ({), code:json ({), code:bash (# curl 示例) (+15 more)
 
-### Community 26 - "Announcement Service"
+### Community 28 - "Operation Log & Catalog Handlers"
 Cohesion: 0.2
 Nodes (18): code(), coverImageHrefFromDescription(), encodeHrefLikeMarked(), extractCoverImageUrlFromMarkdown(), fileCoverImageHrefFromFields(), image(), link(), escapeHtml() (+10 more)
 
-### Community 27 - "Admin Announcements UI"
-Cohesion: 0.14
-Nodes (10): DailyStatsDelta, AdjustDailyStatsTx(), AdjustSystemStatsTx(), RecordSiteVisitStatsTx(), statsDay(), DownloadEvent, File, SystemStatsDelta (+2 more)
+### Community 29 - "Feedback Repository"
+Cohesion: 0.13
+Nodes (12): canEdit(), closeDeleteDialog(), closeEditor(), confirmDelete(), editorTitle, formDirty, loadItems(), normalizeRouteEditId() (+4 more)
 
-### Community 28 - "Operation Log & Catalog Handlers"
+### Community 30 - "NetCDF to Markdown"
 Cohesion: 0.16
 Nodes (8): AdminIdentity, Clock, Manager, hashToken(), randomToken(), sameSiteMode(), realClock, ResolveResult
 
-### Community 29 - "Feedback Repository"
+### Community 31 - "Cover Image Picker"
 Cohesion: 0.12
 Nodes (12): getHomeConsoleHooks(), HomeConsoleHooks, HomeListSortDirection, HomeListSortMode, HomeListViewMode, ConsoleNavOpts, OpenShareConsoleApi, OpenShareConsoleFavorites (+4 more)
 
-### Community 30 - "NetCDF to Markdown"
-Cohesion: 0.32
-Nodes (18): assertEventuallyDownloadCount(), assertEventuallyRecentFileHotDownloads(), createPublicDownloadFolder(), createRepositoryFileForDownload(), TestPublicBatchDownloadStreamsZip(), TestPublicDownloadAPIRemainsWhitelistOnly(), TestPublicDownloadByPathHEADOnFolderReturns405(), TestPublicDownloadByPathHEADReturnsMetadataWithoutCounting() (+10 more)
-
-### Community 31 - "Cover Image Picker"
-Cohesion: 0.1
-Nodes (19): 1. 简约、现代的前端界面, 2. 普通用户使用体验优化, 3. 后台治理与权限管理优化, 4. 资料共建共享, code:text (OpenShare/), code:bash (./start.sh), code:bash (# 构建 + 前台运行), code:bash (# 停止后台服务) (+11 more)
-
 ### Community 32 - "Admin Confirmation Actions"
-Cohesion: 0.23
-Nodes (19): confirmDeleteAdmin(), confirmResetPassword(), confirmToggleStatus(), createAdmin(), expandPermissions(), loadItems(), saveAdmin(), closeDeleteDialog() (+11 more)
+Cohesion: 0.12
+Nodes (8): AdjustSystemStatsTx(), Feedback, Submission, NewModerationRepository(), newOperationLogID(), ModerationRepository, PendingSubmissionRecord, PendingSubmissionRow
 
 ### Community 33 - "Import Repository"
-Cohesion: 0.12
-Nodes (10): AdminMeResponse, attachGuestAccessKey(), BROWSE_ENDPOINT_PREFIXES, DOWNLOAD_ENDPOINT_PATTERNS, GuestKeyAttachable, HttpError, normalizeBody(), RequestOptions (+2 more)
+Cohesion: 0.1
+Nodes (19): 1. 简约、现代的前端界面, 2. 普通用户使用体验优化, 3. 后台治理与权限管理优化, 4. 资料共建共享, code:text (OpenShare/), code:bash (./start.sh), code:bash (# 构建 + 前台运行), code:bash (# 停止后台服务) (+11 more)
 
 ### Community 34 - "Admin Auth Handler"
 Cohesion: 0.13
 Nodes (12): FileTagDefinition, PublicFileTag, deepCloneDirectoryEntry(), directoryViewCache, DirectoryViewCacheEntry, directoryViewCacheKey(), FolderDetailResponse, PublicFileItem (+4 more)
 
 ### Community 35 - "Folder Stats & Downloads Repo"
+Cohesion: 0.12
+Nodes (10): AdminMeResponse, attachGuestAccessKey(), BROWSE_ENDPOINT_PREFIXES, DOWNLOAD_ENDPOINT_PATTERNS, GuestKeyAttachable, HttpError, normalizeBody(), RequestOptions (+2 more)
+
+### Community 36 - "File Tag Repository"
 Cohesion: 0.16
 Nodes (7): batchDownloadRequest, isCORSHeader(), NewPublicDownloadHandler(), uniqueZipEntryName(), PublicDownloadHandler, resourceBatchDownloadRequest, InlineEmbedDispositionAllowed()
 
-### Community 36 - "File Tag Repository"
+### Community 37 - "File Tag Service"
 Cohesion: 0.2
 Nodes (7): mapAnnouncements(), NewAnnouncementService(), normalizeAnnouncementInput(), AnnouncementCreator, AnnouncementItem, AnnouncementService, SaveAnnouncementInput
 
-### Community 37 - "File Tag Service"
-Cohesion: 0.21
-Nodes (12): string, NewPublicDownloadRepository(), TestRescanManagedDirectoryMirrorsFilesystemAndPreservesHistoricalDownloadStats(), TestUnmanageManagedDirectoryRequiresSuperAdminPasswordKeepsSourceDirectoryAndCleansManagedData(), createImportFixture(), newImportRouteEnv(), TestFolderTree(), TestImportDirectoryBrowser() (+4 more)
-
 ### Community 38 - "Identity ID & Resource Mgmt"
+Cohesion: 0.12
+Nodes (13): NewAnnouncementHandler(), NewApiTokenHandler(), createApiTokenRequest, NewImportHandler(), importLocalRequest, saveAnnouncementRequest, unmanageManagedDirectoryRequest, buildHandlers() (+5 more)
+
+### Community 39 - "Frontend Static Data Loader"
 Cohesion: 0.14
 Nodes (4): feedbackTarget(), NewFeedbackRepository(), FeedbackListRow, FeedbackRepository
 
-### Community 39 - "Frontend Static Data Loader"
+### Community 40 - "Home View Modals"
 Cohesion: 0.15
 Nodes (13): capturing, close(), confirm(), dragOver, handleCaptureFrame(), handleDrop(), handleFile(), handleFileInput() (+5 more)
 
-### Community 40 - "Home View Modals"
+### Community 41 - "Export Handler"
 Cohesion: 0.22
 Nodes (16): appendGroup(), attributesDisclosureHtml(), escapeHtmlCell(), globalAttributesDisclosureHtml(), mdInlineCode(), mdTableCell(), NetCDFDumpAttr, NetCDFDumpDim (+8 more)
 
-### Community 41 - "Export Handler"
+### Community 42 - "Public Upload Service Tests"
 Cohesion: 0.16
 Nodes (10): DownloadPolicy, GuestAccessKey, GuestAccessPolicy, defaultSystemPolicy(), NewSystemSettingService(), normalizeGuestAccess(), validateLargeDownloadConfirmBytes(), SystemPolicy (+2 more)
 
-### Community 42 - "Public Upload Service Tests"
-Cohesion: 0.17
-Nodes (11): generateAdminLoginID(), generateAdminPassword(), mapManagedAdmin(), NewAdminManagementService(), randomInt(), AdminManagementService, CreateAdminInput, CreatedAdminResult (+3 more)
-
 ### Community 43 - "Moderation Repository"
-Cohesion: 0.15
-Nodes (7): canEdit(), editorTitle, formDirty, normalizeRouteEditId(), openEditEditor(), previewHTML, tryOpenEditorFromQuery()
+Cohesion: 0.14
+Nodes (8): DailyStatsDelta, AdjustDailyStatsTx(), RecordSiteVisitStatsTx(), statsDay(), DownloadEvent, File, SiteVisitEvent, SystemStatsDelta
 
 ### Community 44 - "Managed File Helpers"
-Cohesion: 0.27
-Nodes (15): date, createFileDailyDownloadAggregate(), createPublicTestFile(), createPublicTestFolderWithParent(), TestPublicFolderFilesSupportsFolderBrowsing(), TestPublicFolderFilesSupportsNameSort(), TestPublicFoldersReturnsAggregatedStats(), TestPublicFoldersReturnsBreadcrumbs() (+7 more)
+Cohesion: 0.23
+Nodes (11): NormalizeManagedFileName(), index, ProbeURLResult, ValidateCustomPath(), extractSuggestedFileName(), normalizeManagedRemark(), normalizeOptionalCoverURL(), normalizeOptionalHTTPURL() (+3 more)
 
 ### Community 45 - "Dashboard Stats Model"
 Cohesion: 0.25
-Nodes (14): createFeedbackTestFile(), createFeedbackTestFolder(), TestApproveFeedback(), TestCreateFeedbackForFile(), TestCreateFeedbackForFolder(), TestListFeedbackForAdmin(), TestLookupFeedbackReceiptCode(), TestRejectFeedback() (+6 more)
+Nodes (9): BuildFolderDisplayPath(), BuildFolderDisplayPathFromFolder(), BuildSubmissionDisplayPath(), derefString(), EnsureManagedFolderPathTx(), NormalizeRelativePathForStorage(), NormalizeStoredSubmissionRelativePath(), stringPtr() (+1 more)
 
 ### Community 46 - "Upload Repository"
 Cohesion: 0.16
@@ -418,20 +416,20 @@ Cohesion: 0.14
 Nodes (3): AdjustFolderStatsTx(), ApprovedUploadBatchItem, UploadRepository
 
 ### Community 48 - "Feedback Service"
+Cohesion: 0.22
+Nodes (3): NewID(), resolveNewFolderSourcePath(), ResourceManagementService
+
+### Community 49 - "Public Markdown Links"
 Cohesion: 0.19
 Nodes (7): isUniqueConstraintErr(), NewFileTagService(), normalizePresetTagColor(), rowToPublicTag(), FileTagDefinitionDTO, FileTagService, PublicFileTag
 
-### Community 49 - "Public Markdown Links"
-Cohesion: 0.23
-Nodes (10): CORS(), PublicDownloadCORS(), TestPublicDownloadCORS_GETAndHEADAllowAnyOrigin(), TestPublicDownloadCORS_OnlyAppliesToDLPath(), TestPublicDownloadCORS_OptionsPreflight(), TestPublicDownloadCORSPreventsWhitelistOverwrite(), newCustomPathHTMLHandler(), TestPublicReceiptCodeEnsuresSessionCode() (+2 more)
-
 ### Community 50 - "Home Download UI"
-Cohesion: 0.16
-Nodes (10): NewAdminDashboardHandler(), AdminDashboardHandler, NewAnnouncementHandler(), NewApiTokenHandler(), createApiTokenRequest, saveAnnouncementRequest, buildHandlers(), buildRouteHandlers() (+2 more)
-
-### Community 51 - "API Token & Submission Handler"
 Cohesion: 0.14
 Nodes (12): current, existingPath, idx, looseKeyword, manual, name, nextPath, path (+4 more)
+
+### Community 51 - "API Token & Submission Handler"
+Cohesion: 0.31
+Nodes (14): confirmDeleteAdmin(), confirmResetPassword(), confirmToggleStatus(), createAdmin(), expandPermissions(), loadItems(), saveAdmin(), readApiError() (+6 more)
 
 ### Community 52 - "System Settings Service"
 Cohesion: 0.15
@@ -442,14 +440,18 @@ Cohesion: 0.14
 Nodes (13): DirectoryExportData, DirectoryExportEntry, DirectoryExportManagedRoot, ExportAnnouncement, ExportDownloadPolicy, ExportFileTag, ExportHotFiles, ExportLatestFiles (+5 more)
 
 ### Community 54 - "Resource Management Handler"
+Cohesion: 0.24
+Nodes (12): renderSimpleMarkdown(), folderIdFromCatalogRoute(), formatFolderTotalSizeBytes(), hydrateMarkdownCatalogNavigatePresentation(), MarkdownCatalogConfirmPresentation, markdownCatalogNavigateInitialPresentation(), PublicFolderDetailJson, routeHasCatalogRoot() (+4 more)
+
+### Community 55 - "API Token Service"
 Cohesion: 0.19
 Nodes (11): DirectoryExportData, DirectoryExportEntry, DirectoryExportManagedRoot, downloadPolicyExport, buildFileDetails(), collectFolderIDs(), findFolderInTree(), getAllPublicFolderFiles() (+3 more)
 
-### Community 55 - "API Token Service"
+### Community 56 - "Resource Mgmt Update Service"
 Cohesion: 0.42
 Nodes (13): NewReceiptCodeRepository(), NewUploadRepository(), NewPublicUploadService(), createExistingSubmission(), createUploadTargetFolder(), createUploadTestAdmin(), mustNewUploadID(), newUploadTestDeps() (+5 more)
 
-### Community 56 - "Resource Mgmt Update Service"
+### Community 57 - "Admin Auth Service"
 Cohesion: 0.23
 Nodes (12): isSameDocumentOriginForMarkdownNav(), isViewportTailwindXlMin(), markdownHrefToVueRoute(), markdownRouteIsCatalogHome(), markdownRoutePublicFileDetailId(), MarkdownRouterNavOptions, markdownRouteSeekSeconds(), onMarkdownLinkClickCapture() (+4 more)
 
@@ -457,53 +459,49 @@ Nodes (12): isSameDocumentOriginForMarkdownNav(), isViewportTailwindXlMin(), mar
 Cohesion: 0.18
 Nodes (3): ManagedFolderNode, incrementFileDailyDownloadTx(), PublicDownloadRepository
 
-### Community 59 - "Announcement Handler"
+### Community 60 - "Import Handler"
 Cohesion: 0.33
 Nodes (10): buildRelativePath(), ensureUploadNamespaceDir(), orderedUploadNamespaceDirs(), registerExistingUploadPath(), registerPlannedUploadEntry(), registerPlannedUploadPath(), reserveFileName(), reserveFolderName() (+2 more)
 
-### Community 60 - "Import Handler"
+### Community 61 - "Announcement Repository"
 Cohesion: 0.15
 Nodes (8): CreateFeedbackInput, CreateFeedbackResult, NewFeedbackService(), FeedbackItem, FeedbackService, PublicFeedbackLookupItem, PublicFeedbackLookupResult, ReviewFeedbackResult
 
-### Community 61 - "Announcement Repository"
-Cohesion: 0.18
-Nodes (13): code:json ({ "value": "abc123" }), code:json ({), code:json ({ "valid": false, "hint": "8-12位字母数字" }), code:bash (# 获取当前管理员信息), code:python (import requests), code:js (const BASE = "https://<BASE_URL>/api";), curl, JavaScript (fetch) (+5 more)
-
 ### Community 62 - "Admin Superadmin Controls"
+Cohesion: 0.15
+Nodes (13): `GET /api/admin/dashboard/stats`, `GET /api/admin/feedback`, `GET /api/admin/operation-logs`, `GET /api/admin/submissions/pending`, `POST /api/admin/feedback/:feedbackID/approve`, `POST /api/admin/feedback/:feedbackID/reject`, `POST /api/admin/submissions/:submissionID/approve`, `POST /api/admin/submissions/:submissionID/reject` (+5 more)
+
+### Community 63 - "Public Layout"
 Cohesion: 0.2
 Nodes (6): copyPlainTextToClipboard(), initMarkdownCodeCopyDelegation(), mountOpenShareConsole(), router, routes, app
 
-### Community 63 - "Public Layout"
+### Community 64 - "Markdown Catalog Navigator"
 Cohesion: 0.21
 Nodes (12): toastWarning(), batchNeedsDownloadConfirm(), clearSelection(), confirmPendingDownload(), downloadResource(), downloadSelectedResources(), performBatchDownload(), performDownloadResource() (+4 more)
 
-### Community 64 - "Markdown Catalog Navigator"
-Cohesion: 0.26
-Nodes (9): index, ProbeURLResult, ValidateCustomPath(), extractSuggestedFileName(), normalizeOptionalCoverURL(), normalizeOptionalHTTPURL(), parseDownloadPolicy(), parseHideFileExtensionPolicy() (+1 more)
-
 ### Community 65 - "API Token Repository"
-Cohesion: 0.33
-Nodes (8): BuildFolderDisplayPath(), BuildFolderDisplayPathFromFolder(), BuildSubmissionDisplayPath(), derefString(), EnsureManagedFolderPathTx(), NormalizeRelativePathForStorage(), NormalizeStoredSubmissionRelativePath(), stringPtr()
-
-### Community 66 - "Resource Mgmt Update Repo"
 Cohesion: 0.17
 Nodes (11): createManagedFolderRequest, createVirtualFileRequest, deleteManagedResourceRequest, moveFileRequest, patchFolderCatalogVisibilityRequest, patchFolderCdnUrlRequest, patchFolderGuestKeysRequest, probeURLResponse (+3 more)
 
-### Community 67 - "Stats Rebuild & Cleanup"
-Cohesion: 0.17
-Nodes (12): `DELETE /api/admin/imports/local/:folderID`, `GET /api/admin/dashboard/stats`, `GET /api/admin/folders/tree`, `GET /api/admin/imports/directories`, `GET /api/admin/operation-logs`, `POST /api/admin/imports/local`, `POST /api/admin/imports/local/:folderID/rescan`, 控制台 (+4 more)
+### Community 66 - "Resource Mgmt Update Repo"
+Cohesion: 0.2
+Nodes (12): code:json ({ "value": "abc123" }), code:json ({), code:json ({ "valid": false, "hint": "8-12位字母数字" }), code:python (import requests), code:js (const BASE = "https://<BASE_URL>/api";), curl, JavaScript (fetch), `POST /api/admin/session/login` (+4 more)
 
-### Community 68 - "Resource Management Service"
+### Community 67 - "Stats Rebuild & Cleanup"
 Cohesion: 0.22
 Nodes (9): clearKey(), currentKey, readGuestAccessKey(), saveToStorage(), setKey(), useGuestAccessKey(), ValidateFailure, ValidateResult (+1 more)
 
-### Community 69 - "Moderation Handler"
+### Community 68 - "Resource Management Service"
 Cohesion: 0.18
 Nodes (5): createFileTagRequest, NewFileTagHandler(), FileTagHandler, replaceFileTagsRequest, updateFileTagRequest
 
-### Community 70 - "Operation Log Service"
+### Community 69 - "Moderation Handler"
 Cohesion: 0.2
 Nodes (4): isValidAvatarURL(), NewAdminAuthService(), AdminAuthService, AuthenticatedAdmin
+
+### Community 70 - "Operation Log Service"
+Cohesion: 0.42
+Nodes (10): createFeedbackTestFile(), createFeedbackTestFolder(), TestApproveFeedback(), TestCreateFeedbackForFile(), TestCreateFeedbackForFolder(), TestListFeedbackForAdmin(), TestLookupFeedbackReceiptCode(), TestRejectFeedback() (+2 more)
 
 ### Community 71 - "Import Delete Repository"
 Cohesion: 0.24
@@ -518,20 +516,16 @@ Cohesion: 0.24
 Nodes (10): invalidateDirectoryViewCacheAll(), loadAnnouncements(), loadHotDownloads(), loadLatestTitles(), openAnnouncementList(), openHotDownloadsModal(), openLatestItemsModal(), openPanelFromQuery() (+2 more)
 
 ### Community 76 - "Admin Management Handler"
-Cohesion: 0.2
-Nodes (4): NewModerationRepository(), ModerationRepository, PendingSubmissionRecord, PendingSubmissionRow
+Cohesion: 0.27
+Nodes (4): BuildManagedFilePath(), folderSourcePath(), modelValue(), normalizeTrimmedString()
 
 ### Community 77 - "System Setting Handler"
 Cohesion: 0.2
-Nodes (10): API Token 管理, code:bash (# 创建 Token), code:python (# 创建 Token), code:json ({), `DELETE /api/admin/api-tokens/:tokenID`, `GET /api/admin/api-tokens`, `PATCH /api/admin/account/profile`, `POST /api/admin/api-tokens` (+2 more)
+Nodes (10): API Token 管理, code:bash (# 获取当前管理员信息), code:python (# 创建 Token), code:json ({), `DELETE /api/admin/api-tokens/:tokenID`, `GET /api/admin/api-tokens`, `PATCH /api/admin/account/profile`, `POST /api/admin/api-tokens` (+2 more)
 
 ### Community 78 - "Session Middleware"
 Cohesion: 0.22
 Nodes (4): createFeedbackRequest, NewFeedbackHandler(), FeedbackHandler, reviewFeedbackRequest
-
-### Community 79 - "Admin Mgmt Handler (Deprecated)"
-Cohesion: 0.28
-Nodes (5): NewModerationService(), replaceRelativePathBase(), ModerationService, PendingSubmissionItem, ReviewResult
 
 ### Community 80 - "Public Submission Repository"
 Cohesion: 0.33
@@ -542,8 +536,8 @@ Cohesion: 0.25
 Nodes (4): links, mainMarginClass, showSidebar, viewKey
 
 ### Community 82 - "Import Service"
-Cohesion: 0.46
-Nodes (7): folderIdFromCatalogRoute(), formatFolderTotalSizeBytes(), hydrateMarkdownCatalogNavigatePresentation(), MarkdownCatalogConfirmPresentation, markdownCatalogNavigateInitialPresentation(), PublicFolderDetailJson, routeHasCatalogRoot()
+Cohesion: 0.29
+Nodes (3): RebuildDashboardStatsTx(), RebuildFolderStatsTx(), detachDeletedResourcesTx()
 
 ### Community 83 - "Sidebar Composable"
 Cohesion: 0.25
@@ -553,7 +547,7 @@ Nodes (7): CustomPathCheckResult, FileOrderEntry, ListManagedFilesInput, Managed
 Cohesion: 0.29
 Nodes (3): isIgnoredUploadFile(), normalizeReceiptCode(), ReceiptCodeService
 
-### Community 87 - "Admin Dashboard Repository"
+### Community 86 - "Auth Middleware"
 Cohesion: 0.29
 Nodes (3): favoriteIdSet, FavoriteItem, favoriteItems
 
@@ -561,29 +555,33 @@ Nodes (3): favoriteIdSet, FavoriteItem, favoriteItems
 Cohesion: 0.29
 Nodes (3): NewGuestAccessHandler(), GuestAccessHandler, validateGuestAccessRequest
 
-### Community 90 - "System Setting Repository"
+### Community 89 - "Admin Dashboard Service"
 Cohesion: 0.29
 Nodes (3): NewModerationHandler(), ModerationHandler, reviewSubmissionRequest
 
-### Community 91 - "Operation Log Repository"
+### Community 90 - "System Setting Repository"
 Cohesion: 0.38
 Nodes (5): dateCountStat, collectManagedRootCleanupStatsTx(), linkedManagedResourceScope(), managedRootCleanupStats, ManagedRootUnmanageResult
 
-### Community 92 - "Resource Mgmt Folder Service"
+### Community 91 - "Operation Log Repository"
 Cohesion: 0.29
 Nodes (6): FolderTreeFileRow, FolderTreeFolderRow, ManagedRootCdnUrlRow, ManagedRootRow, ManagedSubtreeFileRow, ManagedSubtreeFolderRow
+
+### Community 92 - "Resource Mgmt Folder Service"
+Cohesion: 0.33
+Nodes (6): createFileForSubmission(), TestPublicSubmissionLookupByReceiptCode(), TestPublicSubmissionLookupRejectsInvalidReceiptCode(), TestPublicSubmissionLookupReturns404WhenMissing(), TestPublicSubmissionLookupReturnsMultipleItems(), createPendingSubmissionForTest()
 
 ### Community 93 - "Project Docs & Rules"
 Cohesion: 0.29
 Nodes (5): ListOperationLogsInput, NewOperationLogService(), OperationLogItem, OperationLogListResult, OperationLogService
 
 ### Community 94 - "Community 94"
-Cohesion: 0.29
-Nodes (7): `GET /api/admin/feedback`, `GET /api/admin/submissions/pending`, `POST /api/admin/feedback/:feedbackID/approve`, `POST /api/admin/feedback/:feedbackID/reject`, `POST /api/admin/submissions/:submissionID/approve`, `POST /api/admin/submissions/:submissionID/reject`, 审核管理
-
-### Community 95 - "Community 95"
 Cohesion: 0.48
 Nodes (7): `DELETE /api/admin/file-tags/:tagID`, `GET /api/admin/file-tags`, `PATCH /api/admin/file-tags/:tagID`, `POST /api/admin/file-tags`, `PUT /api/admin/resources/files/:fileID/tags`, 文件标签, 文件标签
+
+### Community 95 - "Community 95"
+Cohesion: 0.29
+Nodes (7): code:bash (# 创建 Token), code:json ({), code:json ({), `GET /api/admin/system/settings`, `PUT /api/admin/resources/folders/:folderID/file-order`, `PUT /api/admin/system/settings`, 系统配置
 
 ### Community 96 - "Community 96"
 Cohesion: 0.29
@@ -602,16 +600,16 @@ Cohesion: 0.4
 Nodes (6): closeMarkdownPeekDrawer(), dismissMarkdownCatalogNavigateConfirm(), onKeyDown(), onMarkdownPeekLeaveCatalog(), onMarkdownPeekOpenFullPage(), syncMarkdownPeekBodyScrollLock()
 
 ### Community 100 - "Community 100"
-Cohesion: 0.47
-Nodes (5): renderSimpleMarkdown(), getWorker(), renderMarkdownAsync(), sanitizeConfig, WorkerInstance
-
-### Community 103 - "Community 103"
 Cohesion: 0.4
 Nodes (4): cookieNameProvider, managerCookieName(), SessionLoader(), SetAdminIdentity()
 
-### Community 105 - "Community 105"
+### Community 104 - "Community 104"
 Cohesion: 0.33
 Nodes (5): AdminFolderItem, FolderTreeNode, ManagedFilePathRow, ManagedFileRow, ManagedFolderPathRow
+
+### Community 105 - "Community 105"
+Cohesion: 0.33
+Nodes (5): NewAdminManagementHandler(), createAdminRequest, deleteAdminRequest, resetAdminPasswordRequest, updateAdminRequest
 
 ### Community 106 - "Community 106"
 Cohesion: 0.33
@@ -619,109 +617,105 @@ Nodes (3): NewPublicSubmissionRepository(), PublicSubmissionRepository, Submissi
 
 ### Community 107 - "Community 107"
 Cohesion: 0.33
-Nodes (5): NewAdminManagementHandler(), createAdminRequest, deleteAdminRequest, resetAdminPasswordRequest, updateAdminRequest
+Nodes (6): `DELETE /api/admin/admins/:adminID`, `GET /api/admin/admins`, `POST /api/admin/admins`, `POST /api/admin/admins/:adminID/reset-password`, `PUT /api/admin/admins/:adminID`, 管理员管理
 
 ### Community 108 - "Community 108"
 Cohesion: 0.33
-Nodes (6): `DELETE /api/admin/admins/:adminID`, `GET /api/admin/admins`, `POST /api/admin/admins`, `POST /api/admin/admins/:adminID/reset-password`, `PUT /api/admin/admins/:adminID`, 管理员管理
+Nodes (6): `DELETE /api/admin/imports/local/:folderID`, `GET /api/admin/folders/tree`, `GET /api/admin/imports/directories`, `POST /api/admin/imports/local`, `POST /api/admin/imports/local/:folderID/rescan`, 目录导入
 
-### Community 109 - "Community 109"
-Cohesion: 0.33
-Nodes (6): code:json ({), code:json ({), `GET /api/admin/system/settings`, `PUT /api/admin/resources/folders/:folderID/file-order`, `PUT /api/admin/system/settings`, 系统配置
-
-### Community 112 - "Community 112"
+### Community 111 - "Community 111"
 Cohesion: 0.6
 Nodes (4): fileEffectiveDownloadHref(), fileUsesBackendDownloadHref(), isBackendPublicFileDownloadHref(), withBackendDownloadInlinePreviewParam()
 
-### Community 113 - "Community 113"
+### Community 112 - "Community 112"
 Cohesion: 0.6
 Nodes (4): RequireAdminAuth(), RequireAdminPermission(), RequireSuperAdmin(), registerAdminRoutes()
 
-### Community 114 - "Community 114"
+### Community 113 - "Community 113"
 Cohesion: 0.4
 Nodes (3): CreateFolderInput, CreateVirtualFileInput, isPathWithinRoot()
 
-### Community 115 - "Community 115"
+### Community 114 - "Community 114"
 Cohesion: 0.4
 Nodes (4): directPublishedUpload, PublicUploadFileInput, PublicUploadInput, PublicUploadResult
 
-### Community 116 - "Community 116"
+### Community 115 - "Community 115"
 Cohesion: 0.4
 Nodes (4): NewPublicSubmissionService(), PublicSubmissionItem, PublicSubmissionLookupResult, PublicSubmissionService
 
 ### Community 117 - "Community 117"
 Cohesion: 0.4
-Nodes (3): NewAdminDashboardService(), AdminDashboardService, AdminDashboardStats
+Nodes (3): NewAdminDashboardRepository(), AdminDashboardRepository, AdminDashboardStatsRow
 
 ### Community 118 - "Community 118"
 Cohesion: 0.4
-Nodes (3): recordSiteVisitRequest, NewSiteVisitHandler(), SiteVisitHandler
+Nodes (3): NewAdminDashboardService(), AdminDashboardService, AdminDashboardStats
 
 ### Community 119 - "Community 119"
+Cohesion: 0.4
+Nodes (3): recordSiteVisitRequest, NewSiteVisitHandler(), SiteVisitHandler
+
+### Community 120 - "Community 120"
 Cohesion: 0.4
 Nodes (3): NewOperationLogRepository(), OperationLogRepository, OperationLogRow
 
 ### Community 121 - "Community 121"
 Cohesion: 0.4
-Nodes (3): NewAdminDashboardRepository(), AdminDashboardRepository, AdminDashboardStatsRow
+Nodes (5): `DELETE /api/admin/announcements/:announcementID`, `GET /api/admin/announcements`, `POST /api/admin/announcements`, `PUT /api/admin/announcements/:announcementID`, 公告管理
 
 ### Community 122 - "Community 122"
 Cohesion: 0.4
-Nodes (5): `DELETE /api/admin/announcements/:announcementID`, `GET /api/admin/announcements`, `POST /api/admin/announcements`, `PUT /api/admin/announcements/:announcementID`, 公告管理
+Nodes (5): `GET /api/admin/export/directory/:folderID`, `GET /api/admin/export/directory/:folderID`, `GET /api/admin/export/global`, `GET /api/admin/export/global`, 导出
 
 ### Community 123 - "Community 123"
 Cohesion: 0.4
-Nodes (5): `GET /api/admin/export/directory/:folderID`, `GET /api/admin/export/directory/:folderID`, `GET /api/admin/export/global`, `GET /api/admin/export/global`, 导出
-
-### Community 124 - "Community 124"
-Cohesion: 0.4
 Nodes (5): OpenShare CLAUDE.md project rules (graphify workflow), Deployment commands (./deploy.sh --daemon/--separated), Local dev start command (./start.sh), OpenShare project overview, OpenShare project directory structure
 
-### Community 126 - "Community 126"
+### Community 125 - "Community 125"
 Cohesion: 0.5
 Nodes (4): isRowSelected(), onCardOpenClick(), selectionKey(), toggleRowSelection()
 
-### Community 131 - "Community 131"
+### Community 129 - "Community 129"
 Cohesion: 0.5
 Nodes (3): ManagedFileUpdate, ManagedFolderUpdate, RescanSyncInput
 
-### Community 133 - "Community 133"
+### Community 130 - "Community 130"
 Cohesion: 0.5
-Nodes (3): NewImportHandler(), importLocalRequest, unmanageManagedDirectoryRequest
+Nodes (3): NewModerationService(), PendingSubmissionItem, ReviewResult
 
-### Community 136 - "Community 136"
+### Community 134 - "Community 134"
 Cohesion: 0.5
 Nodes (3): routeHandlers, routeRepositories, routeServices
 
-### Community 137 - "Community 137"
+### Community 135 - "Community 135"
 Cohesion: 0.5
 Nodes (3): Answer, Q: 下载直链 /dl 为什么没有为 https://store.linlifei.top 返回 Access-Control-Allow-Origin？, Source Nodes
 
-### Community 147 - "Community 147"
+### Community 145 - "Community 145"
 Cohesion: 0.67
 Nodes (3): Admin submissions + feedback moderation endpoints, GET /api/public/submissions/:receiptCode, POST /api/public/submissions
 
-### Community 148 - "Community 148"
+### Community 146 - "Community 146"
 Cohesion: 0.67
 Nodes (3): API Token management endpoints, GET /api/admin/me, POST /api/admin/session/login
 
-### Community 149 - "Community 149"
+### Community 147 - "Community 147"
 Cohesion: 0.67
 Nodes (3): GET /api/admin/resources/check-custom-path, GET /api/public/resolve-custom-path, Custom access paths (short URLs, HTML in-place render)
 
 ## Knowledge Gaps
 - **668 isolated node(s):** `app`, `PanelName`, `activePanel`, `favoriteIdSet`, `currentKey` (+663 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **62 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **61 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `string` connect `File Tag Service` to `Frontend Home View`, `Backend Routes & CORS Tests`, `DB Bootstrap & Schemas`, `Folder Paths & Upload Services`, `Config & Web Entry Point`, `Public Download Service`, `Admin Management Model`, `Public Catalog Repository & Visibility`, `Storage Service & Trash Volume`, `Admin Session & HTTP Client`, `Resource Management Repository`, `Announcement Service`, `Operation Log & Catalog Handlers`, `NetCDF to Markdown`, `File Tag Repository`, `Export Handler`, `Public Upload Service Tests`, `Dashboard Stats Model`, `API Token Service`, `Resource Mgmt Update Service`, `Import Handler`, `Operation Log Service`, `Toast Notifications`, `Community 98`, `Community 110`, `Community 114`?**
+- **Why does `string` connect `Public Upload Route Tests` to `Frontend Home View`, `Backend Routes & CORS Tests`, `DB Bootstrap & Schemas`, `Folder Paths & Upload Services`, `Config & Web Entry Point`, `Public Download Service`, `Admin Management Model`, `Public Catalog Repository & Visibility`, `Admin Session & HTTP Client`, `Import Helpers Service`, `Announcement Service`, `Operation Log & Catalog Handlers`, `NetCDF to Markdown`, `File Tag Service`, `Public Upload Service Tests`, `Managed File Helpers`, `Resource Mgmt Update Service`, `Admin Auth Service`, `Announcement Repository`, `Moderation Handler`, `Operation Log Service`, `Toast Notifications`, `Resource Mgmt Folder Service`, `Community 98`, `Community 109`, `Community 113`?**
   _High betweenness centrality (0.360) - this node is a cross-community bridge._
-- **Why does `NewID()` connect `Public Upload Handler` to `Backend Routes & CORS Tests`, `Community 130`, `Public Download Service`, `Community 134`, `Public Catalog Repository & Visibility`, `Storage Service & Trash Volume`, `Admin Admins UI`, `Resource Management Repository`, `Admin Announcements UI`, `Operation Log & Catalog Handlers`, `File Tag Repository`, `Identity ID & Resource Mgmt`, `Export Handler`, `Public Upload Service Tests`, `Dashboard Stats Model`, `Feedback Service`, `API Token Service`, `Home Loading Actions`, `Import Handler`, `Markdown Catalog Navigator`, `API Token Repository`, `Operation Log Service`, `Import Delete Repository`, `Feedback Handler`?**
+- **Why does `NewID()` connect `Feedback Service` to `Backend Routes & CORS Tests`, `Community 131`, `Public Download Service`, `Public Upload Route Tests`, `Public Catalog Repository & Visibility`, `Static Data Loader (Lib)`, `Admin Session & HTTP Client`, `NetCDF to Markdown`, `Admin Confirmation Actions`, `File Tag Service`, `Frontend Static Data Loader`, `Public Upload Service Tests`, `Managed File Helpers`, `Dashboard Stats Model`, `Public Markdown Links`, `Resource Mgmt Update Service`, `Home Loading Actions`, `Announcement Repository`, `Moderation Handler`, `Operation Log Service`, `Import Delete Repository`, `Admin Management Handler`, `Admin Mgmt Handler (Deprecated)`, `Import Service`?**
   _High betweenness centrality (0.138) - this node is a cross-community bridge._
-- **Why does `New()` connect `Public Markdown Links` to `Backend Routes & CORS Tests`, `Folder Paths & Upload Services`, `File Tag Service`, `Community 103`, `Admin Management Model`, `Storage Service & Trash Volume`, `Dashboard Stats Model`, `Managed File Helpers`, `Community 113`, `Home Download UI`, `Markdown Library`, `Resource Management Repository`, `API Token Service`, `Operation Log & Catalog Handlers`, `NetCDF to Markdown`?**
+- **Why does `New()` connect `Admin Admins UI` to `Backend Routes & CORS Tests`, `Folder Paths & Upload Services`, `Community 100`, `Operation Log Service`, `Identity ID & Resource Mgmt`, `Admin Management Model`, `Public Upload Route Tests`, `Community 112`, `Admin Session & HTTP Client`, `Markdown Library`, `Import Helpers Service`, `Resource Mgmt Update Service`, `Announcement Service`, `Resource Mgmt Folder Service`, `NetCDF to Markdown`?**
   _High betweenness centrality (0.121) - this node is a cross-community bridge._
 - **Are the 79 inferred relationships involving `string` (e.g. with `persistState()` and `stripOrNull()`) actually correct?**
   _`string` has 79 INFERRED edges - model-reasoned connections that need verification._

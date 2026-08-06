@@ -171,7 +171,7 @@ async function submitGuestKeyPrompt() {
   guestKeyPromptSubmitting.value = false;
   if (result.ok) {
     closeGuestKeyPrompt();
-    await loadFileDetail();
+    await loadDetail();
     return;
   }
   guestKeyPromptError.value = result.hint || "密钥无效，请重新输入。";

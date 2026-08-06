@@ -202,8 +202,7 @@ const sortDirection = ref<"asc" | "desc">("desc");
 const cardCoverFirst = ref(true);
 /** 文件分页：当前页码与单页条数（页大小配置持久化到 localStorage） */
 const currentPage = ref(1);
-/** 后端 page_size 上限 100 */
-const PAGE_SIZE_LIMIT = 100;
+/** 可选单页条数（后端 page_size 上限 100） */
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const pageSize = ref<number>(50);
 /** 当前文件夹下文件总数（来自 API 响应 total） */
