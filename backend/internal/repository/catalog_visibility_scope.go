@@ -39,3 +39,36 @@ func FoldersNotUnderHiddenPublicCatalogRoot() func(db *gorm.DB) *gorm.DB {
 		)
 	}
 }
+
+// guestKeyRequiredCTE 计算所有 guest_key_required=true 的目录及其后代。
+const guestKeyRequiredCTE = `
+WITH RECURSIVE guest_key_descendant AS (
+	SELECT id FROM folders WHERE COALESCE(guest_key_required, 0) != 0
+	UNION ALL
+	SELECT f.id FROM folders f INNER JOIN guest_key_descendant g ON f.parent_id = g.id
+)
+`
+
+// FilesNotUnderGuestKeyRequired 限定 files：排除所属目录或其任意上级设置了 guest_key_required 的文件。
+func FilesNotUnderGuestKeyRequired() func(db *gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where(
+			`files.folder_id IS NULL OR files.folder_id NOT IN (` +
+				guestKeyRequiredCTE +
+				`SELECT id FROM guest_key_descendant` +
+				`)`,
+		)
+	}
+}
+
+// FoldersNotUnderGuestKeyRequired 限定 folders：排除自身或任意上级设置了 guest_key_required 的目录。
+func FoldersNotUnderGuestKeyRequired() func(db *gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where(
+			`folders.id NOT IN (` +
+				guestKeyRequiredCTE +
+				`SELECT id FROM guest_key_descendant` +
+				`)`,
+		)
+	}
+}

@@ -628,3 +628,37 @@ func (h *ResourceManagementHandler) CheckCustomPath(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, result)
 }
+
+type patchFolderGuestKeysRequest struct {
+	Required      bool     `json:"required"`
+	AllowedKeyIDs []string `json:"allowed_key_ids"`
+}
+
+// PatchFolderGuestKeys 切换目录的访客密钥访问要求并替换允许的密钥 ID 列表。
+func (h *ResourceManagementHandler) PatchFolderGuestKeys(ctx *gin.Context) {
+	identity, ok := session.GetAdminIdentity(ctx)
+	if !ok {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req patchFolderGuestKeysRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	err := h.service.PatchFolderGuestKeys(ctx.Request.Context(), ctx.Param("folderID"), req.Required, req.AllowedKeyIDs, identity.AdminID, ctx.ClientIP())
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrManagedFolderNotFound):
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		case errors.Is(err, service.ErrInvalidResourceEdit):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid guest access input"})
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update folder guest keys"})
+		}
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}

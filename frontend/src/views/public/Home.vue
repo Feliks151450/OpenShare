@@ -41,6 +41,7 @@ import { useFavorites } from "../../composables/useFavorites";
 import { registerHomeConsoleHooks, unregisterHomeConsoleHooks } from "../../lib/homeConsoleBridge";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { useGuestAccessKey } from "../../composables/useGuestAccessKey";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { toastError, toastSuccess, toastWarning } from "../../lib/toast";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
@@ -199,6 +200,14 @@ const sortMode = ref<"smart" | "name" | "download" | "format" | "modified">("sma
 const sortDirection = ref<"asc" | "desc">("desc");
 /** 卡片视图：先按是否有封面分组，组内仍沿用当前排序方式 */
 const cardCoverFirst = ref(true);
+/** 文件分页：当前页码与单页条数（页大小配置持久化到 localStorage） */
+const currentPage = ref(1);
+/** 后端 page_size 上限 100 */
+const PAGE_SIZE_LIMIT = 100;
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
+const pageSize = ref<number>(50);
+/** 当前文件夹下文件总数（来自 API 响应 total） */
+const totalFiles = ref(0);
 /** 当前文件夹下的标签过滤：空 Set 为不过滤 */
 const selectedTagIds = ref<Set<string>>(new Set());
 /** 是否有活跃的标签过滤 */
@@ -258,6 +267,51 @@ let hotDownloadsLoaded = false;
 let latestTitlesLoaded = false;
 type DownloadConfirmState = { mode: "single"; row: DirectoryRow } | { mode: "batch" };
 const downloadConfirm = ref<DownloadConfirmState | null>(null);
+
+// 访客密钥访问：受保护目录命中时弹窗
+const guestAccess = useGuestAccessKey();
+const guestKeyPromptOpen = ref(false);
+const guestKeyPromptValue = ref("");
+const guestKeyPromptHint = ref("");
+const guestKeyPromptSubmitting = ref(false);
+const guestKeyPromptError = ref("");
+
+function openGuestKeyPrompt(hint: string) {
+  guestKeyPromptHint.value = hint ?? "";
+  guestKeyPromptValue.value = "";
+  guestKeyPromptError.value = "";
+  guestKeyPromptOpen.value = true;
+}
+
+function closeGuestKeyPrompt() {
+  guestKeyPromptOpen.value = false;
+  guestKeyPromptValue.value = "";
+  guestKeyPromptError.value = "";
+  guestKeyPromptSubmitting.value = false;
+}
+
+async function submitGuestKeyPrompt() {
+  if (guestKeyPromptSubmitting.value) return;
+  guestKeyPromptSubmitting.value = true;
+  guestKeyPromptError.value = "";
+  const result = await guestAccess.setKey(guestKeyPromptValue.value);
+  guestKeyPromptSubmitting.value = false;
+  if (result.ok) {
+    closeGuestKeyPrompt();
+    await loadDirectory({ force: true });
+    return;
+  }
+  guestKeyPromptError.value = result.hint || "密钥无效，请重新输入。";
+}
+
+// 检测 401 with guest key 错误并触发弹窗
+function isGuestKeyRequiredError(err: unknown): { matched: boolean; hint: string } {
+  if (!(err instanceof HttpError)) return { matched: false, hint: "" };
+  if (err.status !== 401) return { matched: false, hint: "" };
+  const payload = err.payload as { error?: string; hint?: string } | null;
+  if (!payload || payload.error !== "guest key required") return { matched: false, hint: "" };
+  return { matched: true, hint: payload.hint ?? "" };
+}
 const folders = ref<PublicFolderItem[]>([]);
 const files = ref<PublicFileItem[]>([]);
 const searchInput = ref("");
@@ -878,7 +932,7 @@ const canGoUp = computed(() => currentFolderID.value.length > 0);
 const backButtonLabel = computed(() => (searchKeyword.value ? "返回所在目录" : "返回上一级"));
 const canUseBackButton = computed(() => searchKeyword.value.length > 0 || canGoUp.value);
 
-/** 当前详情为托管根目录（无父级）时可重新扫描磁盘，与后台 rescan API 一致。虚拟目录不可重新扫描。 */
+/** 当前详情为任一非虚拟托管目录时均可重新扫描磁盘，与后台 rescan API 一致。扫描范围包含该目录及其所有后代。虚拟目录不可重新扫描。 */
 const showRescanCurrentManagedFolder = computed(() => {
   const d = currentFolderDetail.value;
   if (!d || !canManageResourceDescriptions.value) {
@@ -887,8 +941,7 @@ const showRescanCurrentManagedFolder = computed(() => {
   if (d.is_virtual) {
     return false;
   }
-  const p = d.parent_id;
-  return p == null || String(p).trim() === "";
+  return true;
 });
 
 const rescanningManagedFolderID = ref("");
@@ -1236,6 +1289,11 @@ onMounted(async () => {
   } else if (storedCardCoverFirst === "1" || storedCardCoverFirst === "true") {
     cardCoverFirst.value = true;
   }
+  // 读取持久化的单页文件数（用户偏好）；首选合法选项，否则退回 50
+  const storedPageSize = Number(window.localStorage.getItem("public-home-page-size"));
+  if (PAGE_SIZE_OPTIONS.includes(storedPageSize)) {
+    pageSize.value = storedPageSize;
+  }
   currentReceiptCode.value = await syncSessionReceiptCode();
   await Promise.all([
     loadDirectory(),
@@ -1305,7 +1363,11 @@ watch(currentFolderID, () => {
     dismissMarkdownCatalogNavigateConfirm(false);
   }
   clearSearchState();
-  void loadDirectory();
+  // 切换文件夹时重置分页状态（按服务端的总数控制 totalPages）
+  // 强制刷新：缓存中可能保存着上次离开时该文件夹的旧页数据
+  currentPage.value = 1;
+  totalFiles.value = 0;
+  void loadDirectory({ force: true });
 });
 
 // 监听自定义路径参数（如 /doc），通过 API 解析为文件夹或文件 UUID
@@ -1705,12 +1767,12 @@ async function loadDirectory(options?: { force?: boolean }) {
 
     if (fetchKey) {
       const folderParams = new URLSearchParams({
-        page: "1",
-        page_size: "100",
-        sort: "name_asc",
+        page: String(currentPage.value),
+        page_size: String(pageSize.value),
+        sort: apiSortValue.value,
       });
       requests.push(
-        httpClient.get<{ items: PublicFileItem[] }>(
+        httpClient.get<{ items: PublicFileItem[]; page: number; page_size: number; total: number }>(
           `/public/folders/${encodeURIComponent(fetchKey)}/files?${folderParams.toString()}`,
         ),
       );
@@ -1743,6 +1805,17 @@ async function loadDirectory(options?: { force?: boolean }) {
       }
     }
     files.value = fetchKey ? ((fileResponse as { items: PublicFileItem[] } | undefined)?.items ?? []) : [];
+    if (fetchKey && fileResponse) {
+      const total = Number((fileResponse as { total?: number }).total ?? 0);
+      totalFiles.value = Number.isFinite(total) && total >= 0 ? total : 0;
+      // 若服务端返回的 page 超出范围（数据被删除等情况），回退到第一页
+      const respPage = Number((fileResponse as { page?: number }).page ?? currentPage.value);
+      if (respPage !== currentPage.value && respPage > 0) {
+        currentPage.value = respPage;
+      }
+    } else {
+      totalFiles.value = 0;
+    }
 
     if (!fetchKey && !rootViewLocked.value && folders.value.length === 1) {
       try {
@@ -1780,19 +1853,31 @@ async function loadDirectory(options?: { force?: boolean }) {
     }
   } catch (err: unknown) {
     if (gen === peekDirectoryViewLoadToken() && currentFolderID.value === fetchKey) {
-      invalidateDirectoryViewCacheFolder(fetchKey);
-      folders.value = [];
-      files.value = [];
-      breadcrumbs.value = [];
-      currentFolderDetail.value = null;
-      folderNameDraft.value = "";
-      folderDescriptionDraft.value = "";
-      folderRemarkDraft.value = "";      folderDirectPrefixDraft.value = "";
-      folderDownloadPolicyDraft.value = "inherit";
-      if (err instanceof HttpError && err.status === 404) {
-        toastError("目录不存在或未公开。");
+      const guestKeyCheck = isGuestKeyRequiredError(err);
+      if (guestKeyCheck.matched) {
+        invalidateDirectoryViewCacheFolder(fetchKey);
+        folders.value = [];
+        files.value = [];
+        breadcrumbs.value = [];
+        currentFolderDetail.value = null;
+        if (!guestKeyPromptOpen.value) {
+          openGuestKeyPrompt(guestKeyCheck.hint);
+        }
       } else {
-        toastError("加载目录失败。");
+        invalidateDirectoryViewCacheFolder(fetchKey);
+        folders.value = [];
+        files.value = [];
+        breadcrumbs.value = [];
+        currentFolderDetail.value = null;
+        folderNameDraft.value = "";
+        folderDescriptionDraft.value = "";
+        folderRemarkDraft.value = "";      folderDirectPrefixDraft.value = "";
+        folderDownloadPolicyDraft.value = "inherit";
+        if (err instanceof HttpError && err.status === 404) {
+          toastError("目录不存在或未公开。");
+        } else {
+          toastError("加载目录失败。");
+        }
       }
     }
   } finally {
@@ -2441,14 +2526,28 @@ watch(viewMode, (mode) => {
 });
 
 function setSortMode(mode: "smart" | "name" | "download" | "format" | "modified") {
+  if (sortMode.value === mode) return;
   sortMode.value = mode;
   window.localStorage.setItem("public-home-sort-mode", mode);
+  // 排序变化需重新请求服务端，避免文件数超过 page_size 时当前页看不到其他文件
+  if (currentFolderID.value) {
+    currentPage.value = 1;
+    void loadDirectory({ force: true });
+  }
 }
 
 function setSortDirection(direction: "asc" | "desc") {
+  if (sortDirection.value === direction) {
+    sortMenuOpen.value = false;
+    return;
+  }
   sortDirection.value = direction;
   sortMenuOpen.value = false;
   window.localStorage.setItem("public-home-sort-direction", direction);
+  if (currentFolderID.value) {
+    currentPage.value = 1;
+    void loadDirectory({ force: true });
+  }
 }
 
 function sortModeLabel(mode: "smart" | "name" | "download" | "format" | "modified") {
@@ -2472,6 +2571,63 @@ function sortDirectionLabel(direction: "asc" | "desc") {
 
 function viewModeLabel(mode: "cards" | "table") {
   return mode === "cards" ? "卡片" : "表格";
+}
+
+/**
+ * 把前端 sortMode + sortDirection 映射为后端 sort 参数。
+ * - smart：信任服务端排序（custom_order ASC + created_at DESC），不做额外参数
+ * - format：客户端按格式排序，服务端使用稳定顺序保证翻页一致
+ * - name/download/modified：组合出对应的 asc/desc
+ */
+function computeApiSortValue(mode: "smart" | "name" | "download" | "format" | "modified", direction: "asc" | "desc"): string {
+  if (mode === "smart") {
+    return ""; // 默认：sort_order ASC, created_at DESC, id DESC
+  }
+  if (mode === "format") {
+    // 格式排序为客户端逻辑，服务器用稳定顺序保证翻页稳定
+    return "name_asc";
+  }
+  const suffix = direction === "asc" ? "_asc" : "_desc";
+  if (mode === "name") {
+    return `name${suffix}`;
+  }
+  if (mode === "download") {
+    return `download_count${suffix}`;
+  }
+  // modified
+  return `created_at${suffix}`;
+}
+
+const apiSortValue = computed(() => computeApiSortValue(sortMode.value, sortDirection.value));
+const totalPages = computed(() => {
+  if (totalFiles.value <= 0 || pageSize.value <= 0) return 1;
+  return Math.max(1, Math.ceil(totalFiles.value / pageSize.value));
+});
+const pageRangeText = computed(() => {
+  if (totalFiles.value <= 0) return "0 条";
+  const start = (currentPage.value - 1) * pageSize.value + 1;
+  const end = Math.min(totalFiles.value, start + pageSize.value - 1);
+  return `${start}-${end} / ${totalFiles.value} 条`;
+});
+
+/** 校验 page_size 合法值（限 PAGE_SIZE_OPTIONS 之内且 ≤ 后端上限） */
+function setPageSize(rawSize: number) {
+  const size = PAGE_SIZE_OPTIONS.includes(rawSize) ? rawSize : 50;
+  if (size === pageSize.value) return;
+  pageSize.value = size;
+  window.localStorage.setItem("public-home-page-size", String(size));
+  // 切换页大小后重置页码并重新请求
+  if (currentFolderID.value) {
+    currentPage.value = 1;
+    void loadDirectory({ force: true });
+  }
+}
+
+function goToPage(page: number) {
+  const target = Math.min(Math.max(1, page), totalPages.value);
+  if (target === currentPage.value) return;
+  currentPage.value = target;
+  void loadDirectory({ force: true });
 }
 
 function openFeedbackModal(target: { id: string; type: "file" | "folder"; name: string }) {
@@ -3599,6 +3755,65 @@ async function syncSessionReceiptCode() {
             </table>
           </div>
 
+          <!-- 文件分页控件：仅在当前文件夹下显示，包含总数、页码与每页大小 -->
+          <div
+            v-if="currentFolderID && totalFiles > 0"
+            class="mt-4 flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6"
+          >
+            <div class="flex items-center gap-2 text-sm text-slate-500">
+              <span>{{ pageRangeText }}</span>
+              <span v-if="totalPages > 1" class="text-slate-400">· 共 {{ totalPages }} 页</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-2">
+              <!-- 单页最大文件数选择 -->
+              <label class="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm text-slate-500">
+                <span class="shrink-0">每页</span>
+                <select
+                  :value="pageSize"
+                  class="field !h-9 !w-auto !py-0 !pr-8 text-sm"
+                  @change="setPageSize(Number(($event.target as HTMLSelectElement).value))"
+                >
+                  <option v-for="size in PAGE_SIZE_OPTIONS" :key="size" :value="size">{{ size }}</option>
+                </select>
+                <span class="shrink-0">条</span>
+              </label>
+              <!-- 翻页按钮 -->
+              <div v-if="totalPages > 1" class="flex shrink-0 flex-wrap items-center gap-1 whitespace-nowrap">
+                <button
+                  type="button"
+                  class="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
+                  :disabled="currentPage <= 1"
+                  aria-label="上一页"
+                  @click="goToPage(currentPage - 1)"
+                >
+                  <ChevronLeft class="h-4 w-4" />
+                </button>
+                <span class="px-2 text-sm tabular-nums text-slate-600">
+                  第 {{ currentPage }} / {{ totalPages }} 页
+                </span>
+                <button
+                  type="button"
+                  class="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
+                  :disabled="currentPage >= totalPages"
+                  aria-label="下一页"
+                  @click="goToPage(currentPage + 1)"
+                >
+                  <ChevronRight class="h-4 w-4" />
+                </button>
+                <input
+                  type="number"
+                  :min="1"
+                  :max="totalPages"
+                  :value="currentPage"
+                  class="field !h-9 !w-16 !py-0 text-center text-sm"
+                  aria-label="跳转到指定页"
+                  @keyup.enter="goToPage(Number(($event.target as HTMLInputElement).value))"
+                  @change="goToPage(Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+            </div>
+          </div>
+
         </div>
           </div>
         </div>
@@ -3993,6 +4208,43 @@ async function syncSessionReceiptCode() {
           <button type="button" class="btn-secondary" @click="closeDownloadConfirm">取消</button>
           <button type="button" class="btn-primary" :disabled="batchDownloadSubmitting" @click="confirmPendingDownload">
             {{ batchDownloadSubmitting ? "处理中…" : "确认下载" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：访客密钥访问 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div
+      v-if="guestKeyPromptOpen"
+      class="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/40 backdrop-blur-sm px-4"
+      @click.self="closeGuestKeyPrompt"
+    >
+      <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" @click.stop>
+        <h3 class="text-lg font-semibold text-slate-900">输入访客密钥</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-600">
+          该目录受到密钥访问保护，请输入密钥以解锁。
+        </p>
+        <p v-if="guestKeyPromptHint" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ guestKeyPromptHint }}</p>
+        <label class="mt-4 block">
+          <span class="text-sm font-medium text-slate-700">访客密钥</span>
+          <input
+            v-model="guestKeyPromptValue"
+            type="password"
+            class="field mt-1"
+            placeholder="请输入密钥"
+            autocomplete="off"
+            @keyup.enter="submitGuestKeyPrompt"
+          />
+        </label>
+        <p v-if="guestKeyPromptError" class="mt-3 text-sm text-rose-600">{{ guestKeyPromptError }}</p>
+        <div class="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" class="btn-secondary" :disabled="guestKeyPromptSubmitting" @click="closeGuestKeyPrompt">取消</button>
+          <button type="button" class="btn-primary" :disabled="guestKeyPromptSubmitting || !guestKeyPromptValue.trim()" @click="submitGuestKeyPrompt">
+            {{ guestKeyPromptSubmitting ? "验证中…" : "解锁" }}
           </button>
         </div>
       </div>

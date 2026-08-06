@@ -25,6 +25,8 @@ type ManagedDirectoryRescanResult struct {
 }
 
 func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, adminID, operatorIP string) (*ManagedDirectoryRescanResult, error) {
+	// 重新扫描支持任意非虚拟托管目录：根目录或子目录均可，扫描范围包含该目录及其所有后代。
+	// 虚拟目录没有磁盘对应，按"目录不可用"返回。
 	rootFolder, err := s.repository.FindFolderByID(ctx, strings.TrimSpace(folderID))
 	if err != nil {
 		return nil, fmt.Errorf("find managed root: %w", err)
@@ -32,8 +34,8 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 	if rootFolder == nil {
 		return nil, ErrFolderTreeNotFound
 	}
-	if rootFolder.ParentID != nil {
-		return nil, ErrManagedRootRequired
+	if rootFolder.IsVirtual {
+		return nil, &ManagedDirectoryUnavailableError{}
 	}
 	if rootFolder.SourcePath == nil || strings.TrimSpace(*rootFolder.SourcePath) == "" {
 		return nil, &ManagedDirectoryUnavailableError{}
@@ -96,7 +98,10 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 	for _, folderPath := range fsFolderPaths {
 		normalizedPath := normalizeRescanPath(folderPath)
 		var parentID *string
-		if normalizedPath != normalizeRescanPath(rootPath) {
+		if normalizedPath == normalizeRescanPath(rootPath) {
+			// 扫描起点对应的目录：保留其在数据库中现存的父级，避免被拍平到根或孤立。
+			parentID = rootFolder.ParentID
+		} else {
 			parentPath := normalizeRescanPath(filepath.Dir(normalizedPath))
 			parentValue := pathToFolderID[parentPath]
 			parentID = &parentValue

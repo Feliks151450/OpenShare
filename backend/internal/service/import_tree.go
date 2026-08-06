@@ -11,6 +11,8 @@ type FolderTreeNode struct {
 	SourcePath        string           `json:"source_path"`
 	HidePublicCatalog bool             `json:"hide_public_catalog"`
 	CdnURL            string           `json:"cdn_url"`
+	GuestKeyRequired  bool             `json:"guest_key_required"`
+	AllowedGuestKeyIDs []string        `json:"allowed_guest_key_ids"`
 	Folders           []FolderTreeNode `json:"folders"`
 	Files             []FolderTreeFile `json:"files"`
 }
@@ -32,6 +34,16 @@ func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, er
 		return nil, fmt.Errorf("list files: %w", err)
 	}
 
+	// 批量取每个目录允许的密钥 ID（仅涉及一次性 INNER，避免逐目录 N+1）
+	folderIDs := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		folderIDs = append(folderIDs, folder.ID)
+	}
+	allowedKeysByFolder, err := s.listAllowedGuestKeysByFolderIDs(ctx, folderIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list allowed guest keys: %w", err)
+	}
+
 	nodes := make(map[string]*FolderTreeNode, len(folders))
 	childrenByParent := make(map[string][]string)
 	rootIDs := make([]string, 0)
@@ -42,7 +54,9 @@ func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, er
 			Name:              folder.Name,
 			SourcePath:        derefString(folder.SourcePath),
 			HidePublicCatalog: folder.HidePublicCatalog,
-				CdnURL:            folder.CdnURL,
+			CdnURL:            folder.CdnURL,
+			GuestKeyRequired:  folder.GuestKeyRequired,
+			AllowedGuestKeyIDs: allowedKeysByFolder[folder.ID],
 			Folders:           []FolderTreeNode{},
 			Files:             []FolderTreeFile{},
 		}
@@ -87,4 +101,32 @@ func (s *ImportService) GetFolderTree(ctx context.Context) ([]FolderTreeNode, er
 	}
 
 	return result, nil
+}
+
+// listAllowedGuestKeysByFolderIDs 批量取每个目录允许的密钥 ID；缺失目录以空 slice 占位。
+func (s *ImportService) listAllowedGuestKeysByFolderIDs(ctx context.Context, folderIDs []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(folderIDs))
+	for _, id := range folderIDs {
+		out[id] = []string{}
+	}
+	if len(folderIDs) == 0 {
+		return out, nil
+	}
+	// 通过 ImportRepository 关联的 GORM 实例直接查询关联表，避免新建 repository 依赖。
+	rows, err := s.repository.GetDB().WithContext(ctx).
+		Table("folder_guest_keys").
+		Where("folder_id IN ?", folderIDs).
+		Rows()
+	if err != nil {
+		return nil, fmt.Errorf("query folder guest keys: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var folderID, keyID string
+		if scanErr := rows.Scan(&folderID, &keyID); scanErr != nil {
+			return nil, fmt.Errorf("scan folder guest key row: %w", scanErr)
+		}
+		out[folderID] = append(out[folderID], keyID)
+	}
+	return out, nil
 }

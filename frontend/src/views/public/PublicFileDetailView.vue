@@ -27,6 +27,7 @@ import FileTagChips from "../../components/public/FileTagChips.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { HttpError, httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
+import { useGuestAccessKey } from "../../composables/useGuestAccessKey";
 import { staticDataLoader } from "../../lib/staticDataLoader";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
 import { hasAdminPermission } from "../../lib/admin/session";
@@ -111,6 +112,8 @@ interface FileDetailResponse {
   uploaded_at: string;
   download_count: number;
   tags?: PublicFileTag[];
+  /** 该文件所在目录（或其祖先）是否要求访客密钥访问 */
+  guest_key_required?: boolean;
 }
 
 const route = useRoute();
@@ -129,6 +132,50 @@ const detail = ref<FileDetailResponse | null>(null);
 const loading = ref(false);
 const error = ref("");
 const message = ref("");
+
+// 访客密钥访问：受保护文件命中时弹窗
+const guestAccess = useGuestAccessKey();
+const guestKeyPromptOpen = ref(false);
+const guestKeyPromptValue = ref("");
+const guestKeyPromptHint = ref("");
+const guestKeyPromptSubmitting = ref(false);
+const guestKeyPromptError = ref("");
+
+function openGuestKeyPrompt(hint: string) {
+  guestKeyPromptHint.value = hint ?? "";
+  guestKeyPromptValue.value = "";
+  guestKeyPromptError.value = "";
+  guestKeyPromptOpen.value = true;
+}
+
+function closeGuestKeyPrompt() {
+  guestKeyPromptOpen.value = false;
+  guestKeyPromptValue.value = "";
+  guestKeyPromptError.value = "";
+  guestKeyPromptSubmitting.value = false;
+}
+
+function isGuestKeyRequiredError(err: unknown): { matched: boolean; hint: string } {
+  if (!(err instanceof HttpError)) return { matched: false, hint: "" };
+  if (err.status !== 401) return { matched: false, hint: "" };
+  const payload = err.payload as { error?: string; hint?: string } | null;
+  if (!payload || payload.error !== "guest key required") return { matched: false, hint: "" };
+  return { matched: true, hint: payload.hint ?? "" };
+}
+
+async function submitGuestKeyPrompt() {
+  if (guestKeyPromptSubmitting.value) return;
+  guestKeyPromptSubmitting.value = true;
+  guestKeyPromptError.value = "";
+  const result = await guestAccess.setKey(guestKeyPromptValue.value);
+  guestKeyPromptSubmitting.value = false;
+  if (result.ok) {
+    closeGuestKeyPrompt();
+    await loadFileDetail();
+    return;
+  }
+  guestKeyPromptError.value = result.hint || "密钥无效，请重新输入。";
+}
 const saveError = ref("");
 const saving = ref(false);
 const editFileName = ref("");
@@ -1667,7 +1714,12 @@ async function loadDetail() {
       }
     }
   } catch (err: unknown) {
-    if (err instanceof HttpError && err.status === 404) {
+    const guestKeyCheck = isGuestKeyRequiredError(err);
+    if (guestKeyCheck.matched) {
+      if (!guestKeyPromptOpen.value) {
+        openGuestKeyPrompt(guestKeyCheck.hint);
+      }
+    } else if (err instanceof HttpError && err.status === 404) {
       toastError("文件不存在或未公开。");
     } else {
       toastError("加载文件详情失败。");
@@ -3670,6 +3722,43 @@ function performDownloadFile() {
             <p v-else class="px-2 py-6 text-center text-sm text-slate-500">
               {{ peerSidebarCopy.empty }}
             </p>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：访客密钥访问 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+      <div
+        v-if="guestKeyPromptOpen"
+        class="fixed inset-0 z-[135] flex items-center justify-center bg-slate-950/40 backdrop-blur-sm px-4"
+        @click.self="closeGuestKeyPrompt"
+      >
+        <div class="modal-card w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" @click.stop>
+          <h3 class="text-lg font-semibold text-slate-900">输入访客密钥</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-600">
+            该文件所在目录受到密钥访问保护，请输入密钥以解锁。
+          </p>
+          <p v-if="guestKeyPromptHint" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ guestKeyPromptHint }}</p>
+          <label class="mt-4 block">
+            <span class="text-sm font-medium text-slate-700">访客密钥</span>
+            <input
+              v-model="guestKeyPromptValue"
+              type="password"
+              class="field mt-1"
+              placeholder="请输入密钥"
+              autocomplete="off"
+              @keyup.enter="submitGuestKeyPrompt"
+            />
+          </label>
+          <p v-if="guestKeyPromptError" class="mt-3 text-sm text-rose-600">{{ guestKeyPromptError }}</p>
+          <div class="mt-6 flex flex-wrap justify-end gap-3">
+            <button type="button" class="btn-secondary" :disabled="guestKeyPromptSubmitting" @click="closeGuestKeyPrompt">取消</button>
+            <button type="button" class="btn-primary" :disabled="guestKeyPromptSubmitting || !guestKeyPromptValue.trim()" @click="submitGuestKeyPrompt">
+              {{ guestKeyPromptSubmitting ? "验证中…" : "解锁" }}
+            </button>
           </div>
         </div>
       </div>

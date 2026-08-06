@@ -134,6 +134,8 @@ type PublicFolderDetail struct {
 	IsVirtual bool `json:"is_virtual"`
 	// HidePublicCatalog 仅托管根目录返回：访客首页根列表是否隐藏该托管树。
 	HidePublicCatalog *bool `json:"hide_public_catalog,omitempty"`
+	// GuestKeyRequired 为 true 时表示该目录（或其祖先）配置了访客密钥访问，必须输入正确密钥才能看到详情。
+	GuestKeyRequired bool `json:"guest_key_required"`
 	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。
 	CustomPath string `json:"custom_path"`
 	// HideFileExtension 原始设置值：inherit/hide/show
@@ -337,6 +339,7 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		DownloadAllowed:           dlAllowed,
 		DownloadPolicy:            DownloadPolicyString(current.AllowDownload),
 		IsVirtual:                 current.IsVirtual,
+		GuestKeyRequired:          current.GuestKeyRequired,
 		CustomPath:                strings.TrimSpace(current.CustomPath),
 		HideFileExtension:         current.HideFileExtension,
 		HideFileExtensionResolved: hideExt,
@@ -355,6 +358,27 @@ func (s *PublicCatalogService) ResolveCustomPath(ctx context.Context, customPath
 		return nil, nil
 	}
 	return s.repository.FindPublicFolderByCustomPath(ctx, customPath)
+}
+
+// ResolveFileFolderID 拿到文件所属目录的 ID（用于自定义路径解析后的密钥校验）。
+func (s *PublicCatalogService) ResolveFileFolderID(ctx context.Context, fileID string) (string, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return "", nil
+	}
+	var folderID *string
+	if err := s.repository.GetDB().
+		WithContext(ctx).
+		Model(&model.File{}).
+		Select("folder_id").
+		Where("id = ?", fileID).
+		Scan(&folderID).Error; err != nil {
+		return "", fmt.Errorf("resolve file folder id: %w", err)
+	}
+	if folderID == nil {
+		return "", nil
+	}
+	return *folderID, nil
 }
 
 // CustomPathResolveResult 自定义路径解析结果，含类型和 ID。
@@ -511,10 +535,16 @@ func resolvePublicFileSort(sort string) ([]string, error) {
 	switch strings.TrimSpace(sort) {
 	case "", "created_at_desc":
 		return []string{"created_at DESC", "id DESC"}, nil
+	case "created_at_asc":
+		return []string{"created_at ASC", "id ASC"}, nil
 	case "download_count_desc":
 		return []string{"download_count DESC", "created_at DESC", "id DESC"}, nil
+	case "download_count_asc":
+		return []string{"download_count ASC", "created_at ASC", "id ASC"}, nil
 	case "name_asc":
 		return []string{"name ASC", "created_at DESC", "id DESC"}, nil
+	case "name_desc":
+		return []string{"name DESC", "created_at DESC", "id DESC"}, nil
 	default:
 		return nil, ErrInvalidPublicFileQuery
 	}

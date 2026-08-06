@@ -31,6 +31,10 @@
     "mtime": 1782136636.749056,
     "hash": "7e76a2c8ebec82ded00f61efc2f8da03"
   },
+  "/Users/linlifei/OpenShare/frontend/src/composables/useGuestAccessKey.ts": {
+    "mtime": 1786034730.3170245,
+    "hash": "a4dce4e2416e7804390017a4ecd8831b"
+  },
   "/Users/linlifei/OpenShare/frontend/src/composables/useSidebar.ts": {
     "mtime": 1778557883.6582093,
     "hash": "9fa8a0b417504b9133245f276348aeb6"
@@ -76,8 +80,8 @@
     "hash": "48509fbfdcf15892628dd480b2fe8154"
   },
   "/Users/linlifei/OpenShare/frontend/src/components/admin/AdminSuperadminControls.vue": {
-    "mtime": 1778775124.94123,
-    "hash": "082ee01197a6bfed82c46530d3af6ef3"
+    "mtime": 1786037956.7936966,
+    "hash": "8d51e5dcd85c7a46b43257894233c996"
   },
   "/Users/linlifei/OpenShare/frontend/src/components/admin/CoverImagePicker.vue": {
     "mtime": 1779048153.7121484,
@@ -144,8 +148,8 @@
     "hash": "75d1d390a47787ffc435eba060ad22f2"
   },
   "/Users/linlifei/OpenShare/frontend/src/lib/publicHomeDirectoryCache.ts": {
-    "mtime": 1782136636.751122,
-    "hash": "2e6cb9555b5990b5913c81412e1c1f2c"
+    "mtime": 1786034883.4694629,
+    "hash": "6ad01fee897c0fb8026effb27eacf3b3"
   },
   "/Users/linlifei/OpenShare/frontend/src/lib/publicMarkdownLinks.ts": {
     "mtime": 1785939049.6932192,
@@ -180,8 +184,8 @@
     "hash": "0be93adfc5519ef03c51bf060c7051c3"
   },
   "/Users/linlifei/OpenShare/frontend/src/lib/openShareConsole.ts": {
-    "mtime": 1782136636.7508614,
-    "hash": "1f7249ab897d588829f652f8f6ca8a81"
+    "mtime": 1786034808.9917154,
+    "hash": "636f8207a6e11c05ba25402267e21dfc"
   },
   "/Users/linlifei/OpenShare/frontend/src/lib/admin/session.ts": {
     "mtime": 1778557883.659053,
@@ -196,8 +200,8 @@
     "hash": "13b96f08dd162fff8ae280d3f471619b"
   },
   "/Users/linlifei/OpenShare/frontend/src/lib/http/client.ts": {
-    "mtime": 1778557883.6598885,
-    "hash": "5343d7f00f8ddb7bfb4dd1d36b4316b7"
+    "mtime": 1786038201.9333334,
+    "hash": "e73a7e8c8c90db8e01687b8dec907a5c"
   },
   "/Users/linlifei/OpenShare/frontend/src/views/admin/AdminFileTagsView.vue": {
     "mtime": 1778710218.1044083,
@@ -228,8 +232,8 @@
     "hash": "475c687ff4cd8f1e53f9641812e2f6c8"
   },
   "/Users/linlifei/OpenShare/frontend/src/views/public/Home.vue": {
-    "mtime": 1785939049.6946466,
-    "hash": "f2e75f99e9df1584aee9f9525ac2a1f6"
+    "mtime": 1786037828.4647753,
+    "hash": "ec83fdd68efc782cc12d3f43475ce0b2"
   },
   "/Users/linlifei/OpenShare/frontend/src/views/public/UploadView.vue": {
     "mtime": 1778709601.7435486,
@@ -240,8 +244,8 @@
     "hash": "eb9b4ec502096353119d66ea9b760ef9"
   },
   "/Users/linlifei/OpenShare/frontend/src/views/public/PublicFileDetailView.vue": {
-    "mtime": 1785939049.695936,
-    "hash": "e98ee7a788edcd36b1aedfe93a193ef8"
+    "mtime": 1786035132.578063,
+    "hash": "c7f3751bbc90499d3615d0c533aad954"
   },
   "/Users/linlifei/OpenShare/frontend/src/router/index.ts": {
     "mtime": 1782136636.7516358,
@@ -284,8 +288,8 @@
     "hash": "77b6fafe97f82ccac8789d3cfd0f34c1"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/resource_management_handler.go": {
-    "mtime": 1782136636.7426803,
-    "hash": "dd83001bd8961db5e7b7da4e903ed4d5"
+    "mtime": 1786034374.3371859,
+    "hash": "3239af2a2a0486e3da36d0db1fecf0ed"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/file_tag_handler.go": {
     "mtime": 1778557883.58828,
@@ -328,8 +332,8 @@
     "hash": "7127c941498fa6f9857e023ab24eb9d1"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/public_catalog_handler.go": {
-    "mtime": 1779076693.3355377,
-    "hash": "8448aeee11c17fc64f56ead11e965a73"
+    "mtime": 1786034167.7033896,
+    "hash": "395268bf07842deda93aa2d93226e058"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/public_submission_handler.go": {
     "mtime": 1778557883.588912,
@@ -339,13 +343,17 @@
     "mtime": 1778557883.5878859,
     "hash": "aa59af48029010a8f08975ef33b519fb"
   },
+  "/Users/linlifei/OpenShare/backend/internal/handler/guest_access_handler.go": {
+    "mtime": 1786034353.4910672,
+    "hash": "dfa3118da2d37acd276d6156fb6ad2b2"
+  },
   "/Users/linlifei/OpenShare/backend/internal/handler/search_handler.go": {
     "mtime": 1778557883.5892453,
     "hash": "a5ec389fa7017981b927f897110104e3"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/system_setting_handler.go": {
-    "mtime": 1778557883.5894115,
-    "hash": "da612a30bef626f4473c29f3174933f6"
+    "mtime": 1786034484.2619877,
+    "hash": "33266e2601b05788021e25ed14154354"
   },
   "/Users/linlifei/OpenShare/backend/internal/handler/import_handler.go": {
     "mtime": 1778557883.5883512,
@@ -363,9 +371,17 @@
     "mtime": 1778557883.5895941,
     "hash": "5ab2a724d5e2614a4884dab71e69bdf2"
   },
+  "/Users/linlifei/OpenShare/backend/internal/middleware/guest_access.go": {
+    "mtime": 1786034068.6710763,
+    "hash": "ef97bbd0dbe3efa680db53bec4c813cc"
+  },
   "/Users/linlifei/OpenShare/backend/internal/middleware/session.go": {
     "mtime": 1779033549.4603696,
     "hash": "9c08eb7d3a68d749d895f465f369480b"
+  },
+  "/Users/linlifei/OpenShare/backend/internal/repository/guest_key_assignment_repository.go": {
+    "mtime": 1786034110.2841604,
+    "hash": "fd8b5283bc10fdf0e583fb52da3ece71"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/api_token_repository.go": {
     "mtime": 1779033549.4609587,
@@ -384,8 +400,8 @@
     "hash": "dcf0aef55d3fa9a69382d0c59161ed37"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/public_catalog_repository.go": {
-    "mtime": 1783271542.8799071,
-    "hash": "d8dfcd2b8776f7f08a1ae5388d651a7d"
+    "mtime": 1786034314.0846198,
+    "hash": "d3515166427badeb0bacd3b52bbdc529"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/resource_management_delete_repository.go": {
     "mtime": 1778557883.5920386,
@@ -408,8 +424,8 @@
     "hash": "737638de1d755e8d8c48e1cb145c8905"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/import_query_repository.go": {
-    "mtime": 1778575165.027892,
-    "hash": "c0e4ecb36ff33b2ae51f12e8b43b17cb"
+    "mtime": 1786035941.6238868,
+    "hash": "d63d4830c2f4a2f5e4a74cc23759073c"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/admin_dashboard_repository.go": {
     "mtime": 1778557883.5904696,
@@ -444,12 +460,12 @@
     "hash": "d29e06bac267825010f61fc6936508c0"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/resource_management_update_repository.go": {
-    "mtime": 1782136636.744116,
-    "hash": "ef98c2f22f4ea2f14c0de1ff82cf8116"
+    "mtime": 1786034454.225651,
+    "hash": "3fd7f94f83da89736012cfcb0ea3e96f"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/catalog_visibility_scope.go": {
-    "mtime": 1778557883.590772,
-    "hash": "fb0b88cc6b277e7caeba0a945a84aca7"
+    "mtime": 1786034043.00716,
+    "hash": "337735daa0922bb22e4a8a2ba4fc5106"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/operation_log_repository.go": {
     "mtime": 1778557883.5916064,
@@ -484,8 +500,8 @@
     "hash": "7955032f2d6c7004749064659c67a8fd"
   },
   "/Users/linlifei/OpenShare/backend/internal/repository/import_repository.go": {
-    "mtime": 1778557883.5913584,
-    "hash": "8a3efec59fb5e59becf957f462b58004"
+    "mtime": 1786035499.0927384,
+    "hash": "eb634b96d9e38d8ea7ec55246b0fe762"
   },
   "/Users/linlifei/OpenShare/backend/internal/bootstrap/feedbacks_schema.go": {
     "mtime": 1778557883.5868897,
@@ -512,8 +528,8 @@
     "hash": "ce949f7608082f7185cbe936cd6ee5f2"
   },
   "/Users/linlifei/OpenShare/backend/internal/bootstrap/schema.go": {
-    "mtime": 1779033549.4588723,
-    "hash": "0c0565d51e7a46b8683f4108f72b3813"
+    "mtime": 1786033828.997108,
+    "hash": "c7d4c702d8333ab4d6616e3f3ce59298"
   },
   "/Users/linlifei/OpenShare/backend/internal/bootstrap/submissions_schema.go": {
     "mtime": 1778557883.5872543,
@@ -568,8 +584,8 @@
     "hash": "bd5e0202880d4d7c284c9c751ef7280c"
   },
   "/Users/linlifei/OpenShare/backend/internal/model/entities.go": {
-    "mtime": 1782136636.7431788,
-    "hash": "2a0c6503ced0020d1e4f2db9850a4d69"
+    "mtime": 1786036040.0931497,
+    "hash": "6c9a65d7d0f52efe9fee4bdd6864c015"
   },
   "/Users/linlifei/OpenShare/backend/internal/model/folder_stats.go": {
     "mtime": 1778557883.5902328,
@@ -624,8 +640,8 @@
     "hash": "c088fc48ab504173ada058e21b2356d9"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/import_rescan.go": {
-    "mtime": 1778575208.078974,
-    "hash": "0d477f868116d53fefbd4edae6690121"
+    "mtime": 1786030641.6105046,
+    "hash": "c8e442bfde03b28451cfe7d2f9ad4407"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/announcement_service.go": {
     "mtime": 1782136636.7455578,
@@ -675,13 +691,17 @@
     "mtime": 1778772398.419415,
     "hash": "f9f5567d5e8a66b411b6cfa365becf4c"
   },
+  "/Users/linlifei/OpenShare/backend/internal/service/guest_access_service.go": {
+    "mtime": 1786034093.371237,
+    "hash": "ddc04691d4d03c7a568eaad68d67f8b1"
+  },
   "/Users/linlifei/OpenShare/backend/internal/service/admin_management_service.go": {
     "mtime": 1778557883.5956643,
     "hash": "20bd0379ff7990f55ee3d95c6d8aae70"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/public_catalog_service.go": {
-    "mtime": 1783270973.560874,
-    "hash": "c2e6a9e766bb94edddd636fe0bfed4e7"
+    "mtime": 1786037051.7442634,
+    "hash": "8069a2f6a1b8dce067895f9d625ff435"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/public_submission_service.go": {
     "mtime": 1778557883.597221,
@@ -703,9 +723,13 @@
     "mtime": 1778557883.5977256,
     "hash": "f4490aa6cd666f68500065528e02274c"
   },
+  "/Users/linlifei/OpenShare/backend/internal/service/import_rescan_test.go": {
+    "mtime": 1786030754.6540189,
+    "hash": "8d20e31654d4f21a03a10561e6546064"
+  },
   "/Users/linlifei/OpenShare/backend/internal/service/resource_management_folder.go": {
-    "mtime": 1782136636.7473738,
-    "hash": "69394abb2a48467cdfcf4c039701a568"
+    "mtime": 1786034465.809146,
+    "hash": "ede4fcff162146c517d6dfbad3459c19"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/import_service.go": {
     "mtime": 1778557883.5965257,
@@ -720,16 +744,16 @@
     "hash": "40a96e6070f3c016f364bba8deeebd04"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/system_setting_service.go": {
-    "mtime": 1778772388.4345906,
-    "hash": "c780a55214bb32d1cb9e86975f683af8"
+    "mtime": 1786034694.463025,
+    "hash": "7d1c1b341b45bc1d8e2d56d6a4323e40"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/resource_management_move.go": {
     "mtime": 1779033549.4655442,
     "hash": "03b8b831016ee082681aa3b82938e645"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/import_tree.go": {
-    "mtime": 1778557883.5965939,
-    "hash": "383c01d5ca31515472c5ef9b8b0aaeae"
+    "mtime": 1786035478.20387,
+    "hash": "a19c14d7044a31e5e2dd84dfd962ad3c"
   },
   "/Users/linlifei/OpenShare/backend/internal/service/admin_bootstrap_service_test.go": {
     "mtime": 1778557883.5952048,
@@ -796,20 +820,20 @@
     "hash": "a98e15b66bf76fb8dcfb33cdbeed150c"
   },
   "/Users/linlifei/OpenShare/backend/internal/router/route_groups.go": {
-    "mtime": 1782136636.7448869,
-    "hash": "c4365b0aa9694775872e71ae82ebfc7a"
+    "mtime": 1786034550.8688452,
+    "hash": "7220a335cefe894d4851250d8d81d90b"
   },
   "/Users/linlifei/OpenShare/backend/internal/router/dependency_builders.go": {
-    "mtime": 1783270973.5603712,
-    "hash": "520b7c8604ecd0f1d026620754b2ccb4"
+    "mtime": 1786034671.942981,
+    "hash": "82be1232dd0432f8153fb6378f8c6849"
   },
   "/Users/linlifei/OpenShare/backend/internal/router/import_routes_setup_test.go": {
     "mtime": 1778557883.593248,
     "hash": "6f42a5544718a678cf46f6bdf426e56b"
   },
   "/Users/linlifei/OpenShare/backend/internal/router/dependency_types.go": {
-    "mtime": 1779033549.4630725,
-    "hash": "7a9899063fdda918f1886439d3f2f1fa"
+    "mtime": 1786034646.5544436,
+    "hash": "8351a67da63d65bd2f30590e9e0066b8"
   },
   "/Users/linlifei/OpenShare/backend/internal/router/resource_management_routes_test.go": {
     "mtime": 1778557883.5945787,
@@ -872,16 +896,16 @@
     "hash": "4d676f00146dba69af9f7ce0a0fd4a3e"
   },
   "/Users/linlifei/OpenShare/api.md": {
-    "mtime": 1785943879.9805276,
-    "hash": "f8aaae37702d0be6b657ed0717bc6b0f"
+    "mtime": 1786037294.1840124,
+    "hash": "dfc07ee25ad1c7fc7eda3e409cfc257b"
   },
   "/Users/linlifei/OpenShare/README.md": {
-    "mtime": 1785943874.757025,
-    "hash": "7b06be4da6cab3e22c6d25c6a589625f"
+    "mtime": 1786037324.1295156,
+    "hash": "2ad5019ca7966ef3df65503a71cbfb83"
   },
   "/Users/linlifei/OpenShare/cmd.md": {
-    "mtime": 1782136636.7484648,
-    "hash": "597e79b4221a20395cadc536587b08f0"
+    "mtime": 1786038094.3050518,
+    "hash": "8c773674a8cb915bbefaf0758866ba43"
   },
   "/Users/linlifei/OpenShare/docker-compose.yml": {
     "mtime": 1778557883.653349,

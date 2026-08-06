@@ -8,16 +8,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"openshare/backend/internal/middleware"
 	"openshare/backend/internal/service"
 )
 
 type PublicCatalogHandler struct {
 	service       *service.PublicCatalogService
 	systemSetting *service.SystemSettingService
+	guestAccess   *service.GuestAccessService
 }
 
-func NewPublicCatalogHandler(service *service.PublicCatalogService, systemSetting *service.SystemSettingService) *PublicCatalogHandler {
-	return &PublicCatalogHandler{service: service, systemSetting: systemSetting}
+func NewPublicCatalogHandler(service *service.PublicCatalogService, systemSetting *service.SystemSettingService, guestAccess *service.GuestAccessService) *PublicCatalogHandler {
+	return &PublicCatalogHandler{service: service, systemSetting: systemSetting, guestAccess: guestAccess}
 }
 
 func (h *PublicCatalogHandler) ListPublicFolderFiles(ctx *gin.Context) {
@@ -33,8 +35,16 @@ func (h *PublicCatalogHandler) ListPublicFolderFiles(ctx *gin.Context) {
 		return
 	}
 
+	folderID := ctx.Param("folderID")
+	if h.guestAccess != nil {
+		if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), folderID, middleware.GuestKeyFromContext(ctx)); !ok {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+			return
+		}
+	}
+
 	result, err := h.service.ListPublicFolderFiles(ctx.Request.Context(), service.PublicFolderFileListInput{
-		FolderID: ctx.Param("folderID"),
+		FolderID: folderID,
 		Page:     page,
 		PageSize: pageSize,
 		Sort:     ctx.Query("sort"),
@@ -131,6 +141,20 @@ func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
 		return
 	}
 
+	// 解析后立即按对应目录/文件的归宿检查密钥。
+	if h.guestAccess != nil {
+		targetFolderID := result.FolderID
+		if targetFolderID == "" {
+			targetFolderID = fileFolderID(ctx, h.service, result.FileID)
+		}
+		if targetFolderID != "" {
+			if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), targetFolderID, middleware.GuestKeyFromContext(ctx)); !ok {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+				return
+			}
+		}
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"type":      result.Type,
 		"folder_id": result.FolderID,
@@ -141,7 +165,15 @@ func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
 }
 
 func (h *PublicCatalogHandler) GetPublicFolderDetail(ctx *gin.Context) {
-	detail, err := h.service.GetPublicFolderDetail(ctx.Request.Context(), ctx.Param("folderID"))
+	folderID := ctx.Param("folderID")
+	if h.guestAccess != nil {
+		if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), folderID, middleware.GuestKeyFromContext(ctx)); !ok {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+			return
+		}
+	}
+
+	detail, err := h.service.GetPublicFolderDetail(ctx.Request.Context(), folderID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrFolderNotFound):
@@ -153,6 +185,18 @@ func (h *PublicCatalogHandler) GetPublicFolderDetail(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, detail)
+}
+
+// fileFolderID 拿到文件所属目录的 ID（解析自定义路径时使用）。
+func fileFolderID(ctx *gin.Context, svc *service.PublicCatalogService, fileID string) string {
+	if fileID == "" || svc == nil {
+		return ""
+	}
+	res, err := svc.ResolveFileFolderID(ctx.Request.Context(), fileID)
+	if err != nil || res == "" {
+		return ""
+	}
+	return res
 }
 
 func parseIntQuery(raw string) (int, error) {

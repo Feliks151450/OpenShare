@@ -1,6 +1,7 @@
 import type { Router } from "vue-router";
 
 import { favoriteItems, type FavoriteItem } from "../composables/useFavorites";
+import { readGuestAccessKey, useGuestAccessKey } from "../composables/useGuestAccessKey";
 import { fileEffectiveDownloadHref } from "./fileDirectUrl";
 import { httpClient } from "./http/client";
 import { getHomeConsoleHooks, type HomeListSortDirection, type HomeListSortMode, type HomeListViewMode } from "./homeConsoleBridge";
@@ -27,6 +28,8 @@ export type OpenShareConsoleApi = {
   home: OpenShareConsoleHomeSpa;
   /** 收藏管理（基于 localStorage，浏览器本地） */
   favorites: OpenShareConsoleFavorites;
+  /** 访客密钥管理（基于 localStorage，浏览器本地；命中受保护目录时由 httpClient 拦截器自动附带） */
+  guestAccessKey: OpenShareConsoleGuestAccessKey;
   /** CDN 静态数据加载器：可配置预导出 JSON 直链，替代部分公开 API 请求 */
   staticData: typeof staticDataLoader;
 };
@@ -89,6 +92,25 @@ export type OpenShareConsoleFavorites = {
   clear(): void;
   /** 收藏数量 */
   count(): number;
+};
+
+/** 访客密钥管理 API */
+export type OpenShareConsoleGuestAccessKey = {
+  /** 获取当前已保存的密钥值；未保存时返回 null */
+  get(): string | null;
+  /**
+   * 提交密钥值给后端 validate 端点。
+   * 校验成功会写入 localStorage 并返回解锁的目录 ID；
+   * 校验失败返回 hint 提示（管理员配置时填写）。
+   */
+  set(value: string): Promise<
+    | { ok: true; unlockedFolderIds: string[] }
+    | { ok: false; hint: string }
+  >;
+  /** 清空已保存的密钥 */
+  clear(): void;
+  /** 是否已保存密钥 */
+  has(): boolean;
 };
 
 async function navigate(router: Router, loc: Parameters<Router["push"]>[0], opts?: ConsoleNavOpts) {
@@ -325,12 +347,35 @@ export function mountOpenShareConsole(router: Router): void {
     },
   };
 
+  const guestAccessKey: OpenShareConsoleGuestAccessKey = {
+    get() {
+      const value = readGuestAccessKey();
+      if (!value) return null;
+      return value;
+    },
+    async set(value: string) {
+      const trimmed = String(value ?? "").trim();
+      if (!trimmed) {
+        return { ok: false, hint: "" };
+      }
+      const result = await useGuestAccessKey().setKey(trimmed);
+      return result;
+    },
+    clear() {
+      useGuestAccessKey().clearKey();
+    },
+    has() {
+      return Boolean(readGuestAccessKey());
+    },
+  };
+
   window.OpenShare = {
     version: "1.0",
     runtime: "spa",
     nav,
     home,
     favorites,
+    guestAccessKey,
     staticData: staticDataLoader,
   };
 }

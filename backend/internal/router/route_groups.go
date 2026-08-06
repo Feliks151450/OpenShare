@@ -15,24 +15,28 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	api.POST("/visits", handlers.siteVisit.Record)
 
 	public := api.Group("/public")
+	// 访客密钥：仅在浏览类路由组挂载（下载 / batch / /dl/* 不参与密钥校验）。
+	public.GET("/files/hot", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListHotFiles)
+	public.GET("/files/latest", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListLatestFiles)
+	public.GET("/files/:fileID", middleware.ExtractGuestKeyHeader(), handlers.publicDownload.GetFileDetail)
+	public.GET("/folders", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListPublicFolders)
+	public.GET("/folders/:folderID/files", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListPublicFolderFiles)
+	public.GET("/folders/:folderID", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.GetPublicFolderDetail)
+	public.GET("/resolve-custom-path", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ResolveCustomPath)
+	public.GET("/search", middleware.ExtractGuestKeyHeader(), handlers.search.Search)
+	// 公开 validate 端点（自身不要求密钥，但允许在已携 header 时直接通过）
+	public.POST("/guest-access/validate", middleware.ExtractGuestKeyHeader(), handlers.guestAccess.Validate)
+	// 下载 / 直链：不在这里挂中间件，密钥不参与校验。
 	public.POST("/files/batch-download", handlers.publicDownload.DownloadBatch)
 	public.POST("/resources/batch-download", handlers.publicDownload.DownloadResourceBatch)
-	public.GET("/files/hot", handlers.publicCatalog.ListHotFiles)
-	public.GET("/files/latest", handlers.publicCatalog.ListLatestFiles)
 	public.GET("/files/:fileID/netcdf-dump", handlers.publicDownload.GetNetCDFDump)
 	public.GET("/files/:fileID/netcdf-dump-fallback", handlers.publicDownload.GetNetCDFDumpFallback)
-	public.GET("/files/:fileID", handlers.publicDownload.GetFileDetail)
 	public.GET("/files/:fileID/download", handlers.publicDownload.DownloadFile)
-	public.GET("/folders", handlers.publicCatalog.ListPublicFolders)
-	public.GET("/folders/:folderID/files", handlers.publicCatalog.ListPublicFolderFiles)
-	public.GET("/folders/:folderID", handlers.publicCatalog.GetPublicFolderDetail)
 	public.GET("/folders/:folderID/download", handlers.publicDownload.DownloadFolder)
-	public.GET("/resolve-custom-path", handlers.publicCatalog.ResolveCustomPath)
 	public.GET("/announcements", handlers.announcement.ListPublic)
 	public.GET("/announcements/home", handlers.announcement.GetHomeAnnouncement)
 	public.GET("/download-policy", handlers.systemSetting.GetPublicDownloadPolicy)
 	public.GET("/receipt-code", handlers.publicReceipt.Ensure)
-	public.GET("/search", handlers.search.Search)
 	public.GET("/file-tags", handlers.fileTag.ListPublicDefinitions)
 	public.POST("/feedback", handlers.feedback.Create)
 	public.GET("/feedback/:receiptCode", handlers.feedback.LookupByReceiptCode)
@@ -168,6 +172,12 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		patchFolderCdnUrl,
 	)
+	patchFolderGuestKeys := handlers.resourceManagement.PatchFolderGuestKeys
+	adminProtected.PATCH(
+		"/resources/folders/:folderID/guest-keys",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		patchFolderGuestKeys,
+	)
 
 	adminProtected.PUT(
 		"/resources/folders/:folderID/file-order",
@@ -267,6 +277,8 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	superAdminOnly.Use(middleware.RequireSuperAdmin())
 	superAdminOnly.GET("/system/settings", handlers.systemSetting.GetPolicy)
 	superAdminOnly.PUT("/system/settings", handlers.systemSetting.SavePolicy)
+	superAdminOnly.GET("/system/guest-access", handlers.guestAccess.AdminGet)
+	superAdminOnly.PUT("/system/guest-access", handlers.guestAccess.AdminPut)
 
 	adminPermissionProbe := adminProtected.Group("/_internal")
 	adminPermissionProbe.GET(

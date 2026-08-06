@@ -284,6 +284,38 @@ type FileOrderEntry struct {
 	SortOrder int64  `json:"sort_order"`
 }
 
+// PatchFolderGuestKeys 切换目录的访客密钥访问要求并替换允许的密钥列表。
+// required=false 时清空所有关联；required=true 时写入 keyIDs（去重）。
+func (r *ResourceManagementRepository) PatchFolderGuestKeys(ctx context.Context, folderID string, required bool, keyIDs []string, operatorID string, operatorIP string, logID string, now time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Update("guest_key_required", required)
+		if result.Error != nil {
+			return fmt.Errorf("patch folder guest key required: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("folder not found: %s", folderID)
+		}
+
+		// 替换关联
+		if err := tx.Where("folder_id = ?", folderID).Delete(&model.FolderGuestKeyAssignment{}).Error; err != nil {
+			return fmt.Errorf("clear folder guest keys: %w", err)
+		}
+		cleaned := dedupeNonEmpty(keyIDs)
+		for _, kid := range cleaned {
+			row := model.FolderGuestKeyAssignment{FolderID: folderID, KeyID: kid}
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("insert folder guest key: %w", err)
+			}
+		}
+
+		comment := fmt.Sprintf("guest_key_required=%t, allowed_keys=%d", required, len(cleaned))
+		if err := createOperationLogTx(tx, logID, operatorID, "folder_guest_key_updated", "folder", folderID, comment, operatorIP, now); err != nil {
+			return fmt.Errorf("log folder guest key update: %w", err)
+		}
+		return nil
+	})
+}
+
 // UpdateFolderFileOrder batch-updates the custom sort order for files within a folder.
 func (r *ResourceManagementRepository) UpdateFolderFileOrder(ctx context.Context, folderID string, orders []FileOrderEntry, operatorID, operatorIP string, now time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

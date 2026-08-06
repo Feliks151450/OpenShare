@@ -48,7 +48,7 @@ const pendingImportPath = ref("");
 const manualBrowsePath = ref("");
 const confirmedImportPath = ref("");
 const importFilter = ref("");
-const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string; hidePublicCatalog: boolean; cdnUrl: string }>>([]);
+const managedFolders = ref<Array<{ id: string; name: string; sourcePath: string; hidePublicCatalog: boolean; cdnUrl: string; guestKeyRequired: boolean; allowedGuestKeyIds: string[] }>>([]);
 const managedFoldersLoading = ref(false);
 const managedFoldersError = ref("");
 const catalogVisibilitySaving = ref("");
@@ -59,6 +59,95 @@ const unmanageMessage = ref("");
 const rescanningFolderID = ref("");
 const rescanError = ref("");
 const rescanMessage = ref("");
+
+// 访客密钥访问：全局配置
+interface GuestAccessKeyDraft {
+  id: string;
+  name: string;
+  value: string;
+  hint: string;
+}
+const guestAccessEnabled = ref(false);
+const guestAccessKeys = ref<GuestAccessKeyDraft[]>([]);
+const guestAccessSnapshot = ref("{}");
+const guestAccessSaving = ref(false);
+const guestAccessMessage = ref("");
+const guestAccessError = ref("");
+const guestAccessDirty = computed(() => JSON.stringify(serializeGuestAccess()) !== guestAccessSnapshot.value);
+
+function serializeGuestAccess() {
+  return {
+    enabled: guestAccessEnabled.value,
+    keys: guestAccessKeys.value.map((k) => ({
+      id: (k.id ?? "").trim(),
+      name: (k.name ?? "").trim(),
+      value: (k.value ?? "").trim(),
+      hint: (k.hint ?? "").trim(),
+    })),
+  };
+}
+
+function addGuestAccessKeyDraft() {
+  guestAccessKeys.value.push({ id: "", name: "", value: "", hint: "" });
+}
+
+function removeGuestAccessKeyDraft(idx: number) {
+  guestAccessKeys.value.splice(idx, 1);
+}
+
+async function loadGuestAccessConfig() {
+  try {
+    const resp = await httpClient.get<{ enabled: boolean; keys: GuestAccessKeyDraft[] }>("/admin/system/guest-access");
+    guestAccessEnabled.value = Boolean(resp.enabled);
+    guestAccessKeys.value = (resp.keys ?? []).map((k) => ({
+      id: k.id ?? "",
+      name: k.name ?? "",
+      value: k.value ?? "",
+      hint: k.hint ?? "",
+    }));
+    guestAccessSnapshot.value = JSON.stringify(serializeGuestAccess());
+  } catch (err: unknown) {
+    toastError(readApiError(err, "加载访客密钥配置失败。"));
+  }
+}
+
+async function saveGuestAccessConfig() {
+  guestAccessSaving.value = true;
+  guestAccessError.value = "";
+  guestAccessMessage.value = "";
+  try {
+    const payload = serializeGuestAccess();
+    // 给未填 ID 的密钥生成 UUID（保持引用稳定）
+    payload.keys = payload.keys.map((k) => {
+      if (!k.id) {
+        const fallback = `key-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // typeof 守卫避免在不支持 crypto 的环境下触发 ReferenceError
+        const newId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+          ? crypto.randomUUID()
+          : fallback;
+        return { ...k, id: newId };
+      }
+      return k;
+    });
+    const resp = await httpClient.put<{ enabled: boolean; keys: GuestAccessKeyDraft[] }>(
+      "/admin/system/guest-access",
+      payload,
+    );
+    guestAccessEnabled.value = Boolean(resp.enabled);
+    guestAccessKeys.value = (resp.keys ?? []).map((k) => ({
+      id: k.id ?? "",
+      name: k.name ?? "",
+      value: k.value ?? "",
+      hint: k.hint ?? "",
+    }));
+    guestAccessSnapshot.value = JSON.stringify(serializeGuestAccess());
+    guestAccessMessage.value = "访客密钥配置已保存。";
+  } catch (err: unknown) {
+    toastError(readApiError(err, "保存访客密钥配置失败。"));
+  } finally {
+    guestAccessSaving.value = false;
+  }
+}
 // 虚拟托管根目录创建
 const virtualRootName = ref("");
 const virtualRootCreating = ref(false);
@@ -85,7 +174,7 @@ const form = reactive<SystemPolicy>({
 });
 
 onMounted(() => {
-  void Promise.all([loadPolicy(), loadDirectories(""), loadManagedFolders()]);
+  void Promise.all([loadPolicy(), loadDirectories(""), loadManagedFolders(), loadGuestAccessConfig()]);
 });
 
 async function loadPolicy() {
@@ -303,12 +392,26 @@ async function loadManagedFolders() {
       sourcePath: item.source_path,
       hidePublicCatalog: Boolean(item.hide_public_catalog),
       cdnUrl: (item as any).cdn_url ?? "",
+      guestKeyRequired: Boolean((item as any).guest_key_required),
+      allowedGuestKeyIds: Array.isArray((item as any).allowed_guest_key_ids) ? (item as any).allowed_guest_key_ids : [],
     }));
   } catch (err: unknown) {
     managedFolders.value = [];
     toastError(readApiError(err, "加载已托管目录失败。"));
   } finally {
     managedFoldersLoading.value = false;
+  }
+}
+
+async function patchFolderGuestKey(folderID: string, required: boolean, allowedKeyIDs: string[]) {
+  try {
+    await httpClient.request(`/admin/resources/folders/${encodeURIComponent(folderID)}/guest-keys`, {
+      method: "PATCH",
+      body: { required, allowed_key_ids: allowedKeyIDs },
+    });
+    await loadManagedFolders();
+  } catch (err: unknown) {
+    toastError(readApiError(err, "更新访客密钥授权失败。"));
   }
 }
 
@@ -590,8 +693,9 @@ function isManagedRootClientChild(path: string, root: string) {
             :key="folder.id"
             class="panel-muted px-4 py-3"
           >
-            <div class="flex items-start justify-between gap-4">
-              <div class="min-w-0">
+            <!-- 窄屏：左右两栏堆叠成上下两行；>=md：恢复左右并排。左右都加 min-w-0/flex-1 + 内部按钮 flex-wrap，确保路径不被挤压。 -->
+            <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
+              <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-slate-900">
                   {{ folder.name }}
                   <span
@@ -604,7 +708,7 @@ function isManagedRootClientChild(path: string, root: string) {
                   <input
                     :value="folder.cdnUrl"
                     type="url"
-                    class="field h-9 flex-1 text-sm"
+                    class="field h-9 min-w-0 flex-1 text-sm"
                     placeholder="CDN JSON 直链（可选）"
                     @change="(e) => { const target = e.target as HTMLInputElement; folder.cdnUrl = target.value; }"
                     @blur="(e) => { const target = e.target as HTMLInputElement; const v = target.value.trim(); if (v !== (folder.cdnUrl ?? '')) { folder.cdnUrl = v; saveFolderCdnUrl(folder.id, v); } }"
@@ -618,8 +722,41 @@ function isManagedRootClientChild(path: string, root: string) {
                     {{ savingCdnUrlFolderId === folder.id ? '保存中…' : '保存' }}
                   </button>
                 </div>
+                <!-- 访客密钥访问：每目录开关与允许的密钥选择 -->
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <label class="inline-flex shrink-0 items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="folder.guestKeyRequired"
+                      class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      @change="(e) => {
+                        const target = e.target as HTMLInputElement;
+                        const next = target.checked;
+                        if (!next) {
+                          patchFolderGuestKey(folder.id, false, []);
+                        } else if (folder.allowedGuestKeyIds.length > 0) {
+                          patchFolderGuestKey(folder.id, true, [...folder.allowedGuestKeyIds]);
+                        }
+                      }"
+                    />
+                    <span class="text-xs font-medium text-slate-700">要求密钥访问</span>
+                  </label>
+                  <select
+                    v-if="folder.guestKeyRequired"
+                    multiple
+                    class="field h-9 min-w-0 flex-1 text-sm"
+                    :value="folder.allowedGuestKeyIds"
+                    @change="(e) => {
+                      const target = e.target as HTMLSelectElement;
+                      const selected = Array.from(target.selectedOptions).map((o) => o.value);
+                      patchFolderGuestKey(folder.id, true, selected);
+                    }"
+                  >
+                    <option v-for="k in guestAccessKeys" :key="k.id" :value="k.id">{{ k.name || k.id }}</option>
+                  </select>
+                </div>
               </div>
-              <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <div class="flex flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
                 <button
                   type="button"
                   class="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
@@ -766,6 +903,65 @@ function isManagedRootClientChild(path: string, root: string) {
           {{ uploadSaving ? "更新中…" : "确认更新" }}
         </button>
       </form>
+
+      <!-- 访客密钥访问：管理全局开关与密钥池 -->
+      <SurfaceCard class="space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">访客密钥访问</h3>
+            <p class="mt-1 text-sm text-slate-500">
+              启用后，访客在网页端浏览被标记为"要求密钥访问"的托管目录前必须先输入密钥。
+              密钥校验成功后保存在浏览器本地存储，后续浏览自动附带。
+              <strong class="text-slate-700">下载与直链不受密钥保护</strong>。
+            </p>
+          </div>
+        </div>
+
+        <label class="mt-2 inline-flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            v-model="guestAccessEnabled"
+            class="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <span class="text-sm font-medium text-slate-700">{{ guestAccessEnabled ? "已启用" : "已关闭" }}</span>
+        </label>
+
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <h4 class="text-sm font-semibold text-slate-800">密钥池</h4>
+            <button type="button" class="btn-secondary" :disabled="guestAccessSaving" @click="addGuestAccessKeyDraft">添加密钥</button>
+          </div>
+          <p v-if="guestAccessKeys.length === 0" class="text-sm text-slate-500">尚未配置密钥。</p>
+          <ul v-else class="space-y-3">
+            <li v-for="(key, idx) in guestAccessKeys" :key="idx" class="panel-muted px-4 py-3 space-y-3">
+              <div class="grid gap-3 md:grid-cols-2">
+                <label class="space-y-1">
+                  <span class="text-xs font-medium text-slate-600">名称</span>
+                  <input v-model="key.name" type="text" class="field h-9 text-sm" placeholder="显示名称" />
+                </label>
+                <label class="space-y-1">
+                  <span class="text-xs font-medium text-slate-600">密钥值</span>
+                  <input v-model="key.value" type="text" class="field h-9 text-sm" placeholder="访客需要输入的密钥" />
+                </label>
+              </div>
+              <label class="space-y-1 block">
+                <span class="text-xs font-medium text-slate-600">提示文案（可选，错误时展示）</span>
+                <input v-model="key.hint" type="text" class="field h-9 text-sm" placeholder="例如：8-12位字母数字" />
+              </label>
+              <div class="flex justify-end">
+                <button type="button" class="btn-secondary" :disabled="guestAccessSaving" @click="removeGuestAccessKeyDraft(idx)">删除</button>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex justify-end">
+          <button type="button" class="btn-primary" :disabled="guestAccessSaving || !guestAccessDirty" @click="saveGuestAccessConfig">
+            {{ guestAccessSaving ? "保存中…" : "保存访客密钥" }}
+          </button>
+        </div>
+        <p v-if="guestAccessMessage" class="text-sm text-emerald-600">{{ guestAccessMessage }}</p>
+      </SurfaceCard>
 
       <SurfaceCard class="space-y-6">
         <div>

@@ -87,6 +87,8 @@ type Folder struct {
 	IsVirtual bool `gorm:"column:is_virtual;not null;default:false"`
 	// HidePublicCatalog 仅对托管根目录（parent_id IS NULL）有效：true 时不出现在访客 GET /public/folders（无 parent）根列表。
 	HidePublicCatalog bool `gorm:"column:hide_public_catalog;not null;default:false"`
+	// GuestKeyRequired 是否要求访客先输入密钥才能在网页端浏览该目录（不影响下载/直链）。
+	GuestKeyRequired bool `gorm:"column:guest_key_required;not null;default:false"`
 	// CustomPath 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹。空字符串表示未设置。
 	CustomPath string `gorm:"column:custom_path;type:text;uniqueIndex:ux_folders_custom_path"`
 	// AllowDownload nil = 继承上层；解析后均未设置则默认允许下载
@@ -150,6 +152,19 @@ type FileTag struct {
 type FileTagAssignment struct {
 	FileID EntityID `gorm:"column:file_id;type:text;primaryKey;index:idx_file_tag_assignments_file_id"`
 	TagID  EntityID `gorm:"column:tag_id;type:text;primaryKey;index:idx_file_tag_assignments_tag_id"`
+}
+
+// FolderGuestKeyAssignment 目录与允许访问的访客密钥的多对多关联。
+// 密钥 ID（key_id）关联到 SystemPolicy.GuestAccess.Keys[].ID（UUID 字符串）；
+// 关联表只存储目录允许的密钥子集，全局密钥池仍然只在系统设置 JSON 中。
+type FolderGuestKeyAssignment struct {
+	FolderID EntityID `gorm:"column:folder_id;type:text;primaryKey;index:idx_folder_guest_keys_folder_id"`
+	KeyID    EntityID `gorm:"column:key_id;type:text;primaryKey;index:idx_folder_guest_keys_key_id"`
+}
+
+// TableName 指定 GORM 管理的实际表名（绕过默认的复数命名）。
+func (FolderGuestKeyAssignment) TableName() string {
+	return "folder_guest_keys"
 }
 
 // Submission tracks an upload request from staging through moderation.

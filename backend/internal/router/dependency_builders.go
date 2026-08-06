@@ -37,6 +37,7 @@ func buildRouteRepositories(db *gorm.DB) *routeRepositories {
 		upload:             repository.NewUploadRepository(db),
 		receiptCode:        repository.NewReceiptCodeRepository(db),
 		apiToken:           repository.NewApiTokenRepository(db),
+		guestKeys:          repository.NewGuestKeyAssignmentRepository(db),
 	}
 }
 
@@ -53,6 +54,7 @@ func buildRouteServices(
 	fileTagService := service.NewFileTagService(repos.fileTag, repos.resourceManagement)
 	publicDownloadService := service.NewPublicDownloadService(repos.publicDownload, storageService, fileTagService)
 	searchService := service.NewSearchService(repos.search, publicDownloadService, fileTagService)
+	guestAccessService := service.NewGuestAccessService(systemSettingService, repos.guestKeys)
 
 	return &routeServices{
 		adminAuth:          adminAuthService,
@@ -73,6 +75,7 @@ func buildRouteServices(
 		search:             searchService,
 		siteVisit:          service.NewSiteVisitService(repos.siteVisit),
 		systemSetting:      systemSettingService,
+		guestAccess:        guestAccessService,
 		apiToken:           service.NewApiTokenService(repos.apiToken),
 	}
 }
@@ -88,7 +91,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		imports:            handler.NewImportHandler(services.imports, services.adminAuth),
 		moderation:         handler.NewModerationHandler(services.moderation),
 		operationLog:       handler.NewOperationLogHandler(services.operationLog),
-		publicCatalog:      handler.NewPublicCatalogHandler(services.publicCatalog, services.systemSetting),
+		publicCatalog:      handler.NewPublicCatalogHandler(services.publicCatalog, services.systemSetting, services.guestAccess),
 		publicDownload:     handler.NewPublicDownloadHandler(services.publicDownload, services.publicCatalog),
 		publicReceipt:      handler.NewPublicReceiptHandler(services.publicReceipt),
 		publicSubmission:   handler.NewPublicSubmissionHandler(services.publicSubmission),
@@ -97,6 +100,7 @@ func buildHandlers(cfg config.Config, sessionManager *session.Manager, services 
 		search:             handler.NewSearchHandler(services.search),
 		siteVisit:          handler.NewSiteVisitHandler(services.siteVisit),
 		systemSetting:      handler.NewSystemSettingHandler(services.systemSetting, repos.imports),
+		guestAccess:        handler.NewGuestAccessHandler(services.systemSetting, services.guestAccess),
 		export_:            handler.NewExportHandler(services.announcement, services.publicCatalog, services.systemSetting, services.fileTag, services.imports, services.publicDownload, repos.imports),
 		apiToken:           handler.NewApiTokenHandler(services.apiToken),
 	}

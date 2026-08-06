@@ -25,6 +25,7 @@ type routeHandlers struct {
 	search             *handler.SearchHandler
 	siteVisit          *handler.SiteVisitHandler
 	systemSetting      *handler.SystemSettingHandler
+	guestAccess        *handler.GuestAccessHandler
 	export_            *handler.ExportHandler
 	apiToken           *handler.ApiTokenHandler
 }
@@ -48,6 +49,7 @@ type routeRepositories struct {
 	systemSetting      *repository.SystemSettingRepository
 	upload             *repository.UploadRepository
 	receiptCode        *repository.ReceiptCodeRepository
+	guestKeys          *repository.GuestKeyAssignmentRepository
 }
 
 type routeServices struct {
@@ -69,5 +71,6 @@ type routeServices struct {
 	search             *service.SearchService
 	siteVisit          *service.SiteVisitService
 	systemSetting      *service.SystemSettingService
+	guestAccess        *service.GuestAccessService
 	apiToken           *service.ApiTokenService
 }

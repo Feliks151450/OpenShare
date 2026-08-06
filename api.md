@@ -638,7 +638,7 @@ await OpenShare.staticData.loadDirectory("dir-b");  // → .../directories/dir-b
 |------|------|--------|------|
 | `page` | `int` | 1 | 页码 |
 | `page_size` | `int` | 20 | 每页条数（上限 **100**） |
-| `sort` | `string` | `created_at_desc` | `name_asc` / `download_count_desc` / `created_at_desc` |
+| `sort` | `string` | `created_at_desc` | `name_asc` / `name_desc` / `download_count_asc` / `download_count_desc` / `created_at_asc` / `created_at_desc` |
 
 **响应**：
 ```json
@@ -844,9 +844,81 @@ curl -O https://example.com/dl/docs/templates
 {
   "large_download_confirm_bytes": 1073741824,
   "wide_layout_extensions": "md,markdown",
-  "cdn_mode": false
+  "cdn_mode": false,
+  "guest_access_enabled": false
 }
 ```
+
+`guest_access_enabled` 表明全局访客密钥访问功能是否启用（仅开关位，不暴露密钥池）。
+
+### 访客密钥访问
+
+管理员在 "系统配置 → 访客密钥访问" 中维护密钥池和每目录授权。访客在网页端浏览被标记为"要求密钥访问"的托管目录时，必须先输入密钥（请求头或查询参数 `X-OpenShare-Guest-Key` / `guest_key`）。密钥校验通过后会保存在浏览器 `localStorage`（键名 `openshare-guest-key`）中，后续浏览自动附带。
+
+**注意**：下载端点（`/api/public/files/:id/download`、`/api/public/files/batch-download`、`/api/public/resources/batch-download`、`/api/public/files/:id/netcdf-dump*`、`/api/public/folders/:id/download`）与 `/dl/*` 直链均**不参与密钥校验**。
+
+#### `POST /api/public/guest-access/validate`
+
+公开端点，访客提交密钥值校验。请求：
+
+```json
+{ "value": "abc123" }
+```
+
+成功响应：
+```json
+{
+  "valid": true,
+  "key_id": "uuid-AbC…",
+  "unlocked_folder_ids": ["folder-A", "folder-B"]
+}
+```
+
+失败响应：
+```json
+{ "valid": false, "hint": "8-12位字母数字" }
+```
+
+`hint` 字段仅在管理员为密钥配置过提示文案时返回，且全局功能启用时才会带；功能关闭时任何 value 都返回 `{ "valid": false }` 不带 hint。
+
+#### `GET /api/admin/system/guest-access`
+
+超管读取全局密钥池。响应：
+```json
+{
+  "enabled": true,
+  "keys": [
+    { "id": "uuid-AbC…", "name": "游客A", "value": "abc123", "hint": "8-12位字母数字" }
+  ]
+}
+```
+
+#### `PUT /api/admin/system/guest-access`
+
+超管替换全局密钥池。请求：
+```json
+{
+  "enabled": true,
+  "keys": [
+    { "id": "uuid-AbC…", "name": "游客A", "value": "abc123", "hint": "8-12位字母数字" }
+  ]
+}
+```
+
+每个密钥必须有非空 `id` / `name` / `value`；`id` 缺失时服务端将视为非法。可执行空 `keys` 数组以清空密钥池。
+
+#### `PATCH /api/admin/resources/folders/:folderID/guest-keys`
+
+切换目录的访客密钥访问要求并替换允许的密钥 ID 列表。请求：
+
+```json
+{
+  "required": true,
+  "allowed_key_ids": ["uuid-AbC…", "uuid-XyZ…"]
+}
+```
+
+`required: false` 时清空 `allowed_key_ids`。需要 `resource_moderation` 权限。
 
 ### 上传与反馈
 
@@ -1442,6 +1514,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 #### `POST /api/admin/imports/local/:folderID/rescan`
 
 重新扫描托管目录，同步磁盘变更。需要 `resource_moderation` 权限。
+
+入口 `:folderID` 可以是托管根目录，也可以是任一非虚拟托管子目录；扫描范围包含该目录及其所有后代。
+虚拟目录（`is_virtual=true`）不可重新扫描；入口目录的 `source_path` 不可用（不存在或不可读）时返回 409。
 
 #### `GET /api/admin/folders/tree`
 

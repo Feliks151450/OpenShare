@@ -466,3 +466,36 @@ func (s *ResourceManagementService) PatchFolderCdnUrl(ctx context.Context, folde
 	}
 	return s.repo.PatchFolderCdnUrl(ctx, folderID, cdnURL, operatorID, operatorIP, logID, s.nowFunc())
 }
+
+// PatchFolderGuestKeys 切换目录的访客密钥访问要求并替换允许的密钥 ID 列表。
+// 该字段对托管根和子目录都生效，不要求根目录。
+func (s *ResourceManagementService) PatchFolderGuestKeys(ctx context.Context, folderID string, required bool, allowedKeyIDs []string, operatorID string, operatorIP string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return ErrManagedFolderNotFound
+	}
+	current, err := s.repo.FindFolderByID(ctx, folderID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrManagedFolderNotFound
+	}
+	// 简单校验：去重后非空 keyIDs 全部 trim
+	cleaned := make([]string, 0, len(allowedKeyIDs))
+	for _, k := range allowedKeyIDs {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		cleaned = append(cleaned, k)
+	}
+	if required && len(cleaned) == 0 {
+		return ErrInvalidResourceEdit
+	}
+	logID, err := identity.NewID()
+	if err != nil {
+		return fmt.Errorf("generate guest key log id: %w", err)
+	}
+	return s.repo.PatchFolderGuestKeys(ctx, folderID, required, cleaned, operatorID, operatorIP, logID, s.nowFunc())
+}

@@ -18,6 +18,51 @@ const defaultHeaders = {
   Accept: "application/json",
 } satisfies HeadersInit;
 
+/** 命中以下前缀的请求会被附加 X-OpenShare-Guest-Key 头（密钥头）。 */
+const BROWSE_ENDPOINT_PREFIXES = [
+  "/public/folders",
+  "/public/files",
+  "/public/search",
+  "/public/resolve-custom-path",
+  "/public/announcements",
+  "/public/file-tags",
+  "/public/guest-access/validate",
+];
+
+/** 以上前缀下不走密钥校验的端点（仅以 /public/files 为根的下载分支）。 */
+const DOWNLOAD_ENDPOINT_PATTERNS = [
+  /\/public\/files\/[^/]+\/download(\/|$)/,
+  /\/public\/files\/[^/]+\/netcdf-dump/,
+  /\/public\/files\/batch-download/,
+  /\/public\/resources\/batch-download/,
+  /\/public\/folders\/[^/]+\/download(\/|$)/,
+];
+
+interface GuestKeyAttachable {
+  headers: Headers;
+  url?: string;
+}
+
+function attachGuestAccessKey(target: GuestKeyAttachable, path: string) {
+  let keyFromStorage = "";
+  try {
+    // 仅在浏览器环境访问 localStorage
+    if (typeof window !== "undefined") {
+      keyFromStorage = window.localStorage.getItem("openshare-guest-key") ?? "";
+    }
+  } catch {
+    keyFromStorage = "";
+  }
+  if (!keyFromStorage) return;
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const isBrowse = BROWSE_ENDPOINT_PREFIXES.some((prefix) =>
+    normalized === prefix || normalized.startsWith(`${prefix}/`),
+  );
+  if (!isBrowse) return;
+  if (DOWNLOAD_ENDPOINT_PATTERNS.some((pattern) => pattern.test(normalized))) return;
+  target.headers.set("X-OpenShare-Guest-Key", keyFromStorage);
+}
+
 export class HttpClient {
   constructor(private readonly baseURL = "/api") {}
 
@@ -27,6 +72,8 @@ export class HttpClient {
     if (options.headers) {
       new Headers(options.headers).forEach((value, key) => headers.set(key, value));
     }
+
+    attachGuestAccessKey({ headers }, path);
 
     const response = await fetch(this.resolveURL(path), {
       ...options,
@@ -50,6 +97,18 @@ export class HttpClient {
 
   post<T>(path: string, body?: RequestOptions["body"], options?: RequestOptions) {
     return this.request<T>(path, { ...options, method: "POST", body });
+  }
+
+  put<T>(path: string, body?: RequestOptions["body"], options?: RequestOptions) {
+    return this.request<T>(path, { ...options, method: "PUT", body });
+  }
+
+  patch<T>(path: string, body?: RequestOptions["body"], options?: RequestOptions) {
+    return this.request<T>(path, { ...options, method: "PATCH", body });
+  }
+
+  delete<T>(path: string, body?: RequestOptions["body"], options?: RequestOptions) {
+    return this.request<T>(path, { ...options, method: "DELETE", body });
   }
 
   private resolveURL(path: string) {

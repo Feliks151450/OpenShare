@@ -53,6 +53,8 @@ func (h *SystemSettingHandler) GetPublicDownloadPolicy(ctx *gin.Context) {
 			resp["directory_cdn_urls"] = m
 		}
 	}
+	// 公开访客密钥访问状态（仅开关位，不暴露密钥池）。
+	resp["guest_access_enabled"] = policy.GuestAccess.Enabled
 	ctx.JSON(http.StatusOK, resp)
 }
 

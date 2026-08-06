@@ -51,6 +51,11 @@ func NewPublicCatalogRepository(db *gorm.DB) *PublicCatalogRepository {
 	return &PublicCatalogRepository{db: db}
 }
 
+// GetDB 暴露底层 gorm.DB 句柄（用于自定义轻量查询场景）。
+func (r *PublicCatalogRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 func (r *PublicCatalogRepository) ListPublicFolderFiles(ctx context.Context, query PublicFolderFileListQuery) ([]model.File, int64, error) {
 	base := r.db.WithContext(ctx).
 		Model(&model.File{}).
@@ -77,7 +82,7 @@ func (r *PublicCatalogRepository) ListPublicFolderFiles(ctx context.Context, que
 func (r *PublicCatalogRepository) ListManagedFileFeed(ctx context.Context, query PublicFileFeedQuery) ([]model.File, error) {
 	listQuery := r.db.WithContext(ctx).
 		Model(&model.File{}).
-		Scopes(FilesNotUnderHiddenPublicCatalogRoot())
+		Scopes(FilesNotUnderHiddenPublicCatalogRoot(), FilesNotUnderGuestKeyRequired())
 	for _, orderBy := range query.OrderBy {
 		listQuery = listQuery.Order(orderBy)
 	}
@@ -99,7 +104,7 @@ func (r *PublicCatalogRepository) ListRecentHotManagedFiles(ctx context.Context,
 	var files []model.File
 	if err := r.db.WithContext(ctx).
 		Model(&model.File{}).
-		Scopes(FilesNotUnderHiddenPublicCatalogRoot()).
+		Scopes(FilesNotUnderHiddenPublicCatalogRoot(), FilesNotUnderGuestKeyRequired()).
 		Select("files.*").
 		Joins("JOIN (?) AS hot ON hot.file_id = files.id", aggregated).
 		Order("hot.hot_downloads DESC").
@@ -136,6 +141,8 @@ func (r *PublicCatalogRepository) ListPublicFolders(ctx context.Context, parentI
 	} else {
 		query = query.Where("parent_id = ?", *parentID)
 	}
+	// 访客密钥访问：凡是自身或任意祖先设置了 guest_key_required 的目录都对访客不可见。
+	query = query.Scopes(FoldersNotUnderGuestKeyRequired())
 
 	var rows []PublicFolderRow
 	if err := query.Order("name ASC").Find(&rows).Error; err != nil {

@@ -14,6 +14,7 @@ var managedModels = []any{
 	&model.File{},
 	&model.FileTag{},
 	&model.FileTagAssignment{},
+	&model.FolderGuestKeyAssignment{},
 	&model.Submission{},
 	&model.Feedback{},
 	&model.Announcement{},

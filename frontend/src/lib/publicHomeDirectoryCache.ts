@@ -54,6 +54,8 @@ export interface FolderDetailResponse {
   download_policy?: "inherit" | "allow" | "deny";
   /** 仅托管根目录：为 true 时访客首页根列表不出现该托管树 */
   hide_public_catalog?: boolean;
+  /** 该目录（或其祖先）是否要求访客密钥访问 */
+  guest_key_required?: boolean;
   /** 虚拟目录：无物理磁盘路径，子文件通过 CDN 直链提供 */
   is_virtual?: boolean;
   /** 自定义访问路径，如 "doc" 对应 /doc 访问该文件夹 */
