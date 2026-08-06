@@ -5,7 +5,7 @@ import { useRouter } from "vue-router";
 import SurfaceCard from "../ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
-import { toastError, toastSuccess } from "../../lib/toast";
+import { toastError, toastInfo, toastSuccess, toastWarning } from "../../lib/toast";
 
 interface SystemPolicy {
   upload: {
@@ -415,6 +415,76 @@ async function patchFolderGuestKey(folderID: string, required: boolean, allowedK
   }
 }
 
+// 切换目录的"要求密钥访问"开关。
+// 后端要求开启时必须至少允许 1 个密钥，因此：
+// - 关闭：直接保存（后端自动清空允许的密钥列表）
+// - 开启：先乐观更新本地状态，让密钥选择下拉立即出现（下拉有 v-if="folder.guestKeyRequired"），
+//   由下拉的 change 事件发送真正的保存请求；密钥池为空则回滚并提示
+function toggleFolderGuestKey(folder: { guestKeyRequired: boolean; allowedGuestKeyIds: string[]; id: string }, checked: boolean) {
+  if (!checked) {
+    void patchFolderGuestKey(folder.id, false, []);
+    return true;
+  }
+  if (guestAccessKeys.value.length === 0) {
+    toastWarning("请先在下方密钥池中添加密钥，再开启密钥访问。");
+    return false;
+  }
+  folder.guestKeyRequired = true;
+  if (folder.allowedGuestKeyIds.length > 0) {
+    // 已有已选密钥：直接按当前选择保存
+    void patchFolderGuestKey(folder.id, true, [...folder.allowedGuestKeyIds]);
+  } else {
+    // 尚无已选密钥：提示用户在刚出现的下拉中选择密钥以完成保存
+    toastInfo("已开启，请在下拉中选择允许访问的密钥以完成保存。");
+  }
+  return true;
+}
+
+// —— 目录密钥选择器：按钮 + 弹出面板（替代原生多选框，同一时刻只打开一个）——
+const guestKeyPickerOpen = ref(false); // 面板是否打开
+const guestKeyPickerFolderId = ref(""); // 当前打开面板的目录 ID
+const guestKeyPickerDraft = ref<string[]>([]); // 面板内的临时选择，点"确定"才保存
+
+// 打开某目录的密钥选择面板：以当前已选密钥初始化草稿
+function openFolderGuestKeyPicker(folder: { id: string; allowedGuestKeyIds: string[] }) {
+  guestKeyPickerFolderId.value = folder.id;
+  guestKeyPickerDraft.value = [...folder.allowedGuestKeyIds];
+  guestKeyPickerOpen.value = true;
+}
+
+// 在面板内勾选/取消一个密钥（只改草稿，不请求后端）
+function toggleGuestKeyDraft(keyId: string) {
+  const draft = guestKeyPickerDraft.value;
+  const idx = draft.indexOf(keyId);
+  if (idx >= 0) {
+    draft.splice(idx, 1);
+  } else {
+    draft.push(keyId);
+  }
+}
+
+// 确定面板选择：草稿非空时按草稿保存；全部取消等价于关闭密钥访问（后端不接受空密钥列表）
+function confirmFolderGuestKeyPicker(folder: { id: string }) {
+  guestKeyPickerOpen.value = false;
+  if (guestKeyPickerDraft.value.length > 0) {
+    void patchFolderGuestKey(folder.id, true, [...guestKeyPickerDraft.value]);
+  } else {
+    void patchFolderGuestKey(folder.id, false, []);
+  }
+}
+
+// 密钥 ID → 显示名称（未找到时回退到 ID 本身）
+function guestKeyNameById(id: string) {
+  return guestAccessKeys.value.find((k) => k.id === id)?.name || id;
+}
+
+// 选择按钮文案：已选密钥的名称摘要
+function folderGuestKeySummary(folder: { allowedGuestKeyIds: string[] }) {
+  if (folder.allowedGuestKeyIds.length === 0) return "选择密钥";
+  const names = folder.allowedGuestKeyIds.map(guestKeyNameById);
+  return `已选 ${names.length} 个：${names.join("、")}`;
+}
+
 function downloadJsonBlob(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -731,29 +801,67 @@ function isManagedRootClientChild(path: string, root: string) {
                       class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                       @change="(e) => {
                         const target = e.target as HTMLInputElement;
-                        const next = target.checked;
-                        if (!next) {
-                          patchFolderGuestKey(folder.id, false, []);
-                        } else if (folder.allowedGuestKeyIds.length > 0) {
-                          patchFolderGuestKey(folder.id, true, [...folder.allowedGuestKeyIds]);
+                        // 开启但未选密钥时不会保存（返回 false），回滚勾选视觉状态
+                        if (!toggleFolderGuestKey(folder, target.checked)) {
+                          target.checked = false;
                         }
                       }"
                     />
                     <span class="text-xs font-medium text-slate-700">要求密钥访问</span>
                   </label>
-                  <select
-                    v-if="folder.guestKeyRequired"
-                    multiple
-                    class="field h-9 min-w-0 flex-1 text-sm"
-                    :value="folder.allowedGuestKeyIds"
-                    @change="(e) => {
-                      const target = e.target as HTMLSelectElement;
-                      const selected = Array.from(target.selectedOptions).map((o) => o.value);
-                      patchFolderGuestKey(folder.id, true, selected);
-                    }"
-                  >
-                    <option v-for="k in guestAccessKeys" :key="k.id" :value="k.id">{{ k.name || k.id }}</option>
-                  </select>
+                  <div v-if="folder.guestKeyRequired" class="relative min-w-0 flex-1">
+                    <!-- 打开密钥选择面板的按钮，展示当前已选摘要 -->
+                    <button
+                      type="button"
+                      class="field h-9 w-full min-w-0 truncate text-left text-sm"
+                      @click="openFolderGuestKeyPicker(folder)"
+                    >
+                      {{ folderGuestKeySummary(folder) }}
+                    </button>
+                    <!-- 透明遮罩：点击面板外任意位置关闭并丢弃草稿 -->
+                    <div
+                      v-if="guestKeyPickerOpen && guestKeyPickerFolderId === folder.id"
+                      class="fixed inset-0 z-10"
+                      @click="guestKeyPickerOpen = false"
+                    ></div>
+                    <!-- 密钥选择面板：本地草稿，点"确定"才保存 -->
+                    <div
+                      v-if="guestKeyPickerOpen && guestKeyPickerFolderId === folder.id"
+                      class="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-950/[0.06]"
+                      @click.stop
+                    >
+                      <div class="mb-2 text-xs font-semibold text-slate-700">允许访问的密钥</div>
+                      <div v-if="guestAccessKeys.length === 0" class="text-xs text-slate-500">
+                        暂无密钥，请先在下方密钥池中添加。
+                      </div>
+                      <div v-else class="max-h-44 space-y-1 overflow-y-auto">
+                        <label
+                          v-for="k in guestAccessKeys"
+                          :key="k.id"
+                          class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
+                        >
+                          <input
+                            type="checkbox"
+                            :checked="guestKeyPickerDraft.includes(k.id)"
+                            class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            @change="toggleGuestKeyDraft(k.id)"
+                          />
+                          <span class="truncate">{{ k.name || k.id }}</span>
+                        </label>
+                      </div>
+                      <div class="mt-2 flex items-center justify-end gap-2 border-t border-slate-100 pt-2">
+                        <button type="button" class="btn-secondary" @click="guestKeyPickerOpen = false">取消</button>
+                        <button
+                          type="button"
+                          class="btn-primary"
+                          :disabled="guestAccessKeys.length === 0"
+                          @click="confirmFolderGuestKeyPicker(folder)"
+                        >
+                          确定
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
