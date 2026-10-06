@@ -30,6 +30,10 @@ func (s *ImportService) ImportLocalDirectory(ctx context.Context, input LocalImp
 	if rootPath == "" || !filepath.IsAbs(rootPath) {
 		return nil, ErrInvalidImportPath
 	}
+	// 白名单校验：与目录浏览共用 import.allowed_roots
+	if !s.pathAllowedByRoots(rootPath) {
+		return nil, ErrInvalidImportPath
+	}
 
 	entries, err := s.storage.ScanDirectory(rootPath)
 	if err != nil {

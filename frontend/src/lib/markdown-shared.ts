@@ -30,7 +30,8 @@ export function escapeHtml(value: string) {
 export function isSafeImageUrlForSrc(url: string): boolean {
   const u = url.trim().toLowerCase();
   if (!u) return false;
-  if (u.startsWith("javascript:") || u.startsWith("data:") || u.startsWith("vbscript:")) {
+  if (u.startsWith("javascript:") || u.startsWith("data:") || u.startsWith("vbscript:")
+    || u.startsWith("blob:") || u.startsWith("file:")) {
     return false;
   }
   return true;
@@ -57,4 +58,37 @@ export function resolveMarkdownImageUrlToHref(raw: string): string {
   } catch {
     return u;
   }
+}
+
+/** 与 marked 的 encodeURI 行为一致：失败返回 null（调用方回退为纯文本） */
+export function encodeHrefLikeMarked(href: string): string | null {
+  try {
+    return encodeURI(href);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 链接 renderer 主体（无 marked 类型依赖，主线程与 Worker 共用）。
+ * 外链（http/https）补 target=_blank + rel=noopener，站内链接保持默认导航。
+ */
+export function markdownLinkHtml(
+  href: string,
+  title: string | null | undefined,
+  inner: string,
+): string {
+  const encoded = encodeHrefLikeMarked(String(href ?? ""));
+  if (encoded === null) {
+    return inner;
+  }
+  const titleAttr =
+    title != null && String(title).trim() !== ""
+      ? ` title="${escapeHtml(String(title))}"`
+      : "";
+  const hrefAttr = escapeHtml(encoded);
+  if (/^https?:\/\//i.test(encoded)) {
+    return `<a href="${hrefAttr}" target="_blank" rel="noopener noreferrer"${titleAttr}>${inner}</a>`;
+  }
+  return `<a href="${hrefAttr}"${titleAttr}>${inner}</a>`;
 }

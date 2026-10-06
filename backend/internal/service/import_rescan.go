@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"openshare/backend/internal/model"
 	"openshare/backend/internal/repository"
@@ -24,7 +25,14 @@ type ManagedDirectoryRescanResult struct {
 	DeletedFiles   int    `json:"deleted_files"`
 }
 
+// rescanMutex 串行化全部重新扫描：磁盘快照与 DB 快照之间的 diff 无锁，
+// 并发 rescan 同一/嵌套目录会产生互相污染的删除集。
+var rescanMutex sync.Mutex
+
 func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, adminID, operatorIP string) (*ManagedDirectoryRescanResult, error) {
+	rescanMutex.Lock()
+	defer rescanMutex.Unlock()
+
 	// 重新扫描支持任意非虚拟托管目录：根目录或子目录均可，扫描范围包含该目录及其所有后代。
 	// 虚拟目录没有磁盘对应，按"目录不可用"返回。
 	rootFolder, err := s.repository.FindFolderByID(ctx, strings.TrimSpace(folderID))
@@ -46,6 +54,10 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 	if err != nil || !info.IsDir() {
 		return nil, &ManagedDirectoryUnavailableError{Path: rootPath}
 	}
+
+	// 磁盘扫描时刻：快照窗口内（此刻之后）新落库的文件不参与删除判定，
+	// 防止扫描期间并发上传/审批的记录被误判为"磁盘不存在"而从 DB 删除。
+	scanStartedAt := s.nowFunc()
 
 	entries, err := s.storage.ScanDirectory(rootPath)
 	if err != nil {
@@ -217,6 +229,11 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 				continue
 			}
 		}
+		// 跳过扫描开始后才落库的记录：它们可能来自扫描期间的并发上传/审批，
+		// 其磁盘文件未进入本次快照，删除会造成"记录消失 + 磁盘孤儿"。
+		if !file.CreatedAt.Before(scanStartedAt) {
+			continue
+		}
 		deletedFileIDs = append(deletedFileIDs, file.ID)
 	}
 	result.DeletedFiles = len(deletedFileIDs)
@@ -231,6 +248,14 @@ func (s *ImportService) RescanManagedDirectory(ctx context.Context, folderID, ad
 		}
 		// 跳过虚拟目录：没有磁盘对应，不应被重新扫描删除
 		if folder.IsVirtual {
+			continue
+		}
+		// 跳过非虚拟但 SourcePath 为空的目录（异常数据）：不应被静默删除
+		if folder.SourcePath == nil || strings.TrimSpace(*folder.SourcePath) == "" {
+			continue
+		}
+		// 同文件：扫描窗口内新建的目录记录不删
+		if !folder.CreatedAt.Before(scanStartedAt) {
 			continue
 		}
 		deletedFolderIDs = append(deletedFolderIDs, folder.ID)

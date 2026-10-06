@@ -485,6 +485,43 @@ func (s *Service) RemoveManagedFilePermanently(diskPath string) error {
 	return nil
 }
 
+// CopyManagedFile 把托管文件复制为备份副本（ReplaceFile 替换前备份旧内容用）。
+func CopyManagedFile(srcPath, dstPath string) error {
+	srcPath = filepath.Clean(strings.TrimSpace(srcPath))
+	dstPath = filepath.Clean(strings.TrimSpace(dstPath))
+	if srcPath == "" || dstPath == "" {
+		return fmt.Errorf("copy source and destination must not be empty")
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open copy source: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create copy destination: %w", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		os.Remove(dstPath)
+		return fmt.Errorf("copy managed file: %w", err)
+	}
+	if err := dst.Sync(); err != nil {
+		dst.Close()
+		os.Remove(dstPath)
+		return fmt.Errorf("sync copy destination: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(dstPath)
+		return fmt.Errorf("close copy destination: %w", err)
+	}
+	if info, err := src.Stat(); err == nil {
+		_ = os.Chmod(dstPath, info.Mode().Perm())
+	}
+	return nil
+}
+
 // RemoveManagedDirectoryPermanently recursively deletes a managed directory tree from disk.
 func (s *Service) RemoveManagedDirectoryPermanently(dirPath string) error {
 	dirPath = filepath.Clean(strings.TrimSpace(dirPath))

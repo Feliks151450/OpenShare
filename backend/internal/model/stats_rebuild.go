@@ -15,14 +15,17 @@ func RebuildFolderStatsTx(tx *gorm.DB) error {
 		return err
 	}
 
+	// depth 列 + 上限 200：parent_id 数据成环时递归 CTE 会无限展开，
+	// 该查询在每次启动的 EnsureSchema 中执行，一旦挂死整个进程无法启动。
 	query := `
-		WITH RECURSIVE folder_tree(root_id, id) AS (
-			SELECT id AS root_id, id
+		WITH RECURSIVE folder_tree(root_id, id, depth) AS (
+			SELECT id AS root_id, id, 0 AS depth
 			FROM folders
 			UNION ALL
-			SELECT folder_tree.root_id, folders.id
+			SELECT folder_tree.root_id, folders.id, folder_tree.depth + 1
 			FROM folders
 			JOIN folder_tree ON folders.parent_id = folder_tree.id
+			WHERE folder_tree.depth < 200
 		),
 		aggregated AS (
 			SELECT

@@ -102,6 +102,94 @@ func (r *ModerationRepository) BuildFolderDisplayPath(ctx context.Context, folde
 	return BuildFolderDisplayPath(ctx, r.db, folderID)
 }
 
+// ApproveSubmissionTx 在传入事务内创建文件记录、更新提交状态并调整统计。
+// File 的 AfterCreate 钩子统计在事务内自动入账。
+func ApproveSubmissionTx(
+	tx *gorm.DB,
+	submissionID string,
+	adminID string,
+	operatorIP string,
+	reviewedAt time.Time,
+	targetFolderID string,
+	finalFileName string,
+	finalRelativePath string,
+) error {
+	var submission model.Submission
+	if err := tx.Where("id = ?", submissionID).Take(&submission).Error; err != nil {
+		return fmt.Errorf("reload submission: %w", err)
+	}
+	if submission.Status != model.SubmissionStatusPending {
+		return fmt.Errorf("submission is not pending")
+	}
+
+	reviewerID := adminID
+	fileID, err := newOperationLogID()
+	if err != nil {
+		return fmt.Errorf("generate approved file id: %w", err)
+	}
+	file := &model.File{
+		ID:            fileID,
+		FolderID:      &targetFolderID,
+		Name:          finalFileName,
+		Description:   submission.Description,
+		Extension:     submission.Extension,
+		MimeType:      submission.MimeType,
+		Size:          submission.Size,
+		DownloadCount: 0,
+		CreatedAt:     submission.CreatedAt,
+		UpdatedAt:     reviewedAt,
+	}
+	cs := tx
+	if file.CustomPath == "" {
+		cs = tx.Omit("custom_path")
+	}
+	if err := cs.Create(file).Error; err != nil {
+		return fmt.Errorf("create approved file: %w", err)
+	}
+
+	if err := tx.Model(&model.Submission{}).
+		Where("id = ?", submissionID).
+		Updates(map[string]any{
+			"name":          finalFileName,
+			"relative_path": finalRelativePath,
+			"file_id":       fileID,
+			"status":        model.SubmissionStatusApproved,
+			"review_reason": "",
+			"staging_path":  "",
+			"reviewer_id":   &reviewerID,
+			"reviewed_at":   &reviewedAt,
+			"updated_at":    reviewedAt,
+		}).Error; err != nil {
+		return fmt.Errorf("approve submission: %w", err)
+	}
+
+	if err := model.AdjustSystemStatsTx(tx, model.SystemStatsDelta{
+		PendingSubmissions: -1,
+	}); err != nil {
+		return fmt.Errorf("adjust approved submission system stats: %w", err)
+	}
+
+	logID, err := newOperationLogID()
+	if err != nil {
+		return fmt.Errorf("generate operation log id: %w", err)
+	}
+	entry := &model.OperationLog{
+		ID:         logID,
+		AdminID:    &reviewerID,
+		Action:     "submission_approved",
+		TargetType: "submission",
+		TargetID:   submissionID,
+		Detail:     finalFileName,
+		IP:         operatorIP,
+		CreatedAt:  reviewedAt,
+	}
+	if err := tx.Create(entry).Error; err != nil {
+		return fmt.Errorf("create operation log: %w", err)
+	}
+
+	return nil
+}
+
 func (r *ModerationRepository) ApproveSubmission(
 	ctx context.Context,
 	submissionID string,
@@ -113,80 +201,7 @@ func (r *ModerationRepository) ApproveSubmission(
 	finalRelativePath string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var submission model.Submission
-		if err := tx.Where("id = ?", submissionID).Take(&submission).Error; err != nil {
-			return fmt.Errorf("reload submission: %w", err)
-		}
-		if submission.Status != model.SubmissionStatusPending {
-			return fmt.Errorf("submission is not pending")
-		}
-
-		reviewerID := adminID
-		fileID, err := newOperationLogID()
-		if err != nil {
-			return fmt.Errorf("generate approved file id: %w", err)
-		}
-		file := &model.File{
-			ID:            fileID,
-			FolderID:      &targetFolderID,
-			Name:          finalFileName,
-			Description:   submission.Description,
-			Extension:     submission.Extension,
-			MimeType:      submission.MimeType,
-			Size:          submission.Size,
-			DownloadCount: 0,
-			CreatedAt:     submission.CreatedAt,
-			UpdatedAt:     reviewedAt,
-		}
-		cs := tx
-		if file.CustomPath == "" {
-			cs = tx.Omit("custom_path")
-		}
-		if err := cs.Create(file).Error; err != nil {
-			return fmt.Errorf("create approved file: %w", err)
-		}
-
-		if err := tx.Model(&model.Submission{}).
-			Where("id = ?", submissionID).
-			Updates(map[string]any{
-				"name":          finalFileName,
-				"relative_path": finalRelativePath,
-				"file_id":       fileID,
-				"status":        model.SubmissionStatusApproved,
-				"review_reason": "",
-				"staging_path":  "",
-				"reviewer_id":   &reviewerID,
-				"reviewed_at":   &reviewedAt,
-				"updated_at":    reviewedAt,
-			}).Error; err != nil {
-			return fmt.Errorf("approve submission: %w", err)
-		}
-
-		if err := model.AdjustSystemStatsTx(tx, model.SystemStatsDelta{
-			PendingSubmissions: -1,
-		}); err != nil {
-			return fmt.Errorf("adjust approved submission system stats: %w", err)
-		}
-
-		logID, err := newOperationLogID()
-		if err != nil {
-			return fmt.Errorf("generate operation log id: %w", err)
-		}
-		entry := &model.OperationLog{
-			ID:         logID,
-			AdminID:    &reviewerID,
-			Action:     "submission_approved",
-			TargetType: "submission",
-			TargetID:   submissionID,
-			Detail:     finalFileName,
-			IP:         operatorIP,
-			CreatedAt:  reviewedAt,
-		}
-		if err := tx.Create(entry).Error; err != nil {
-			return fmt.Errorf("create operation log: %w", err)
-		}
-
-		return nil
+		return ApproveSubmissionTx(tx, submissionID, adminID, operatorIP, reviewedAt, targetFolderID, finalFileName, finalRelativePath)
 	})
 }
 

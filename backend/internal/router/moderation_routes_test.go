@@ -221,7 +221,11 @@ func createPendingModerationRecord(t *testing.T, cfg config.Config, db *gorm.DB,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	if err := db.Create(folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(folder).Error; err != nil {
 		t.Fatalf("create folder failed: %v", err)
 	}
 

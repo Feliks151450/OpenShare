@@ -108,7 +108,7 @@ func (r *SearchRepository) SearchCandidates(ctx context.Context, query SearchCan
 func (r *SearchRepository) searchFilesForCandidates(ctx context.Context, query SearchCandidateQuery) ([]model.File, int64, error) {
 	db := r.db.WithContext(ctx).
 		Model(&model.File{}).
-		Scopes(FilesNotUnderHiddenPublicCatalogRoot())
+		Scopes(FilesNotUnderHiddenPublicCatalogRoot(), FilesNotUnderGuestKeyRequired())
 
 	if query.ScopeFolderIDs != nil {
 		db = db.Where("folder_id IN ?", query.ScopeFolderIDs)
@@ -139,7 +139,7 @@ func (r *SearchRepository) searchFilesForCandidates(ctx context.Context, query S
 func (r *SearchRepository) searchFoldersForCandidates(ctx context.Context, query SearchCandidateQuery) ([]model.Folder, int64, error) {
 	db := r.db.WithContext(ctx).
 		Model(&model.Folder{}).
-		Scopes(FoldersNotUnderHiddenPublicCatalogRoot())
+		Scopes(FoldersNotUnderHiddenPublicCatalogRoot(), FoldersNotUnderGuestKeyRequired())
 
 	if query.ScopeFolderIDs != nil {
 		db = db.Where("id IN ?", query.ScopeFolderIDs)

@@ -5,6 +5,7 @@
  */
 
 import { computed, ref, watch } from "vue";
+import { safeLocalSet } from "../lib/safeStorage";
 
 /** 收藏项类型 */
 export interface FavoriteItem {
@@ -52,7 +53,7 @@ function loadFromStorage(): FavoriteItem[] {
 
 /** 将收藏数据持久化到 localStorage */
 function saveToStorage(items: FavoriteItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  safeLocalSet(STORAGE_KEY, JSON.stringify(items));
 }
 
 /** 监听数据变化自动持久化 */

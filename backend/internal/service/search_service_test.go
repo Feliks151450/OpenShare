@@ -263,14 +263,22 @@ func TestSearchEscapesLikeWildcards(t *testing.T) {
 
 func mustCreateSearchFile(t *testing.T, db *gorm.DB, file model.File) {
 	t.Helper()
-	if err := db.Create(&file).Error; err != nil {
+	createSQL := db
+	if file.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(&file).Error; err != nil {
 		t.Fatalf("create file %q failed: %v", file.ID, err)
 	}
 }
 
 func mustCreateSearchFolder(t *testing.T, db *gorm.DB, folder model.Folder) {
 	t.Helper()
-	if err := db.Create(&folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(&folder).Error; err != nil {
 		t.Fatalf("create folder %q failed: %v", folder.ID, err)
 	}
 }

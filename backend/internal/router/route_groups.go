@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 
+	"openshare/backend/internal/config"
 	"openshare/backend/internal/middleware"
 	"openshare/backend/internal/model"
 )
@@ -11,8 +12,9 @@ func registerHealthRoutes(engine *gin.Engine, healthCheck gin.HandlerFunc) {
 	engine.GET("/healthz", healthCheck)
 }
 
-func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
-	api.POST("/visits", handlers.siteVisit.Record)
+func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers, cfg config.Config) {
+	// 公开写入口统一限流：上传/登录/密钥校验走 upload 规则，搜索/访问打点走 search 规则
+	api.POST("/visits", middleware.RateLimit("visits", cfg.RateLimit.Search), handlers.siteVisit.Record)
 
 	public := api.Group("/public")
 	// 访客密钥：仅在浏览类路由组挂载（下载 / batch / /dl/* 不参与密钥校验）。
@@ -23,9 +25,9 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.GET("/folders/:folderID/files", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListPublicFolderFiles)
 	public.GET("/folders/:folderID", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.GetPublicFolderDetail)
 	public.GET("/resolve-custom-path", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ResolveCustomPath)
-	public.GET("/search", middleware.ExtractGuestKeyHeader(), handlers.search.Search)
-	// 公开 validate 端点（自身不要求密钥，但允许在已携 header 时直接通过）
-	public.POST("/guest-access/validate", middleware.ExtractGuestKeyHeader(), handlers.guestAccess.Validate)
+	public.GET("/search", middleware.ExtractGuestKeyHeader(), middleware.RateLimit("search", cfg.RateLimit.Search), handlers.search.Search)
+	// 公开 validate 端点（自身不要求密钥，但允许在已携 header 时直接通过）；限流防密钥爆破
+	public.POST("/guest-access/validate", middleware.ExtractGuestKeyHeader(), middleware.RateLimit("guest-access", cfg.RateLimit.Upload), handlers.guestAccess.Validate)
 	// 下载 / 直链：不在这里挂中间件，密钥不参与校验。
 	public.POST("/files/batch-download", handlers.publicDownload.DownloadBatch)
 	public.POST("/resources/batch-download", handlers.publicDownload.DownloadResourceBatch)
@@ -40,13 +42,15 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 	public.GET("/file-tags", handlers.fileTag.ListPublicDefinitions)
 	public.POST("/feedback", handlers.feedback.Create)
 	public.GET("/feedback/:receiptCode", handlers.feedback.LookupByReceiptCode)
-	public.POST("/submissions", handlers.publicUpload.CreateSubmission)
+	// 上传是重量级操作且无鉴权，按 upload 规则限流（默认 10 次/分钟/IP）
+	public.POST("/submissions", middleware.RateLimit("submissions", cfg.RateLimit.Upload), handlers.publicUpload.CreateSubmission)
 	public.GET("/submissions/:receiptCode", handlers.publicSubmission.LookupByReceiptCode)
 }
 
-func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
+func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers, cfg config.Config) {
 	admin := api.Group("/admin")
-	admin.POST("/session/login", handlers.adminAuth.Login)
+	// 登录端点限流（与上传同级），配合无账号锁定机制降低爆破可行性
+	admin.POST("/session/login", middleware.RateLimit("login", cfg.RateLimit.Upload), handlers.adminAuth.Login)
 	admin.POST("/session/logout", handlers.adminAuth.Logout)
 
 	adminProtected := admin.Group("")
@@ -58,7 +62,10 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		adminProtected.GET("/api-tokens", handlers.apiToken.List)
 		adminProtected.POST("/api-tokens", handlers.apiToken.Create)
 		adminProtected.DELETE("/api-tokens/:tokenID", handlers.apiToken.Delete)
-	adminProtected.GET("/operation-logs", handlers.operationLog.List)
+	adminProtected.GET("/operation-logs",
+		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
+		handlers.operationLog.List,
+	)
 
 	adminProtected.GET(
 		"/announcements",
@@ -130,9 +137,18 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.imports.RescanManagedDirectory,
 	)
-	adminProtected.GET("/folders/tree", handlers.imports.GetFolderTree)
-	adminProtected.GET("/export/global", handlers.export_.ExportGlobal)
-	adminProtected.GET("/export/directory/:folderID", handlers.export_.ExportDirectory)
+	adminProtected.GET("/folders/tree",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.imports.GetFolderTree,
+	)
+	adminProtected.GET("/export/global",
+		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
+		handlers.export_.ExportGlobal,
+	)
+	adminProtected.GET("/export/directory/:folderID",
+		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
+		handlers.export_.ExportDirectory,
+	)
 	adminProtected.GET(
 			"/resources/folders",
 			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
@@ -148,8 +164,14 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 			handlers.resourceManagement.CreateVirtualFolder,
 		)
-		adminProtected.GET("/resources/files", handlers.resourceManagement.ListFiles)
-		adminProtected.GET("/resources/check-custom-path", handlers.resourceManagement.CheckCustomPath)
+		adminProtected.GET("/resources/files",
+			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+			handlers.resourceManagement.ListFiles,
+		)
+		adminProtected.GET("/resources/check-custom-path",
+			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+			handlers.resourceManagement.CheckCustomPath,
+		)
 		adminProtected.PUT(
 		"/resources/folders/:folderID",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
@@ -251,7 +273,10 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers) {
 		handlers.resourceManagement.DeleteFolder,
 	)
 
-	adminProtected.GET("/admins", handlers.adminManagement.ListAdmins)
+	adminProtected.GET("/admins",
+		middleware.RequireAdminPermission(model.AdminPermissionManageAdmins),
+		handlers.adminManagement.ListAdmins,
+	)
 	adminProtected.POST(
 		"/admins",
 		middleware.RequireAdminPermission(model.AdminPermissionManageAdmins),

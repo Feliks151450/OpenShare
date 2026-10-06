@@ -24,3 +24,13 @@ func NewID() (string, error) {
 		hex.EncodeToString(raw[10:16]),
 	), nil
 }
+
+// MustNewID 同 NewID，但随机源失败时 panic（仅用于无法返回错误的辅助场景，
+// 如构造临时文件名；随机源失败在正常运行中不可能发生）。
+func MustNewID() string {
+	id, err := NewID()
+	if err != nil {
+		panic(fmt.Sprintf("identity.MustNewID: %v", err))
+	}
+	return id
+}

@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../templatesWithNodejs/vscode-office/vditor"
+		}
+	],
+  "settings": {}
+}

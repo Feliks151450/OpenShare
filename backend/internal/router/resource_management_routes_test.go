@@ -219,7 +219,12 @@ func createManagedTestFile(t *testing.T, db *gorm.DB, folderID *string, original
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := db.Create(file).Error; err != nil {
+	// 与生产写入路径一致：空 custom_path 跳过插入，避免 UNIQUE 索引冲突
+	createSQL := db
+	if file.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(file).Error; err != nil {
 		t.Fatalf("create managed test file failed: %v", err)
 	}
 

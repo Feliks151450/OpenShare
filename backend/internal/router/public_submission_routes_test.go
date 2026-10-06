@@ -131,7 +131,11 @@ func createFileForSubmission(t *testing.T, db *gorm.DB, submissionID string, dow
 		CreatedAt:     time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC),
 		UpdatedAt:     time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC),
 	}
-	if err := db.Create(file).Error; err != nil {
+	createSQL := db
+	if file.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(file).Error; err != nil {
 		t.Fatalf("create file for submission failed: %v", err)
 	}
 	if err := db.Model(&model.Submission{}).Where("id = ?", submissionID).Update("file_id", file.ID).Error; err != nil {

@@ -69,7 +69,10 @@ fi
 
 echo "==> 安装前端依赖"
 cd "$ROOT_DIR/frontend"
-npm install > "$FRONTEND_LOG" 2>&1
+if ! npm install > "$FRONTEND_LOG" 2>&1; then
+  echo "错误: npm install 失败，详见 $FRONTEND_LOG"
+  exit 1
+fi
 
 echo "==> 启动前端开发服务器"
 npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1 &
@@ -80,7 +83,13 @@ echo "==> 启动后端服务"
 mkdir -p "$ROOT_DIR/backend/web/dist"
 touch "$ROOT_DIR/backend/web/dist/.gitkeep"
 cd "$ROOT_DIR/backend"
-go run ./cmd/server > "$BACKEND_LOG" 2>&1 &
+# go build 产出真实二进制再运行：kill BACKEND_PID 即终止服务本身，
+# 不会像 go run 那样留下孤儿服务进程占用 :8080
+if ! go build -o "$LOCAL_DATA_DIR/openshare-dev" ./cmd/server; then
+  echo "错误: 后端编译失败，详见 $BACKEND_LOG"
+  exit 1
+fi
+"$LOCAL_DATA_DIR/openshare-dev" > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 
 echo
@@ -108,5 +117,12 @@ done
 
 echo "按 Ctrl+C 停止服务"
 
-trap 'kill $FRONTEND_PID $BACKEND_PID 2>/dev/null' EXIT
+# go run 是包装器，直接 kill 它不会终止真实服务进程（golang/go#40467），
+# 需要先用 exec 让 shell 进程本身成为后端，或以进程组为单位终止。
+# 这里改用 go build + 直接运行二进制：BACKEND_PID 就是真实服务进程。
+cleanup() {
+  kill "$FRONTEND_PID" "$BACKEND_PID" 2>/dev/null
+  wait "$FRONTEND_PID" "$BACKEND_PID" 2>/dev/null
+}
+trap cleanup EXIT
 wait

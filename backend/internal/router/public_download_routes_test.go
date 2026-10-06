@@ -105,7 +105,8 @@ func TestPublicFileDetailReturnsMetadata(t *testing.T) {
 	file := createRepositoryFileForDownload(t, cfg, db, folder, "notes.txt", []byte("hello"))
 	file.MimeType = "text/plain"
 	file.Description = "detail"
-	if err := db.Save(file).Error; err != nil {
+	// 与生产写入路径一致：空 custom_path 跳过插入，避免 UNIQUE 索引冲突
+	if err := db.Model(file).Updates(map[string]any{"mime_type": "text/plain", "description": "detail"}).Error; err != nil {
 		t.Fatalf("save detail file failed: %v", err)
 	}
 	engine := New(db, cfg, newRouterSessionManager(db))
@@ -118,12 +119,14 @@ func TestPublicFileDetailReturnsMetadata(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		ID            string `json:"id"`
-		Extension     string `json:"extension"`
-		FolderID      string `json:"folder_id"`
-		Description   string `json:"description"`
-		Path          string `json:"path"`
-		StoragePath   string `json:"storage_path"`
+		ID          string `json:"id"`
+		Extension   string `json:"extension"`
+		FolderID    string `json:"folder_id"`
+		Description string `json:"description"`
+		Path        string `json:"path"`
+		// storage_path 不再向匿名访客返回（防服务器路径泄露），仅管理员可见
+		StoragePath string `json:"storage_path"`
+		IsVirtual   bool   `json:"is_virtual"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode detail response: %v", err)
@@ -134,9 +137,11 @@ func TestPublicFileDetailReturnsMetadata(t *testing.T) {
 	if response.Path != folder.Name {
 		t.Fatalf("expected file path %q, got %q", folder.Name, response.Path)
 	}
-	expectedDisk := filepath.Join(*folder.SourcePath, file.Name)
-	if response.StoragePath != expectedDisk {
-		t.Fatalf("expected storage_path %q, got %q", expectedDisk, response.StoragePath)
+	if response.StoragePath != "" {
+		t.Fatalf("storage_path must not be exposed to anonymous visitors, got %q", response.StoragePath)
+	}
+	if response.IsVirtual {
+		t.Fatalf("physical file must not be flagged virtual")
 	}
 	if response.FolderID != folder.ID {
 		t.Fatalf("expected folder_id %q for managed file, got %q", folder.ID, response.FolderID)
@@ -148,13 +153,11 @@ func TestPublicBatchDownloadStreamsZip(t *testing.T) {
 	db := newRouterTestDB(t)
 	folder := createPublicDownloadFolder(t, db, nil, "批量下载")
 	first := createRepositoryFileForDownload(t, cfg, db, folder, "a.txt", []byte("alpha"))
-	first.MimeType = "text/plain"
-	if err := db.Save(first).Error; err != nil {
+	if err := db.Model(first).Update("mime_type", "text/plain").Error; err != nil {
 		t.Fatalf("save first batch file failed: %v", err)
 	}
 	second := createRepositoryFileForDownload(t, cfg, db, folder, "b.txt", []byte("beta"))
-	second.MimeType = "text/plain"
-	if err := db.Save(second).Error; err != nil {
+	if err := db.Model(second).Update("mime_type", "text/plain").Error; err != nil {
 		t.Fatalf("save second batch file failed: %v", err)
 	}
 
@@ -191,15 +194,12 @@ func TestPublicFolderDownloadStreamsZip(t *testing.T) {
 	nestedFolder := createPublicDownloadFolder(t, db, &rootFolder.ID, "讲义")
 
 	rootFile := createRepositoryFileForDownload(t, cfg, db, rootFolder, "overview.txt", []byte("overview"))
-	rootFile.MimeType = "text/plain"
-	if err := db.Save(rootFile).Error; err != nil {
+	if err := db.Model(rootFile).Update("mime_type", "text/plain").Error; err != nil {
 		t.Fatalf("save root folder file failed: %v", err)
 	}
 
 	nestedFile := createRepositoryFileForDownload(t, cfg, db, nestedFolder, "chapter1.pdf", []byte("chapter"))
-	if err := db.Save(nestedFile).Error; err != nil {
-		t.Fatalf("save nested folder file failed: %v", err)
-	}
+	_ = nestedFile
 
 	engine := New(db, cfg, newRouterSessionManager(db))
 	request := httptest.NewRequest(http.MethodGet, "/api/public/folders/"+rootFolder.ID+"/download", nil)
@@ -452,7 +452,11 @@ func createRepositoryFileForDownload(t *testing.T, cfg config.Config, db *gorm.D
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := db.Create(file).Error; err != nil {
+	createSQL := db
+	if file.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(file).Error; err != nil {
 		t.Fatalf("create download file failed: %v", err)
 	}
 
@@ -475,7 +479,11 @@ func createPublicDownloadFolder(t *testing.T, db *gorm.DB, parentID *string, nam
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	if err := db.Create(folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(folder).Error; err != nil {
 		t.Fatalf("create public download folder failed: %v", err)
 	}
 

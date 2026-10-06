@@ -1,4 +1,5 @@
 import type { Router } from "vue-router";
+import { safeLocalSet } from "./safeStorage";
 
 import { favoriteItems, type FavoriteItem } from "../composables/useFavorites";
 import { readGuestAccessKey, useGuestAccessKey } from "../composables/useGuestAccessKey";
@@ -125,15 +126,15 @@ async function navigate(router: Router, loc: Parameters<Router["push"]>[0], opts
 }
 
 function persistHomeListView(mode: HomeListViewMode) {
-  window.localStorage.setItem("public-home-view-mode", mode);
+  safeLocalSet("public-home-view-mode", mode);
 }
 
 function persistHomeSortMode(mode: HomeListSortMode) {
-  window.localStorage.setItem("public-home-sort-mode", mode);
+  safeLocalSet("public-home-sort-mode", mode);
 }
 
 function persistHomeSortDirection(direction: HomeListSortDirection) {
-  window.localStorage.setItem("public-home-sort-direction", direction);
+  safeLocalSet("public-home-sort-direction", direction);
 }
 
 export function mountOpenShareConsole(router: Router): void {

@@ -24,16 +24,21 @@ import {
   LayoutGrid,
   Link2,
   List,
+  ListTree,
   NotebookText,
   PanelRightOpen,
   Plus,
   Check,
+  Search,
   Star,
   Trash2,
   Upload,
+  X,
 } from "lucide-vue-next";
 
 import { type InfoPanelCardItem } from "../../components/shared/InfoPanelCard.vue";
+import MarkdownEditor from "../../components/markdown/MarkdownEditor.vue";
+import MarkdownPreview from "../../components/markdown/MarkdownPreview.vue";
 import PublicFileDetailView from "./PublicFileDetailView.vue";
 import SearchSection from "../../components/resources/SearchSection.vue";
 import { useNavActions } from "../../composables/useNavActions";
@@ -45,12 +50,11 @@ import { useGuestAccessKey } from "../../composables/useGuestAccessKey";
 import { copyPlainTextToClipboard } from "../../lib/clipboard";
 import { toastError, toastSuccess, toastWarning } from "../../lib/toast";
 import { ensureSessionReceiptCode, readStoredReceiptCode } from "../../lib/receiptCode";
+import { safeLocalGet, safeLocalSet, safeSessionSet } from "../../lib/safeStorage";
 import {
   fileCoverImageHrefFromFields,
-  renderSimpleMarkdown,
 } from "../../lib/markdown";
 import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
-import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -147,8 +151,6 @@ const router = useRouter();
 
 const announcements = ref<AnnouncementItem[]>([]);
 const homeAnnouncement = ref<AnnouncementItem | null>(null);
-const homeAnnouncementContentHTML = ref("");
-let homeAnnouncementRenderSerial = 0;
 const selectedAnnouncementId = ref<string | null>(null);
 const selectedAnnouncement = computed(() => {
   if (!selectedAnnouncementId.value) return null;
@@ -330,18 +332,11 @@ const canModerateSubmissions = ref(false);
 const homeSessionAdminId = ref("");
 const homeSessionIsSuperAdmin = ref(false);
 const folderDescriptionEditorOpen = ref(false);
+const folderDescriptionFocusOpen = ref(false);
+const folderDescriptionFocusHeight = ref(480);
 const folderCoverPickerOpen = ref(false);
 const folderNameDraft = ref("");
 const folderDescriptionDraft = ref("");
-const folderDescriptionTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const {
-  isDragOver: folderDescIsDragOver,
-  isUploading: folderDescIsUploading,
-  onDragEnter: onFolderDescDragEnter,
-  onDragOver: onFolderDescDragOver,
-  onDragLeave: onFolderDescDragLeave,
-  handleDrop: onFolderDescDrop,
-} = useMarkdownImageDrop({ modelRef: folderDescriptionDraft });
 const folderRemarkDraft = ref("");
 const folderDirectPrefixDraft = ref("");
 const folderDownloadPolicyDraft = ref<"inherit" | "allow" | "deny">("inherit");
@@ -602,6 +597,10 @@ function folderIdFromRouteQuery(raw: unknown): string {
 }
 /* 通过自定义路径（如 /doc）解析到的文件夹 UUID，空字符串表示未通过自定义路径访问 */
 const customPathResolvedFolderID = ref("");
+/** 自定义路径指向 Markdown 文件时的正文（未进入整页模式时为 null） */
+const customPathMarkdownSource = ref<string | null>(null);
+/** 与文件详情页的文本预览上限一致：超限的 Markdown 交给详情页提示下载 */
+const CUSTOM_PATH_MARKDOWN_MAX_BYTES = 1_048_576;
 const currentFolderID = computed(() => {
   const fromQuery = folderIdFromRouteQuery(route.query.folder);
   if (fromQuery) return fromQuery;
@@ -755,21 +754,11 @@ const downloadConfirmMessage = computed(() => {
   return `该文件大小为 ${row.sizeText}，已超过本站设定的大文件阈值（${formatSize(largeDownloadConfirmBytes.value)}）。确定要下载吗？`;
 });
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
-const currentFolderDescriptionHTML = ref("");
-let folderDescRenderSerial = 0;
-watch(
-  () => currentFolderDetail.value?.description ?? "",
-  (desc) => {
-    const mySerial = ++folderDescRenderSerial;
-    renderMarkdownAsync(desc).then((html) => {
-      if (mySerial === folderDescRenderSerial) {
-        currentFolderDescriptionHTML.value = html;
-      }
-    });
-  },
-  { immediate: true },
-);
+const currentFolderDescriptionSource = computed(() => currentFolderDetail.value?.description ?? "");
 
+/** 首页公告条是紧凑摘要（自带琥珀配色），继续用 marked 渲染，避免为一条摘要拉取 vditor 静态资源 */
+const homeAnnouncementContentHTML = ref("");
+let homeAnnouncementRenderSerial = 0;
 watch(
   () => homeAnnouncement.value?.content ?? "",
   (content) => {
@@ -818,7 +807,7 @@ function updateFolderMarkdownClampUI() {
     folderMarkdownFooterVisible.value = false;
     return;
   }
-  if (!currentFolderDescriptionHTML.value) {
+  if (!currentFolderDescriptionSource.value.trim()) {
     folderMarkdownFooterVisible.value = false;
     return;
   }
@@ -856,7 +845,6 @@ watch(
   () => [
     currentFolderID.value,
     currentFolderDetail.value?.description,
-    currentFolderDescriptionHTML.value,
     folderMarkdownExpanded.value,
   ],
   async () => {
@@ -914,7 +902,6 @@ const folderEditorHideCatalogDirty = computed(() => {
 });
 
 const folderEditorDirty = computed(() => folderEditorMetaDirty.value || folderEditorHideCatalogDirty.value);
-const folderDescriptionPreviewHTML = computed(() => renderSimpleMarkdown(folderDescriptionDraft.value));
 const currentFolderStats = computed(() => {
   if (!currentFolderDetail.value) {
     return [];
@@ -1188,6 +1175,7 @@ function syncBodyScrollLock() {
       || feedbackModalOpen.value
       || feedbackSuccessModalOpen.value
       || folderDescriptionEditorOpen.value
+      || folderDescriptionFocusOpen.value
       || createFolderModalOpen.value
       || virtualFolderModalOpen.value
       || virtualFileModalOpen.value
@@ -1250,6 +1238,188 @@ function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
   });
 }
 
+/** 整页 Markdown 模式下不渲染目录内容：侧栏抽屉与目录确认弹窗都会被遮罩盖住，站内链一律走路由跳转 */
+function handleCustomPathMarkdownLinkNavigate(ev: MouseEvent) {
+  onMarkdownLinkClickCapture(ev, router);
+}
+
+type MarkdownOutlineItem = { id: string; level: number; text: string };
+
+const customPathMarkdownScrollerRef = ref<HTMLElement | null>(null);
+const customPathMarkdownOutline = ref<MarkdownOutlineItem[]>([]);
+const customPathMarkdownActiveId = ref("");
+const customPathMarkdownDrawerOpen = ref(false);
+/** 与大纲项一一对应的标题元素，滚动高亮与跳转直接读 rect，避免每次滚动查 DOM */
+let customPathMarkdownHeadingElements: HTMLElement[] = [];
+let customPathMarkdownScrollRaf = 0;
+
+/** Vditor 预览完成后从渲染结果里收集标题（Lute 会给每个标题生成 slug id） */
+function collectCustomPathMarkdownOutline() {
+  const root = customPathMarkdownScrollerRef.value?.querySelector(".markdown-content") ?? null;
+  const headings = root
+    ? Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).filter((h) => h.id)
+    : [];
+  customPathMarkdownHeadingElements = headings;
+  customPathMarkdownOutline.value = headings.map((h) => ({
+    id: h.id,
+    level: Number(h.tagName.slice(1)),
+    text: h.innerText.replace(/\s+/g, " ").trim(),
+  }));
+  customPathMarkdownActiveId.value = customPathMarkdownOutline.value[0]?.id ?? "";
+  updateCustomPathMarkdownActiveHeading();
+  // 重渲染会抹掉高亮 <mark>：搜索面板开着时按当前关键词重新标记
+  if (markdownSearchOpen.value && markdownSearchQuery.value.trim()) runMarkdownSearch();
+}
+
+function updateCustomPathMarkdownActiveHeading() {
+  const scroller = customPathMarkdownScrollerRef.value;
+  if (!scroller || customPathMarkdownHeadingElements.length === 0) return;
+  const baseline = scroller.getBoundingClientRect().top + 96;
+  let active = customPathMarkdownHeadingElements[0].id;
+  for (const heading of customPathMarkdownHeadingElements) {
+    if (heading.getBoundingClientRect().top <= baseline) {
+      active = heading.id;
+    } else {
+      break;
+    }
+  }
+  customPathMarkdownActiveId.value = active;
+}
+
+function onCustomPathMarkdownScroll() {
+  if (customPathMarkdownScrollRaf) return;
+  customPathMarkdownScrollRaf = requestAnimationFrame(() => {
+    customPathMarkdownScrollRaf = 0;
+    updateCustomPathMarkdownActiveHeading();
+  });
+}
+
+/** 与 vditor 正文 TOC 点击同一思路：按实时 rect 差值滚外层容器，offsetTop 在定位祖先下会偏 */
+function jumpToCustomPathMarkdownHeading(id: string) {
+  const scroller = customPathMarkdownScrollerRef.value;
+  const target = customPathMarkdownHeadingElements.find((h) => h.id === id);
+  if (!scroller || !target) return;
+  const top =
+    scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+  // 平滑滚动期间的高亮交给滚动监听逐步跟进，点击时不抢先写 active
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  scroller.scrollTo({ top, behavior: reduceMotion ? "auto" : "smooth" });
+  customPathMarkdownDrawerOpen.value = false;
+}
+
+/** 正文搜索：在渲染结果里包 <mark> 高亮并逐条跳转。公式/SVG 内部文本是碎片的，跳过避免破坏排版 */
+const MARKDOWN_SEARCH_SKIP_SELECTOR = "svg, .katex, script, style";
+const MARKDOWN_SEARCH_MAX_HITS = 999;
+const markdownSearchOpen = ref(false);
+const markdownSearchQuery = ref("");
+const markdownSearchHits = ref<HTMLElement[]>([]);
+const markdownSearchCurrent = ref(-1);
+let markdownSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function unwrapMarkdownSearchHits() {
+  for (const mark of markdownSearchHits.value) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parent.replaceChild(document.createTextNode(mark.textContent ?? ""), mark);
+    parent.normalize();
+  }
+  markdownSearchHits.value = [];
+  markdownSearchCurrent.value = -1;
+}
+
+function runMarkdownSearch() {
+  unwrapMarkdownSearchHits();
+  const query = markdownSearchQuery.value.trim().toLowerCase();
+  const root = customPathMarkdownScrollerRef.value?.querySelector(".markdown-content");
+  if (!root || !query) return;
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const owner = node.parentElement;
+      if (!owner || owner.closest(MARKDOWN_SEARCH_SKIP_SELECTOR)) return NodeFilter.FILTER_REJECT;
+      if (!(node.nodeValue ?? "").toLowerCase().includes(query)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const matched: Text[] = [];
+  while (walker.nextNode()) matched.push(walker.currentNode as Text);
+
+  const hits: HTMLElement[] = [];
+  for (const textNode of matched) {
+    const full = textNode.nodeValue ?? "";
+    const lower = full.toLowerCase();
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let idx = lower.indexOf(query);
+    while (idx !== -1 && hits.length < MARKDOWN_SEARCH_MAX_HITS) {
+      if (idx > cursor) fragment.appendChild(document.createTextNode(full.slice(cursor, idx)));
+      const mark = document.createElement("mark");
+      // 内联样式：vditor 的 .vditor-reset mark 选择器比工具类更具体，类名压不住
+      mark.style.borderRadius = "2px";
+      mark.style.padding = "0 1px";
+      mark.style.color = "inherit";
+      mark.textContent = full.slice(idx, idx + query.length);
+      fragment.appendChild(mark);
+      hits.push(mark);
+      cursor = idx + query.length;
+      idx = lower.indexOf(query, cursor);
+    }
+    if (cursor < full.length) fragment.appendChild(document.createTextNode(full.slice(cursor)));
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+
+  markdownSearchHits.value = hits;
+  markdownSearchCurrent.value = hits.length ? 0 : -1;
+  paintMarkdownSearchActiveHit(false);
+}
+
+function paintMarkdownSearchActiveHit(scroll: boolean) {
+  markdownSearchHits.value.forEach((mark, i) => {
+    mark.style.background = i === markdownSearchCurrent.value ? "#f59e0b" : "rgba(252, 211, 77, 0.55)";
+  });
+  const active = markdownSearchHits.value[markdownSearchCurrent.value];
+  const scroller = customPathMarkdownScrollerRef.value;
+  if (!scroll || !active || !scroller) return;
+  const top =
+    scroller.scrollTop + active.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 120;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  scroller.scrollTo({ top, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
+function stepMarkdownSearch(delta: number) {
+  const total = markdownSearchHits.value.length;
+  if (!total) return;
+  markdownSearchCurrent.value = (markdownSearchCurrent.value + delta + total) % total;
+  paintMarkdownSearchActiveHit(true);
+}
+
+function closeMarkdownSearch() {
+  if (markdownSearchDebounceTimer) {
+    clearTimeout(markdownSearchDebounceTimer);
+    markdownSearchDebounceTimer = null;
+  }
+  markdownSearchOpen.value = false;
+  markdownSearchQuery.value = "";
+  unwrapMarkdownSearchHits();
+}
+
+function onMarkdownSearchKeydown(ev: KeyboardEvent) {
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    stepMarkdownSearch(ev.shiftKey ? -1 : 1);
+  } else if (ev.key === "Escape") {
+    closeMarkdownSearch();
+  }
+}
+
+watch(markdownSearchQuery, () => {
+  if (markdownSearchDebounceTimer) clearTimeout(markdownSearchDebounceTimer);
+  markdownSearchDebounceTimer = setTimeout(() => {
+    markdownSearchDebounceTimer = null;
+    runMarkdownSearch();
+  }, 160);
+});
+
 function onDocumentPointerDownCloseToolbarMenus(event: PointerEvent) {
   if (!sortMenuOpen.value && !viewMenuOpen.value) {
     return;
@@ -1270,26 +1440,28 @@ onMounted(async () => {
     setListSortDirection: setSortDirection,
   });
   document.addEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
-  const storedViewMode = window.localStorage.getItem("public-home-view-mode");
+  // localStorage 访问在隐私模式（禁 Cookie）下可能抛 SecurityError，
+  // 全部走 safeStorage 封装，避免 onMounted 中断导致首页卡在加载中
+  const storedViewMode = safeLocalGet("public-home-view-mode");
   if (storedViewMode === "cards" || storedViewMode === "table") {
     viewMode.value = storedViewMode;
   }
-  const storedSortMode = window.localStorage.getItem("public-home-sort-mode");
+  const storedSortMode = safeLocalGet("public-home-sort-mode");
   if (storedSortMode === "smart" || storedSortMode === "name" || storedSortMode === "download" || storedSortMode === "format" || storedSortMode === "modified") {
     sortMode.value = storedSortMode;
   }
-  const storedSortDirection = window.localStorage.getItem("public-home-sort-direction");
+  const storedSortDirection = safeLocalGet("public-home-sort-direction");
   if (storedSortDirection === "asc" || storedSortDirection === "desc") {
     sortDirection.value = storedSortDirection;
   }
-  const storedCardCoverFirst = window.localStorage.getItem("public-home-card-cover-first");
+  const storedCardCoverFirst = safeLocalGet("public-home-card-cover-first");
   if (storedCardCoverFirst === "0" || storedCardCoverFirst === "false") {
     cardCoverFirst.value = false;
   } else if (storedCardCoverFirst === "1" || storedCardCoverFirst === "true") {
     cardCoverFirst.value = true;
   }
   // 读取持久化的单页文件数（用户偏好）；首选合法选项，否则退回 50
-  const storedPageSize = Number(window.localStorage.getItem("public-home-page-size"));
+  const storedPageSize = Number(safeLocalGet("public-home-page-size"));
   if (PAGE_SIZE_OPTIONS.includes(storedPageSize)) {
     pageSize.value = storedPageSize;
   }
@@ -1346,6 +1518,14 @@ async function loadLargeDownloadPolicy() {
 onBeforeUnmount(() => {
   unregisterHomeConsoleHooks();
   document.removeEventListener("pointerdown", onDocumentPointerDownCloseToolbarMenus, true);
+  if (customPathMarkdownScrollRaf) {
+    cancelAnimationFrame(customPathMarkdownScrollRaf);
+    customPathMarkdownScrollRaf = 0;
+  }
+  if (markdownSearchDebounceTimer) {
+    clearTimeout(markdownSearchDebounceTimer);
+    markdownSearchDebounceTimer = null;
+  }
   folderMarkdownResizeObserver?.disconnect();
   markdownCatalogNavigateHydrateGeneration += 1;
   markdownCatalogNavigateConfirmResolve?.(false);
@@ -1369,11 +1549,40 @@ watch(currentFolderID, () => {
   void loadDirectory({ force: true });
 });
 
-// 监听自定义路径参数（如 /doc），通过 API 解析为文件夹或文件 UUID
+// 监听自定义路径参数（如 /doc），通过 API 解析为文件夹或文件 UUID。
+// 代际令牌：离开路径（watch 先清空状态）后迟到的响应不得把旧 folder_id 写回。
+let customPathLoadToken = 0;
+
+/** 取 Markdown 正文用于整页渲染；取不到或超限时返回 null，由调用方回退到文件详情页 */
+async function fetchCustomPathMarkdownSource(fileID: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/public/files/${encodeURIComponent(fileID)}/download?inline=1`, {
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const cl = res.headers.get("content-length");
+    if (cl != null) {
+      const n = Number(cl);
+      if (Number.isFinite(n) && n > CUSTOM_PATH_MARKDOWN_MAX_BYTES) return null;
+    }
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > CUSTOM_PATH_MARKDOWN_MAX_BYTES) return null;
+    return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+  } catch {
+    return null;
+  }
+}
+
 watch(
   () => route.params.customPath as string | undefined,
   async (customPath) => {
+    const gen = ++customPathLoadToken;
     const trimmed = (customPath ?? "").trim();
+    customPathMarkdownSource.value = null;
+    customPathMarkdownOutline.value = [];
+    customPathMarkdownHeadingElements = [];
+    customPathMarkdownDrawerOpen.value = false;
+    closeMarkdownSearch();
     if (!trimmed) {
       customPathResolvedFolderID.value = "";
       if (route.meta?.resolvedFolderId) {
@@ -1389,6 +1598,7 @@ watch(
         name: string;
         extension: string;
       }>(`/public/resolve-custom-path?path=${encodeURIComponent(trimmed)}`);
+      if (gen !== customPathLoadToken) return;
       if (resp.type === "file" && resp.file_id) {
         // HTML 文件自定义路径：fetch 获取内容后直接替换当前页面（地址栏保持自定义路径）
         const ext = (resp.extension ?? "").toLowerCase();
@@ -1409,6 +1619,16 @@ watch(
             return;
           }
         }
+        // Markdown 文件自定义路径：就地整页渲染 vditor 预览（后端无法跑 vditor，只能客户端渲染）
+        if (ext === ".md" || ext === ".markdown" || /\.(md|markdown)$/i.test(resp.name ?? "")) {
+          const source = await fetchCustomPathMarkdownSource(resp.file_id);
+          if (gen !== customPathLoadToken) return;
+          if (source) {
+            customPathResolvedFolderID.value = "";
+            customPathMarkdownSource.value = source;
+            return;
+          }
+        }
         // 其它文件自定义路径 → 跳转到文件详情页
         customPathResolvedFolderID.value = "";
         router.replace({ name: "public-file-detail", params: { fileID: resp.file_id } });
@@ -1419,6 +1639,7 @@ watch(
         route.meta.resolvedFolderId = resp.folder_id;
       }
     } catch {
+      if (gen !== customPathLoadToken) return;
       customPathResolvedFolderID.value = "";
       if (route.meta?.resolvedFolderId) {
         route.meta.resolvedFolderId = undefined;
@@ -1816,7 +2037,8 @@ async function loadDirectory(options?: { force?: boolean }) {
       totalFiles.value = 0;
     }
 
-    if (!fetchKey && !rootViewLocked.value && folders.value.length === 1) {
+    // 仅根页面才自动进入唯一根目录：自定义路径（/doc、/mdtest）与已跳走的详情页都不得抢地址栏
+    if (!fetchKey && route.name === "public-home" && !rootViewLocked.value && folders.value.length === 1) {
       try {
         writeDirectoryViewCache(fetchKey, snapshotDirectoryViewFromRefs());
       } catch {
@@ -2212,6 +2434,9 @@ async function saveFileOrder() {
   }
 }
 
+// 搜索代际令牌：连续提交时旧关键词的慢响应不得覆盖新结果
+let searchLoadToken = 0;
+
 async function runSearch(keyword: string) {
   const normalizedKeyword = keyword.trim();
   if (!normalizedKeyword) {
@@ -2219,6 +2444,7 @@ async function runSearch(keyword: string) {
     return;
   }
 
+  const gen = ++searchLoadToken;
   searchInput.value = normalizedKeyword;
   searchKeyword.value = normalizedKeyword;
   searchLoading.value = true;
@@ -2233,6 +2459,7 @@ async function runSearch(keyword: string) {
       query.set("folder_id", currentFolderID.value);
     }
     const response = await httpClient.get<SearchResultResponse>(`/public/search?${query.toString()}`);
+    if (gen !== searchLoadToken) return;
     searchRows.value = response.items.map((item) => {
       const modRaw =
         item.entity_type === "folder"
@@ -2263,10 +2490,13 @@ async function runSearch(keyword: string) {
       };
     });
   } catch (err: unknown) {
+    if (gen !== searchLoadToken) return;
     searchRows.value = [];
     toastError(readApiError(err, "搜索失败。"));
   } finally {
-    searchLoading.value = false;
+    if (gen === searchLoadToken) {
+      searchLoading.value = false;
+    }
   }
 }
 
@@ -2298,7 +2528,18 @@ function openUpload() {
   syncBodyScrollLock();
 }
 
+// 进行中的上传 XHR 引用：关闭上传弹窗时中止，避免网络挂起时按钮永久"提交中"
+let activeUploadXhr: XMLHttpRequest | null = null;
+
 function closeUploadModal() {
+  if (activeUploadXhr) {
+    try {
+      activeUploadXhr.abort();
+    } catch {
+      // ignore
+    }
+    activeUploadXhr = null;
+  }
   uploadModalOpen.value = false;
   syncBodyScrollLock();
 }
@@ -2357,6 +2598,89 @@ async function onUploadDrop(event: DragEvent) {
   }
 }
 
+/** 新建 Markdown：弹窗里用 vditor 编辑，保存时合成 .md 文件走 submissions 上传链路 */
+const markdownDraftOpen = ref(false);
+const markdownDraftName = ref("");
+const markdownDraftBody = ref("");
+const markdownDraftSaving = ref(false);
+const markdownDraftError = ref("");
+// 弹窗高度的主体是编辑器：vditor 对字符串高度是原样写入 style.height，
+// 所以可以直接用 CSS 表达式——保底 360px，视口够高时按 62vh 放大、封顶 720px
+const markdownDraftEditorHeight = "max(360px, min(62vh, 720px))";
+
+function openMarkdownDraft() {
+  markdownDraftName.value = "";
+  markdownDraftBody.value = "";
+  markdownDraftError.value = "";
+  markdownDraftOpen.value = true;
+}
+
+function closeMarkdownDraft() {
+  if (markdownDraftSaving.value) return;
+  markdownDraftOpen.value = false;
+}
+
+/** 从剪贴板导入正文：空文档直接填入，已有内容则追加，避免覆盖已写的部分 */
+async function pasteMarkdownDraftFromClipboard() {
+  if (!navigator.clipboard?.readText) {
+    markdownDraftError.value = "当前环境不支持读取剪贴板，请直接在编辑区 Ctrl/Cmd+V。";
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text.trim()) {
+      markdownDraftError.value = "剪贴板是空的。";
+      return;
+    }
+    markdownDraftError.value = "";
+    markdownDraftBody.value = markdownDraftBody.value.trim()
+      ? `${markdownDraftBody.value.replace(/\s+$/, "")}\n\n${text}`
+      : text;
+  } catch {
+    markdownDraftError.value = "浏览器拒绝读取剪贴板，请直接在编辑区 Ctrl/Cmd+V。";
+  }
+}
+
+async function submitMarkdownDraft() {
+  const rawName = markdownDraftName.value.trim();
+  if (!rawName) {
+    markdownDraftError.value = "请填写文件名。";
+    return;
+  }
+  if (/[\\/]/.test(rawName)) {
+    markdownDraftError.value = "文件名不能包含 / 或 \\。";
+    return;
+  }
+  const fileName = /\.(md|markdown)$/i.test(rawName) ? rawName : `${rawName}.md`;
+
+  markdownDraftSaving.value = true;
+  markdownDraftError.value = "";
+  try {
+    const file = new File([markdownDraftBody.value], fileName, { type: "text/markdown" });
+    const formData = new FormData();
+    formData.set("folder_id", currentFolderID.value);
+    formData.set("manifest", JSON.stringify([{ relative_path: fileName }]));
+    formData.append("files", file, fileName);
+    const resp = await httpClient.request<{ receipt_code?: string; status?: string }>("/public/submissions", {
+      method: "POST",
+      body: formData,
+    });
+    markdownDraftOpen.value = false;
+    if ((resp.status ?? "") === "approved") {
+      toastSuccess(`已保存 ${fileName} 到当前目录。`);
+    } else {
+      toastSuccess(`已提交 ${fileName}，等待审核。回执：${resp.receipt_code ?? ""}`);
+    }
+    await loadDirectory();
+  } catch (err: unknown) {
+    markdownDraftError.value = err instanceof HttpError
+      ? readApiError(err, `保存失败（HTTP ${err.status}）。`)
+      : "保存失败，请重试。";
+  } finally {
+    markdownDraftSaving.value = false;
+  }
+}
+
 async function submitUpload() {
   if (uploadForm.value.entries.length === 0) {
     toastError("请选择文件，或直接拖入多文件/文件夹。");
@@ -2384,6 +2708,7 @@ async function submitUpload() {
     // 使用 XHR 以支持上传进度回调
     const response = await new Promise<{ receipt_code: string; item_count: number; status: string }>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      activeUploadXhr = xhr;
       xhr.open("POST", "/api/public/submissions");
       xhr.withCredentials = true;
 
@@ -2394,6 +2719,7 @@ async function submitUpload() {
       });
 
       xhr.addEventListener("load", () => {
+        activeUploadXhr = null;
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             resolve(JSON.parse(xhr.responseText));
@@ -2407,8 +2733,14 @@ async function submitUpload() {
         }
       });
 
-      xhr.addEventListener("error", () => reject(new Error("network error")));
-      xhr.addEventListener("abort", () => reject(new Error("aborted")));
+      xhr.addEventListener("error", () => {
+        activeUploadXhr = null;
+        reject(new Error("network error"));
+      });
+      xhr.addEventListener("abort", () => {
+        activeUploadXhr = null;
+        reject(new Error("aborted"));
+      });
 
       xhr.send(formData);
     });
@@ -2420,7 +2752,7 @@ async function submitUpload() {
     } else {
       toastSuccess(`已提交 ${response.item_count} 个文件进入审核，请保存回执码 ${response.receipt_code}。`);
     }
-    window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
+    safeSessionSet("openshare_receipt_code", response.receipt_code);
     currentReceiptCode.value = response.receipt_code;
     uploadForm.value.description = "";
     clearUploadEntries();
@@ -2501,12 +2833,12 @@ async function copyFolderCustomPathUrl() {
 function setViewMode(mode: "cards" | "table") {
   viewMode.value = mode;
   viewMenuOpen.value = false;
-  window.localStorage.setItem("public-home-view-mode", mode);
+  safeLocalSet("public-home-view-mode", mode);
 }
 
 function toggleCardCoverFirst() {
   cardCoverFirst.value = !cardCoverFirst.value;
-  window.localStorage.setItem("public-home-card-cover-first", cardCoverFirst.value ? "1" : "0");
+  safeLocalSet("public-home-card-cover-first", cardCoverFirst.value ? "1" : "0");
 }
 
 watch(sortedRows, (rows) => {
@@ -2527,7 +2859,7 @@ watch(viewMode, (mode) => {
 function setSortMode(mode: "smart" | "name" | "download" | "format" | "modified") {
   if (sortMode.value === mode) return;
   sortMode.value = mode;
-  window.localStorage.setItem("public-home-sort-mode", mode);
+  safeLocalSet("public-home-sort-mode", mode);
   // 排序变化需重新请求服务端，避免文件数超过 page_size 时当前页看不到其他文件
   if (currentFolderID.value) {
     currentPage.value = 1;
@@ -2542,7 +2874,7 @@ function setSortDirection(direction: "asc" | "desc") {
   }
   sortDirection.value = direction;
   sortMenuOpen.value = false;
-  window.localStorage.setItem("public-home-sort-direction", direction);
+  safeLocalSet("public-home-sort-direction", direction);
   if (currentFolderID.value) {
     currentPage.value = 1;
     void loadDirectory({ force: true });
@@ -2614,7 +2946,7 @@ function setPageSize(rawSize: number) {
   const size = PAGE_SIZE_OPTIONS.includes(rawSize) ? rawSize : 50;
   if (size === pageSize.value) return;
   pageSize.value = size;
-  window.localStorage.setItem("public-home-page-size", String(size));
+  safeLocalSet("public-home-page-size", String(size));
   // 切换页大小后重置页码并重新请求
   if (currentFolderID.value) {
     currentPage.value = 1;
@@ -2650,7 +2982,7 @@ function closeFeedbackSuccessModal() {
   syncBodyScrollLock();
 }
 
-function openFolderDescriptionEditor() {
+function syncFolderDescriptionDrafts() {
   folderNameDraft.value = currentFolderDetail.value?.name ?? "";
   folderDescriptionDraft.value = currentFolderDetail.value?.description ?? "";
   folderRemarkDraft.value = (currentFolderDetail.value?.remark ?? "").trim();
@@ -2659,7 +2991,26 @@ function openFolderDescriptionEditor() {
   folderDownloadPolicyDraft.value = currentFolderDetail.value?.download_policy ?? "inherit";
   folderHidePublicCatalogDraft.value = Boolean(currentFolderDetail.value?.hide_public_catalog);
   folderDescriptionError.value = "";
+}
+
+function openFolderDescriptionEditor() {
+  syncFolderDescriptionDrafts();
   folderDescriptionEditorOpen.value = true;
+  syncBodyScrollLock();
+}
+
+/** 文件夹简介的专注编辑弹窗：vditor 需要独占版面，塞进信息表单里不好用 */
+function openFolderDescriptionFocusEditor() {
+  syncFolderDescriptionDrafts();
+  // 用打开时的视口算出确定像素值：百分比高度在弹窗的 flex 链路里不解析
+  folderDescriptionFocusHeight.value = Math.max(360, Math.round(window.innerHeight * 0.7));
+  folderDescriptionFocusOpen.value = true;
+  syncBodyScrollLock();
+}
+
+function closeFolderDescriptionFocusEditor() {
+  folderDescriptionFocusOpen.value = false;
+  syncFolderDescriptionDrafts();
   syncBodyScrollLock();
 }
 
@@ -2752,6 +3103,7 @@ async function saveFolderDescription() {
         : item
     ));
     folderDescriptionEditorOpen.value = false;
+    folderDescriptionFocusOpen.value = false;
     syncBodyScrollLock();
     if (currentFolderDetail.value) {
       invalidateDirectoryViewCacheFolder(currentFolderDetail.value.id);
@@ -2784,7 +3136,7 @@ async function submitFeedback() {
       description: feedbackDescription.value.trim(),
     });
     toastSuccess(`反馈已提交，请保存回执码 ${response.receipt_code}。`);
-    window.sessionStorage.setItem("openshare_receipt_code", response.receipt_code);
+    safeSessionSet("openshare_receipt_code", response.receipt_code);
     currentReceiptCode.value = response.receipt_code;
     closeFeedbackModal();
     feedbackSuccessModalOpen.value = true;
@@ -2947,8 +3299,145 @@ async function syncSessionReceiptCode() {
 </script>
 
 <template>
+  <!-- 自定义路径指向 Markdown 文件：整页只放渲染后的正文，盖住站内导航（地址栏保持短路径） -->
+  <div
+    v-if="customPathMarkdownSource"
+    ref="customPathMarkdownScrollerRef"
+    class="fixed inset-0 z-[70] overflow-y-auto bg-white dark:bg-slate-950"
+    @click.capture="handleCustomPathMarkdownLinkNavigate"
+    @scroll.passive="onCustomPathMarkdownScroll"
+  >
+    <div class="mx-auto flex w-full max-w-6xl">
+      <!-- 宽屏左栏大纲：sticky 相对外层滚动容器，长文滚动时保持可见 -->
+      <aside
+        v-if="customPathMarkdownOutline.length"
+        class="sticky top-0 hidden max-h-screen w-60 shrink-0 overflow-y-auto border-r border-slate-200 px-4 py-10 lg:block dark:border-slate-800"
+      >
+        <nav aria-label="文档大纲">
+          <ul class="space-y-0.5 border-l border-slate-200 text-sm dark:border-slate-800">
+            <li v-for="item in customPathMarkdownOutline" :key="item.id">
+              <button
+                type="button"
+                class="-ml-px block w-full border-l-2 py-1 pr-2 text-left text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                :class="item.id === customPathMarkdownActiveId
+                  ? 'border-slate-900 font-medium text-slate-900 dark:border-slate-100 dark:text-slate-100'
+                  : 'border-transparent'"
+                :style="{ paddingLeft: `${(item.level - 1) * 12 + 8}px` }"
+                @click="jumpToCustomPathMarkdownHeading(item.id)"
+              >
+                {{ item.text }}
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </aside>
+      <article class="min-w-0 flex-1 px-5 py-10 sm:px-8 sm:py-14">
+        <div class="mx-auto max-w-3xl">
+          <MarkdownPreview :source="customPathMarkdownSource" :debounce-ms="0" @rendered="collectCustomPathMarkdownOutline" />
+        </div>
+      </article>
+    </div>
+
+    <!-- 右上角正文搜索：在渲染结果里高亮命中并逐条跳转 -->
+    <button
+      type="button"
+      class="fixed right-3 top-3 z-[72] flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-lg backdrop-blur sm:right-4 sm:top-4 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300"
+      :aria-expanded="markdownSearchOpen"
+      aria-label="搜索正文文字"
+      @click="markdownSearchOpen = !markdownSearchOpen"
+    >
+      <Search class="h-5 w-5" />
+    </button>
+    <div v-if="markdownSearchOpen" class="fixed inset-x-3 top-14 z-[72] sm:left-auto sm:right-4 sm:w-80">
+      <div class="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        <input
+          v-model="markdownSearchQuery"
+          autofocus
+          type="search"
+          placeholder="搜索正文…"
+          class="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+          @keydown="onMarkdownSearchKeydown"
+        />
+        <span class="shrink-0 text-xs tabular-nums text-slate-400">
+          {{ markdownSearchHits.length ? `${markdownSearchCurrent + 1}/${markdownSearchHits.length}` : "0" }}
+        </span>
+        <button
+          type="button"
+          class="rounded-md p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+          :disabled="!markdownSearchHits.length"
+          aria-label="上一个匹配"
+          @click="stepMarkdownSearch(-1)"
+        >
+          <ChevronUp class="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          class="rounded-md p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+          :disabled="!markdownSearchHits.length"
+          aria-label="下一个匹配"
+          @click="stepMarkdownSearch(1)"
+        >
+          <ChevronDown class="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          class="rounded-md p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+          aria-label="关闭搜索"
+          @click="closeMarkdownSearch"
+        >
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 窄屏：悬浮按钮唤起抽屉式大纲 -->
+    <button
+      v-if="customPathMarkdownOutline.length"
+      type="button"
+      class="fixed bottom-5 right-5 z-[71] flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg lg:hidden dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+      :aria-expanded="customPathMarkdownDrawerOpen"
+      aria-label="文档大纲"
+      @click="customPathMarkdownDrawerOpen = !customPathMarkdownDrawerOpen"
+    >
+      <ListTree class="h-5 w-5" />
+    </button>
+    <Transition name="md-drawer">
+      <div
+        v-if="customPathMarkdownDrawerOpen"
+        class="fixed inset-0 z-[71] bg-slate-950/30 lg:hidden"
+        @click.self="customPathMarkdownDrawerOpen = false"
+      >
+        <div class="md-drawer-sheet absolute inset-x-3 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-2xl bg-white px-4 pb-6 pt-4 shadow-xl dark:bg-slate-900">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">目录</span>
+            <button
+              type="button"
+              class="rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              @click="customPathMarkdownDrawerOpen = false"
+            >
+              关闭
+            </button>
+          </div>
+          <ul class="space-y-0.5 text-sm">
+            <li v-for="item in customPathMarkdownOutline" :key="item.id">
+              <button
+                type="button"
+                class="block w-full py-1 text-left text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                :class="item.id === customPathMarkdownActiveId ? 'font-medium text-slate-900 dark:text-slate-100' : ''"
+                :style="{ paddingLeft: `${(item.level - 1) * 12}px` }"
+                @click="jumpToCustomPathMarkdownHeading(item.id)"
+              >
+                {{ item.text }}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </Transition>
+  </div>
+
   <!-- 主页/目录浏览页：面包屑导航 + 文件夹信息描述 + 文件卡片/表格/列表视图 + 搜索 + 公告 + 管理员功能入口 -->
-  <main class="app-container py-0 px-0 sm:py-4 sm:px-4 lg:py-8 lg:px-8">
+  <main v-else class="app-container py-0 px-0 sm:py-4 sm:px-4 lg:py-8 lg:px-8">
     <div class="space-y-6">
       <div class="grid gap-6">
       <section class="order-1 min-w-0">
@@ -3157,19 +3646,28 @@ async function syncSessionReceiptCode() {
                   ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:border-none xl:border-slate-200 xl:pr-0 xl:py-0'
                   : 'border-b border-slate-200 px-0 py-0'"
               >
-                <div v-if="currentFolderDescriptionHTML" :class="useWideDescriptionLayout
-                ? 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:border-none xl:rounded-none xl:mx-0 xl:mt-0 xl:pr-0 dark:border-slate-800 dark:bg-slate-900/40'
-                : 'rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-6 sm:my-6 sm:px-5 sm:py-5 xl:border-b xl:mx-6 xl:my-6 dark:border-slate-800 dark:bg-slate-900/40'"
+                <div :class="useWideDescriptionLayout
+                ? 'relative rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-5 sm:mt-5 sm:px-5 sm:py-5 xl:border-none xl:rounded-none xl:mx-0 xl:mt-0 xl:pr-0 dark:border-slate-800 dark:bg-slate-900/40'
+                : 'relative rounded-3xl border-slate-200 bg-white px-4 py-4 rounded-none sm:border sm:rounded-2xl sm:mx-6 sm:my-6 sm:px-5 sm:py-5 xl:border-b xl:mx-6 xl:my-6 dark:border-slate-800 dark:bg-slate-900/40'"
                 >
+                  <button
+                    v-if="canManageResourceDescriptions"
+                    type="button"
+                    class="absolute right-3 top-3 z-10 inline-flex items-center rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white"
+                    @click="openFolderDescriptionFocusEditor"
+                  >
+                    编辑简介
+                  </button>
                   <div class="space-y-3">
                     <div class="relative overflow-y-auto">
                       <div
                         ref="folderMarkdownClampRef"
                         class="markdown-content"
                         :class="!folderMarkdownExpanded ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
-                        v-html="currentFolderDescriptionHTML"
                         @click.capture="handleMarkdownInternalLinkNavigate"
-                      />
+                      >
+                        <MarkdownPreview :source="currentFolderDescriptionSource" :debounce-ms="0" empty-text="暂无简介" @rendered="updateFolderMarkdownClampUI" />
+                      </div>
                       <div
                         v-if="!folderMarkdownExpanded && folderMarkdownFooterVisible"
                         class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent dark:from-slate-900"
@@ -3233,6 +3731,19 @@ async function syncSessionReceiptCode() {
               >
                 <Upload class="h-4 w-4" />
                 {{ canUploadToCurrentFolder ? "在该目录上传" : "进入目录后上传" }}
+              </button>
+
+              <!-- 新建 Markdown 文件：弹窗编辑后作为 .md 存入当前目录 -->
+              <button
+                v-if="!isCurrentFolderVirtual"
+                type="button"
+                class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                :disabled="!canUploadToCurrentFolder"
+                :class="!canUploadToCurrentFolder ? 'cursor-not-allowed opacity-45 hover:border-slate-200 hover:text-slate-600' : ''"
+                @click="openMarkdownDraft"
+              >
+                <FilePenLine class="h-4 w-4" />
+                {{ canUploadToCurrentFolder ? "新建 Markdown" : "进入目录后新建" }}
               </button>
 
               <button
@@ -4119,7 +4630,9 @@ async function syncSessionReceiptCode() {
               </div>
             </div>
             <div class="flex-1 overflow-y-auto px-6 py-5">
-              <div class="markdown-content" v-html="renderSimpleMarkdown(selectedAnnouncement.content)" />
+              <div class="markdown-content">
+                <MarkdownPreview :source="selectedAnnouncement.content" :debounce-ms="0" />
+              </div>
             </div>
           </template>
           <div v-else class="flex flex-1 flex-col">
@@ -4208,6 +4721,52 @@ async function syncSessionReceiptCode() {
           <button type="button" class="btn-primary" :disabled="batchDownloadSubmitting" @click="confirmPendingDownload">
             {{ batchDownloadSubmitting ? "处理中…" : "确认下载" }}
           </button>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：新建 Markdown 文件 -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div
+      v-if="markdownDraftOpen"
+      class="fixed inset-0 z-[126] flex items-center justify-center bg-slate-950/35 px-3 py-4 backdrop-blur-[1px]"
+      @click.self="closeMarkdownDraft"
+    >
+      <div class="modal-card flex max-h-full w-full max-w-3xl flex-col overflow-y-auto rounded-2xl bg-white p-4 shadow-xl sm:p-5" @click.stop>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 class="text-lg font-semibold text-slate-900">新建 Markdown</h3>
+          <div class="ml-auto flex shrink-0 flex-wrap justify-end gap-3">
+            <button type="button" class="btn-secondary" :disabled="markdownDraftSaving" @click="pasteMarkdownDraftFromClipboard">粘贴</button>
+            <button type="button" class="btn-secondary" :disabled="markdownDraftSaving" @click="closeMarkdownDraft">取消</button>
+            <button type="button" class="btn-primary" :disabled="markdownDraftSaving" @click="submitMarkdownDraft">
+              {{ markdownDraftSaving ? "保存中…" : "保存到当前目录" }}
+            </button>
+          </div>
+        </div>
+        <div class="mt-3">
+          <input
+            v-model="markdownDraftName"
+            type="text"
+            class="field"
+            aria-label="文件名"
+            placeholder="例如：课程笔记（保存时自动补 .md）"
+          />
+        </div>
+        <p v-if="markdownDraftError" class="mt-3 text-sm text-rose-600">{{ markdownDraftError }}</p>
+        <!-- 负边距抵消卡片内边距：编辑器全出血贴到弹窗左右与底边 -->
+        <div class="-mx-4 -mb-4 mt-3 sm:-mx-5 sm:-mb-5">
+          <!-- 预留编辑器版面：淡出开始时 vditor 就被卸载，不预留外壳会塌成一条 -->
+          <div class="vditor-flush" :style="{ minHeight: markdownDraftEditorHeight }">
+            <MarkdownEditor
+              v-model="markdownDraftBody"
+              :height="markdownDraftEditorHeight"
+              :upload-enabled="canManageResourceDescriptions"
+              placeholder="支持 Markdown、公式与图表，可直接拖入或粘贴图片。"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -4304,15 +4863,15 @@ async function syncSessionReceiptCode() {
               </div>
             </label>
 
-            <label class="space-y-2">
+            <div class="space-y-2">
               <span class="text-sm font-medium text-slate-700">资料简介</span>
-              <textarea
+              <MarkdownEditor
                 v-model="uploadForm.description"
-                rows="4"
-                class="field-area"
-                placeholder="可选，简要介绍资料内容和适用场景，支持简单 Markdown 语法"
+                :height="300"
+                :upload-enabled="canManageResourceDescriptions"
+                placeholder="可选，简要介绍资料内容和适用场景，支持 Markdown 语法"
               />
-            </label>
+            </div>
 
             <div class="space-y-2">
               <div class="flex items-center justify-between gap-3">
@@ -4513,51 +5072,6 @@ async function syncSessionReceiptCode() {
               />
             </label>
 
-            <div
-              class="grid min-h-0 grid-cols-1 gap-6 lg:min-h-[28rem] lg:grid-cols-2 lg:grid-rows-[auto_minmax(17rem,1fr)]"
-            >
-              <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
-                简介（Markdown）
-              </span>
-              <div class="order-2 lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 relative">
-                <textarea
-                  ref="folderDescriptionTextareaRef"
-                  v-model="folderDescriptionDraft"
-                  class="field-area min-h-[17rem] w-full resize-y rounded-3xl lg:h-full lg:min-h-0 lg:resize-none transition-colors"
-                  :class="{ 'border-blue-400 bg-blue-50/60': folderDescIsDragOver, 'opacity-50 pointer-events-none': folderDescIsUploading }"
-                  rows="10"
-                  placeholder="进入该文件夹后的详情区展示；支持简单 Markdown。拖拽图片到此处自动上传插入。"
-                  @dragenter="onFolderDescDragEnter"
-                  @dragover="onFolderDescDragOver"
-                  @dragleave="onFolderDescDragLeave"
-                  @drop="onFolderDescDrop($event, folderDescriptionTextareaRef)"
-                />
-                <!-- 上传中遮罩 -->
-                <div
-                  v-if="folderDescIsUploading"
-                  class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
-                >
-                  <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
-                </div>
-              </div>
-              <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
-                <h4 class="text-lg font-semibold text-slate-900">简介预览</h4>
-              </div>
-              <div
-                class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
-              >
-                <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                  <div
-                    v-if="folderDescriptionPreviewHTML"
-                    class="markdown-content"
-                    v-html="folderDescriptionPreviewHTML"
-                    @click.capture="handleMarkdownInternalLinkNavigate"
-                  />
-                  <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
-                </div>
-              </div>
-            </div>
-
             <label class="space-y-2">
               <span class="text-sm font-medium text-slate-700">子文件直链前缀（可选）</span>
               <input
@@ -4624,6 +5138,42 @@ async function syncSessionReceiptCode() {
               </span>
             </label>
 </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 弹窗：文件夹简介专注编辑（整块版面都给 vditor 所见即所得） -->
+  <Teleport to="body">
+    <Transition name="modal-shell">
+    <div v-if="folderDescriptionFocusOpen" class="fixed inset-0 z-[122] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+      <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+        <div class="modal-card panel relative my-auto flex w-full max-w-4xl flex-col overflow-visible">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 pb-3 pt-4">
+            <div class="min-w-0">
+              <h3 class="truncate text-lg font-semibold text-slate-900">编辑简介 · {{ currentFolderDetail?.name }}</h3>
+            </div>
+            <div class="flex shrink-0 gap-3">
+              <button type="button" class="btn-secondary" @click="closeFolderDescriptionFocusEditor">取消</button>
+              <button
+                type="button"
+                class="btn-primary"
+                :disabled="folderDescriptionSaving || !folderEditorDirty"
+                @click="saveFolderDescription"
+              >
+                {{ folderDescriptionSaving ? "保存中…" : "保存简介" }}
+              </button>
+            </div>
+          </div>
+          <!-- 预留编辑器版面：卸载会在淡出开始时就清空 vditor，不预留的话外壳会塌成一条 -->
+          <div class="vditor-flush" :style="{ minHeight: `${folderDescriptionFocusHeight}px` }">
+            <MarkdownEditor
+              v-model="folderDescriptionDraft"
+              :height="folderDescriptionFocusHeight"
+              placeholder="进入该文件夹后的详情区展示；支持 Markdown、公式与图表，可直接拖入或粘贴图片。"
+            />
           </div>
         </div>
       </div>
@@ -4929,5 +5479,26 @@ async function syncSessionReceiptCode() {
     opacity: 0;
     transform: translateY(-6px);
   }
+}
+
+/* 窄屏大纲抽屉：遮罩淡入淡出，面板自底部上滑/下滑 */
+.md-drawer-enter-active,
+.md-drawer-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.md-drawer-enter-active .md-drawer-sheet,
+.md-drawer-leave-active .md-drawer-sheet {
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.md-drawer-enter-from,
+.md-drawer-leave-to {
+  opacity: 0;
+}
+
+.md-drawer-enter-from .md-drawer-sheet,
+.md-drawer-leave-to .md-drawer-sheet {
+  transform: translateY(100%);
 }
 </style>

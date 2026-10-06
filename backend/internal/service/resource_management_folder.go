@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"openshare/backend/internal/model"
+	"openshare/backend/internal/repository"
 	"openshare/backend/internal/storage"
 	"openshare/backend/pkg/identity"
 )
@@ -110,6 +110,21 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 	}
 
 	oldRootPath := strings.TrimSpace(*current.SourcePath)
+
+	// 一致性编排：事务开启 → DB 更新（未提交）→ 磁盘改名 → 提交；
+	// 提交失败时把目录名改回旧名，避免整棵子树路径与磁盘脱节。
+	now := s.nowFunc()
+	tx := s.repo.DB().WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin folder update transaction: %w", tx.Error)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
 	newRootPath, err := s.storage.RenameManagedDirectory(oldRootPath, name)
 	if err != nil {
 		if errors.Is(err, storage.ErrManagedDirectoryConflict) {
@@ -136,12 +151,19 @@ func (s *ResourceManagementService) UpdateFolderDescription(ctx context.Context,
 		folderSourcePaths[folder.ID] = filepath.Join(newRootPath, relative)
 	}
 
-	if err := s.repo.UpdateFolderTreePaths(ctx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
+	if err := repository.UpdateFolderTreePathsTx(tx, folderID, name, description, remark, coverURL, prefix, customPath, applyDl, allowDl, folderSourcePaths, input.OperatorID, input.OperatorIP, logID, now); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrManagedFolderNotFound
 		}
 		return fmt.Errorf("update folder tree paths: %w", err)
 	}
+
+	if err := tx.Commit().Error; err != nil {
+		// 磁盘已改名，DB 未提交：把目录名还原回旧名
+		_, _ = s.storage.RenameManagedDirectory(newRootPath, current.Name)
+		return fmt.Errorf("commit folder update: %w", err)
+	}
+	committed = true
 	return nil
 }
 
@@ -169,8 +191,8 @@ type CreateFolderInput struct {
 }
 
 func (s *ResourceManagementService) CreateFolder(ctx context.Context, input CreateFolderInput) (*model.Folder, error) {
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
+	name, ok := model.NormalizeManagedFolderName(input.Name)
+	if !ok {
 		return nil, ErrInvalidResourceEdit
 	}
 	parentID := strings.TrimSpace(input.ParentID)
@@ -190,12 +212,6 @@ func (s *ResourceManagementService) CreateFolder(ctx context.Context, input Crea
 
 		// Resolve the managed root source path by walking up the tree
 		folderSourcePath = resolveNewFolderSourcePath(parent, name)
-		if folderSourcePath != nil {
-			diskPath := strings.TrimSpace(*folderSourcePath)
-			if err := s.storage.EnsureManagedDirectory(diskPath); err != nil {
-				return nil, fmt.Errorf("create directory on disk: %w", err)
-			}
-		}
 	}
 
 	// Check name conflict
@@ -232,16 +248,31 @@ func (s *ResourceManagementService) CreateFolder(ctx context.Context, input Crea
 	if err := s.repo.CreateFolder(ctx, folder, input.OperatorID, input.OperatorIP, now); err != nil {
 		return nil, fmt.Errorf("create folder: %w", err)
 	}
+
+	// DB 记录落库后再建磁盘目录；失败时删除刚建的记录，避免留下"有记录无目录"或
+	// 冲突检查前的空目录残留。
+	if folderSourcePath != nil {
+		if err := s.storage.EnsureManagedDirectory(strings.TrimSpace(*folderSourcePath)); err != nil {
+			if delErr := s.repo.DeleteFolderRecord(ctx, folder.ID); delErr != nil {
+				return nil, fmt.Errorf("create directory on disk failed (%v); cleanup db record failed: %w", err, delErr)
+			}
+			return nil, fmt.Errorf("create directory on disk: %w", err)
+		}
+	}
 	return folder, nil
 }
 
 // resolveNewFolderSourcePath builds the on-disk path for a new folder named childName
 // under the given parent. Returns nil if the parent is not part of a managed tree.
+// childName 必须已经过 NormalizeManagedFolderName 校验，这里再做一次 Base 防御。
 func resolveNewFolderSourcePath(parent *model.Folder, childName string) *string {
 	if parent == nil {
 		return nil
 	}
 	if parent.SourcePath == nil || strings.TrimSpace(*parent.SourcePath) == "" {
+		return nil
+	}
+	if validated, ok := model.NormalizeManagedFolderName(childName); !ok || validated != childName {
 		return nil
 	}
 	rootPath := filepath.Clean(strings.TrimSpace(*parent.SourcePath))
@@ -251,8 +282,8 @@ func resolveNewFolderSourcePath(parent *model.Folder, childName string) *string 
 
 // CreateVirtualFolder 创建虚拟目录（无物理磁盘路径，仅存数据库，子文件通过 CDN 直链提供）。
 func (s *ResourceManagementService) CreateVirtualFolder(ctx context.Context, input CreateFolderInput) (*model.Folder, error) {
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
+	name, ok := model.NormalizeManagedFolderName(input.Name)
+	if !ok {
 		return nil, ErrInvalidResourceEdit
 	}
 	parentID := strings.TrimSpace(input.ParentID)
@@ -394,19 +425,28 @@ func (s *ResourceManagementService) CreateVirtualFile(ctx context.Context, input
 		return nil, ErrManagedFileConflict
 	}
 
-	// HEAD 请求获取文件大小：代理模式用代理源地址，否则用前台直链
+	// HEAD 请求获取文件大小：代理模式用代理源地址（proxy 模式允许内网存储），
+	// 否则用前台直链（strict 模式拒绝内网目标）。
+	// 探测失败仅跳过大小探测（size 落库为 0），错误打印日志，不阻断创建。
 	headURL := proxySourceURL
+	headMode := SSRFModeStrict
 	if headURL == "" {
 		headURL = playbackURL
+	} else if input.ProxyDownload {
+		headMode = SSRFModeProxy
 	}
 	fileSize := int64(0)
 	if headURL != "" {
-		client := &http.Client{Timeout: 10 * time.Second}
-		headResp, err := client.Head(headURL)
-		if err == nil && headResp != nil {
-			headResp.Body.Close()
-			if headResp.ContentLength > 0 {
-				fileSize = headResp.ContentLength
+		if validateErr := validateSSRFURL(headURL, headMode); validateErr == nil {
+			client := NewSSRFFetchClient(headMode, 10*time.Second)
+			headResp, err := client.Head(headURL)
+			if err == nil && headResp != nil {
+				headResp.Body.Close()
+				if headResp.ContentLength > 0 {
+					fileSize = headResp.ContentLength
+				}
+			} else if err != nil {
+				fmt.Printf("[warn] virtual file HEAD probe failed for %q: %v\n", headURL, err)
 			}
 		}
 	}

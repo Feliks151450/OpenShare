@@ -67,7 +67,10 @@ fi
 
 echo "==> 安装前端依赖"
 cd "$ROOT_DIR/frontend"
-npm install > "$FRONTEND_LOG" 2>&1
+if ! npm install > "$FRONTEND_LOG" 2>&1; then
+  echo "错误: npm install 失败，详见 $FRONTEND_LOG"
+  exit 1
+fi
 
 echo "==> 启动前端开发服务器（后台永久运行）"
 nohup npm run dev -- --host 0.0.0.0 > "$FRONTEND_LOG" 2>&1 &
@@ -76,7 +79,13 @@ FRONTEND_PID=$!
 
 echo "==> 启动后端服务（后台永久运行）"
 cd "$ROOT_DIR/backend"
-nohup go run ./cmd/server > "$BACKEND_LOG" 2>&1 &
+# go build 产出真实二进制再运行：backend.pid 即服务进程本身，
+# kill 它就是停服务，不会像 go run 那样留下孤儿进程占用 :8080
+if ! go build -o "$LOCAL_DATA_DIR/openshare-dev" ./cmd/server; then
+  echo "错误: 后端编译失败，详见 $BACKEND_LOG"
+  exit 1
+fi
+nohup "$LOCAL_DATA_DIR/openshare-dev" > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 
 # 改动2：将 PID 写入文件，方便后续手动停止
@@ -110,4 +119,4 @@ done
 
 echo "服务已在后台运行，退出终端不会中断"
 echo "如需停止服务，请执行："
-echo "  kill \$(cat $LOCAL_DATA_DIR/frontend.pid) \$(cat $LOCAL_DATA_DIR/backend.pid) 2>/dev/null"
+echo "  ./stop.sh --daemon"

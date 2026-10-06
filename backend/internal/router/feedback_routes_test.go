@@ -24,7 +24,11 @@ func createFeedbackTestFile(t *testing.T, db *gorm.DB) *model.File {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := db.Create(folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(folder).Error; err != nil {
 		t.Fatalf("create folder failed: %v", err)
 	}
 
@@ -38,7 +42,11 @@ func createFeedbackTestFile(t *testing.T, db *gorm.DB) *model.File {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := db.Create(file).Error; err != nil {
+	fileSQL := db
+	if file.CustomPath == "" {
+		fileSQL = db.Omit("custom_path")
+	}
+	if err := fileSQL.Create(file).Error; err != nil {
 		t.Fatalf("create file failed: %v", err)
 	}
 	return file
@@ -54,7 +62,11 @@ func createFeedbackTestFolder(t *testing.T, db *gorm.DB) *model.Folder {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := db.Create(folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(folder).Error; err != nil {
 		t.Fatalf("create folder failed: %v", err)
 	}
 	return folder

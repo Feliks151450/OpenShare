@@ -169,20 +169,23 @@ func collectManagedRootCleanupStatsTx(tx *gorm.DB, fileIDs []string, folderIDs [
 
 func linkedManagedResourceScope(tx *gorm.DB, fileIDs []string, folderIDs []string) *gorm.DB {
 	hasCondition := false
+	var grouped *gorm.DB
 	if len(folderIDs) > 0 {
-		tx = tx.Where("folder_id IN ?", folderIDs)
+		grouped = tx.Where("folder_id IN ?", folderIDs)
 		hasCondition = true
 	}
 	if len(fileIDs) > 0 {
-		if hasCondition {
-			tx = tx.Or("file_id IN ?", fileIDs)
+		if grouped != nil {
+			grouped = grouped.Or("file_id IN ?", fileIDs)
 		} else {
-			tx = tx.Where("file_id IN ?", fileIDs)
-			hasCondition = true
+			grouped = tx.Where("file_id IN ?", fileIDs)
 		}
+		hasCondition = true
 	}
 	if !hasCondition {
 		return tx.Where("1 = 0")
 	}
-	return tx
+	// 用嵌套 Where 分组（生成 "(A OR B)"），否则后续链式 .Where("status = ...")
+	// 会因 SQL AND 优先级高于 OR 而只作用于 OR 的右支
+	return tx.Where(grouped)
 }

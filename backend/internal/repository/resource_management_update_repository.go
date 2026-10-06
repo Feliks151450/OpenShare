@@ -42,6 +42,52 @@ func appendCustomPathUpdate(updates map[string]any, customPath string) {
 	}
 }
 
+// UpdateFileMetadataTx 在传入事务内更新文件元数据并写操作日志。
+func UpdateFileMetadataTx(
+	tx *gorm.DB,
+	fileID string,
+	name string,
+	extension string,
+	description string,
+	remark string,
+	playbackURL string,
+	playbackFallbackURL string,
+	proxySourceURL string,
+	coverURL *string,
+	customPath string,
+	applyAllowDownload bool,
+	allowDownload *bool,
+	operatorID string,
+	operatorIP string,
+	logID string,
+	now time.Time,
+) error {
+	updates := map[string]any{
+		"name":                  name,
+		"extension":             extension,
+		"description":           description,
+		"remark":                remark,
+		"playback_url":          playbackURL,
+		"playback_fallback_url": playbackFallbackURL,
+		"proxy_source_url":      proxySourceURL,
+		"updated_at":            now,
+	}
+	if coverURL != nil {
+		updates["cover_url"] = *coverURL
+	}
+	appendCustomPathUpdate(updates, customPath)
+	appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
+	result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update file metadata: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	return createOperationLogTx(tx, logID, operatorID, "resource_updated", "file", fileID, name, operatorIP, now)
+}
+
 func (r *ResourceManagementRepository) UpdateFileMetadata(
 	ctx context.Context,
 	fileID string,
@@ -62,30 +108,7 @@ func (r *ResourceManagementRepository) UpdateFileMetadata(
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updates := map[string]any{
-			"name":                  name,
-			"extension":             extension,
-			"description":           description,
-			"remark":                remark,
-			"playback_url":          playbackURL,
-			"playback_fallback_url": playbackFallbackURL,
-		"proxy_source_url":      proxySourceURL,
-			"updated_at":            now,
-		}
-		if coverURL != nil {
-			updates["cover_url"] = *coverURL
-		}
-		appendCustomPathUpdate(updates, customPath)
-		appendAllowDownloadUpdate(updates, applyAllowDownload, allowDownload)
-		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates)
-		if result.Error != nil {
-			return fmt.Errorf("update file metadata: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-
-		return createOperationLogTx(tx, logID, operatorID, "resource_updated", "file", fileID, name, operatorIP, now)
+		return UpdateFileMetadataTx(tx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, customPath, applyAllowDownload, allowDownload, operatorID, operatorIP, logID, now)
 	})
 }
 
@@ -164,6 +187,63 @@ func (r *ResourceManagementRepository) UpdateRootFolderHidePublicCatalog(
 	})
 }
 
+// UpdateFolderTreePathsTx 在传入事务内更新目录树路径（目录改名）并写操作日志。
+func UpdateFolderTreePathsTx(
+	tx *gorm.DB,
+	folderID string,
+	name string,
+	description string,
+	remark string,
+	coverURL *string,
+	directLinkPrefix string,
+	customPath string,
+	applyAllowDownload bool,
+	allowDownload *bool,
+	folderSourcePaths map[string]string,
+	operatorID string,
+	operatorIP string,
+	logID string,
+	now time.Time,
+) error {
+	rootUpdates := map[string]any{
+		"name":               name,
+		"description":        description,
+		"remark":             remark,
+		"direct_link_prefix": directLinkPrefix,
+		"updated_at":         now,
+	}
+	if coverURL != nil {
+		rootUpdates["cover_url"] = *coverURL
+	}
+	appendCustomPathUpdate(rootUpdates, customPath)
+	appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)
+	if sourcePath, ok := folderSourcePaths[folderID]; ok {
+		rootUpdates["source_path"] = sourcePath
+	}
+
+	result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(rootUpdates)
+	if result.Error != nil {
+		return fmt.Errorf("update root folder metadata: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	for id, sourcePath := range folderSourcePaths {
+		if id == folderID {
+			continue
+		}
+		if err := tx.Model(&model.Folder{}).Where("id = ?", id).Updates(map[string]any{
+			"source_path": sourcePath,
+			"updated_at":  now,
+		}).Error; err != nil {
+			return fmt.Errorf("update child folder path: %w", err)
+		}
+	}
+
+	return createOperationLogTx(tx, logID, operatorID, "folder_updated", "folder", folderID, name, operatorIP, now)
+}
+
 func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	ctx context.Context,
 	folderID string,
@@ -182,43 +262,7 @@ func (r *ResourceManagementRepository) UpdateFolderTreePaths(
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rootUpdates := map[string]any{
-			"name":               name,
-			"description":        description,
-			"remark":             remark,
-			"direct_link_prefix": directLinkPrefix,
-			"updated_at":         now,
-		}
-		if coverURL != nil {
-			rootUpdates["cover_url"] = *coverURL
-		}
-		appendCustomPathUpdate(rootUpdates, customPath)
-		appendAllowDownloadUpdate(rootUpdates, applyAllowDownload, allowDownload)
-		if sourcePath, ok := folderSourcePaths[folderID]; ok {
-			rootUpdates["source_path"] = sourcePath
-		}
-
-		result := tx.Model(&model.Folder{}).Where("id = ?", folderID).Updates(rootUpdates)
-		if result.Error != nil {
-			return fmt.Errorf("update root folder metadata: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-
-		for id, sourcePath := range folderSourcePaths {
-			if id == folderID {
-				continue
-			}
-			if err := tx.Model(&model.Folder{}).Where("id = ?", id).Updates(map[string]any{
-				"source_path": sourcePath,
-				"updated_at":  now,
-			}).Error; err != nil {
-				return fmt.Errorf("update child folder path: %w", err)
-			}
-		}
-
-		return createOperationLogTx(tx, logID, operatorID, "folder_updated", "folder", folderID, name, operatorIP, now)
+		return UpdateFolderTreePathsTx(tx, folderID, name, description, remark, coverURL, directLinkPrefix, customPath, applyAllowDownload, allowDownload, folderSourcePaths, operatorID, operatorIP, logID, now)
 	})
 }
 
@@ -238,6 +282,14 @@ func (r *ResourceManagementRepository) CreateFolder(ctx context.Context, folder 
 		}
 		return createOperationLogTx(tx, logID, operatorID, "folder_created", "folder", folder.ID, folder.Name, operatorIP, now)
 	})
+}
+
+// DeleteFolderRecord 删除单条目录记录（不含子树与统计调整）。
+// 仅供 CreateFolder 在磁盘目录创建失败时回滚刚建的空记录使用。
+func (r *ResourceManagementRepository) DeleteFolderRecord(ctx context.Context, folderID string) error {
+	return r.db.WithContext(ctx).
+		Where("id = ?", folderID).
+		Delete(&model.Folder{}).Error
 }
 
 func (r *ResourceManagementRepository) CreateFile(ctx context.Context, file *model.File, operatorID string, operatorIP string, now time.Time) error {
@@ -341,21 +393,91 @@ func (r *ResourceManagementRepository) UpdateFolderFileOrder(ctx context.Context
 	})
 }
 
+// UpdateFileSizeTx 在传入事务内更新文件大小（内容替换后）并同步调整目录统计。
+func UpdateFileSizeTx(tx *gorm.DB, fileID string, newSize int64, operatorID, operatorIP, logID string, now time.Time) error {
+	var file model.File
+	if err := tx.Select("id, folder_id, size").
+		Where("id = ?", fileID).
+		Take(&file).Error; err != nil {
+		return err
+	}
+	result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(map[string]any{
+		"size":       newSize,
+		"updated_at": now,
+	})
+	if result.Error != nil {
+		return fmt.Errorf("update file size: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if sizeDelta := newSize - file.Size; sizeDelta != 0 {
+		if err := model.AdjustFolderStatsTx(tx, file.FolderID, sizeDelta, 0, 0); err != nil {
+			return fmt.Errorf("adjust folder stats after replace: %w", err)
+		}
+	}
+	return createOperationLogTx(tx, logID, operatorID, "file_replaced", "file", fileID, "file content replaced", operatorIP, now)
+}
+
 // UpdateFileSize updates a file's size and updated_at after content replacement.
 func (r *ResourceManagementRepository) UpdateFileSize(ctx context.Context, fileID string, newSize int64, operatorID, operatorIP, logID string, now time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(map[string]any{
-			"size":       newSize,
-			"updated_at": now,
-		})
-		if result.Error != nil {
-			return fmt.Errorf("update file size: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return createOperationLogTx(tx, logID, operatorID, "file_replaced", "file", fileID, "file content replaced", operatorIP, now)
+		return UpdateFileSizeTx(tx, fileID, newSize, operatorID, operatorIP, logID, now)
 	})
+}
+
+// MoveFileToFolderTx 在传入事务内更新文件 folder_id 并双向调整目录统计。
+func MoveFileToFolderTx(
+	tx *gorm.DB,
+	fileID string,
+	targetFolderID string,
+	operatorID string,
+	operatorIP string,
+	logID string,
+	now time.Time,
+) error {
+	var file model.File
+	if err := tx.Select("id, folder_id, name, size, download_count").
+		Where("id = ?", fileID).
+		Take(&file).Error; err != nil {
+		return err
+	}
+
+	if file.FolderID == nil || *file.FolderID == targetFolderID {
+		return fmt.Errorf("file already in target folder")
+	}
+
+	// 检查目标文件夹下是否已有同名文件
+	var conflictCount int64
+	if err := tx.Model(&model.File{}).
+		Where("folder_id = ? AND name = ? AND id != ?", targetFolderID, file.Name, fileID).
+		Count(&conflictCount).Error; err != nil {
+		return fmt.Errorf("check file name conflict in target folder: %w", err)
+	}
+	if conflictCount > 0 {
+		return fmt.Errorf("target folder already contains a file named %q", file.Name)
+	}
+
+	srcFolderID := *file.FolderID
+
+	// 更新文件的 folder_id
+	if err := tx.Model(&model.File{}).Where("id = ?", fileID).
+		Update("folder_id", targetFolderID).Error; err != nil {
+		return fmt.Errorf("update file folder_id: %w", err)
+	}
+
+	// 调整源文件夹统计（减）
+	if err := model.AdjustFolderStatsTx(tx, &srcFolderID, -file.Size, -file.DownloadCount, -1); err != nil {
+		return fmt.Errorf("adjust source folder stats: %w", err)
+	}
+
+	// 调整目标文件夹统计（加）
+	if err := model.AdjustFolderStatsTx(tx, &targetFolderID, file.Size, file.DownloadCount, 1); err != nil {
+		return fmt.Errorf("adjust target folder stats: %w", err)
+	}
+
+	detail := fmt.Sprintf("moved %q from folder %s to folder %s", file.Name, srcFolderID, targetFolderID)
+	return createOperationLogTx(tx, logID, operatorID, "file_moved", "file", fileID, detail, operatorIP, now)
 }
 
 // MoveFileToFolder updates a file's folder_id and adjusts folder stats for both
@@ -370,47 +492,6 @@ func (r *ResourceManagementRepository) MoveFileToFolder(
 	now time.Time,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var file model.File
-		if err := tx.Select("id, folder_id, name, size, download_count").
-			Where("id = ?", fileID).
-			Take(&file).Error; err != nil {
-			return err
-		}
-
-		if file.FolderID == nil || *file.FolderID == targetFolderID {
-			return fmt.Errorf("file already in target folder")
-		}
-
-		// 检查目标文件夹下是否已有同名文件
-		var conflictCount int64
-		if err := tx.Model(&model.File{}).
-			Where("folder_id = ? AND name = ? AND id != ?", targetFolderID, file.Name, fileID).
-			Count(&conflictCount).Error; err != nil {
-			return fmt.Errorf("check file name conflict in target folder: %w", err)
-		}
-		if conflictCount > 0 {
-			return fmt.Errorf("target folder already contains a file named %q", file.Name)
-		}
-
-		srcFolderID := *file.FolderID
-
-		// 更新文件的 folder_id
-		if err := tx.Model(&model.File{}).Where("id = ?", fileID).
-			Update("folder_id", targetFolderID).Error; err != nil {
-			return fmt.Errorf("update file folder_id: %w", err)
-		}
-
-		// 调整源文件夹统计（减）
-		if err := model.AdjustFolderStatsTx(tx, &srcFolderID, -file.Size, -file.DownloadCount, -1); err != nil {
-			return fmt.Errorf("adjust source folder stats: %w", err)
-		}
-
-		// 调整目标文件夹统计（加）
-		if err := model.AdjustFolderStatsTx(tx, &targetFolderID, file.Size, file.DownloadCount, 1); err != nil {
-			return fmt.Errorf("adjust target folder stats: %w", err)
-		}
-
-		detail := fmt.Sprintf("moved %q from folder %s to folder %s", file.Name, srcFolderID, targetFolderID)
-		return createOperationLogTx(tx, logID, operatorID, "file_moved", "file", fileID, detail, operatorIP, now)
+		return MoveFileToFolderTx(tx, fileID, targetFolderID, operatorID, operatorIP, logID, now)
 	})
 }

@@ -7,6 +7,7 @@ import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { toastError } from "../../lib/toast";
+import { useSessionStore } from "../../stores/session";
 
 interface OperationLogItem {
   id: string;
@@ -31,6 +32,12 @@ const total = ref(0);
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 
 onMounted(() => {
+  // 后端已将该接口收紧为 manage_system 权限；无权限时不再发起注定 403 的请求
+  if (!useSessionStore().hasPermission("manage_system")) {
+    loading.value = false;
+    error.value = "当前账号没有查看操作记录的权限。";
+    return;
+  }
   void loadItems();
 });
 

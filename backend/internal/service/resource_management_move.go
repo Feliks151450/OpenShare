@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"openshare/backend/internal/model"
+	"openshare/backend/internal/repository"
 	"openshare/backend/pkg/identity"
 )
 
@@ -41,6 +42,10 @@ type MoveFileInput struct {
 	OperatorIP     string
 }
 
+// MoveFile 移动文件到目标目录。
+// 一致性编排：事务开启 → DB 移动（未提交）→ 磁盘移动 → 提交；
+// 磁盘失败回滚事务；提交失败时把磁盘文件移回源目录。
+// 物理文件移入虚拟目录时旧磁盘文件改入回收站（原为永久删除，DB 失败即丢数据）。
 func (s *ResourceManagementService) MoveFile(ctx context.Context, input MoveFileInput) error {
 	fileID := strings.TrimSpace(input.FileID)
 	targetFolderID := strings.TrimSpace(input.TargetFolderID)
@@ -77,10 +82,37 @@ func (s *ResourceManagementService) MoveFile(ctx context.Context, input MoveFile
 		return fmt.Errorf("file already in the target folder")
 	}
 
-	// 虚拟目录 / 非虚拟目录处理
-	if !srcFolder.IsVirtual && !dstFolder.IsVirtual {
+	// 预解析磁盘路径（磁盘操作发生在事务窗口内）
+	srcPath := ""
+	if !srcFolder.IsVirtual {
+		srcPath = model.BuildManagedFilePath(folderSourcePath(srcFolder), file.Name)
+	}
+
+	logID, err := identity.NewID()
+	if err != nil {
+		return fmt.Errorf("generate move log id: %w", err)
+	}
+	now := s.nowFunc()
+
+	tx := s.repo.DB().WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin move transaction: %w", tx.Error)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	if err := repository.MoveFileToFolderTx(tx, fileID, targetFolderID, input.OperatorID, input.OperatorIP, logID, now); err != nil {
+		return fmt.Errorf("move file in database: %w", err)
+	}
+
+	trashPath := ""
+	switch {
+	case !srcFolder.IsVirtual && !dstFolder.IsVirtual:
 		// 两个都是物理文件夹：移动磁盘文件
-		srcPath := model.BuildManagedFilePath(folderSourcePath(srcFolder), file.Name)
 		if srcPath == "" {
 			return fmt.Errorf("cannot resolve source file path")
 		}
@@ -91,26 +123,30 @@ func (s *ResourceManagementService) MoveFile(ctx context.Context, input MoveFile
 		); err != nil {
 			return fmt.Errorf("move managed file on disk: %w", err)
 		}
-	} else if srcFolder.IsVirtual && !dstFolder.IsVirtual {
-		// 虚拟文件移动到物理文件夹：仅更新 DB，无磁盘操作
-	} else if !srcFolder.IsVirtual && dstFolder.IsVirtual {
-		// 物理文件移动到虚拟目录：删除磁盘文件，仅保留 DB 记录
-		srcPath := model.BuildManagedFilePath(folderSourcePath(srcFolder), file.Name)
+	case !srcFolder.IsVirtual && dstFolder.IsVirtual:
+		// 物理文件移动到虚拟目录：旧磁盘文件移入回收站（保留恢复能力）
 		if srcPath != "" {
-			if err := s.storage.RemoveManagedFilePermanently(srcPath); err != nil {
-				return fmt.Errorf("remove source file when moving to virtual folder: %w", err)
+			trashPath, err = s.storage.MoveManagedFileToTrash(srcPath)
+			if err != nil {
+				return fmt.Errorf("move source file to trash when moving to virtual folder: %w", err)
 			}
 		}
+		// 虚拟→物理、虚拟→虚拟：仅 DB，无磁盘操作
 	}
-	// 两个都是虚拟目录：仅更新 DB
 
-	logID, err := identity.NewID()
-	if err != nil {
-		return fmt.Errorf("generate move log id: %w", err)
+	if err := tx.Commit().Error; err != nil {
+		// 提交失败：把磁盘状态还原
+		if !srcFolder.IsVirtual && !dstFolder.IsVirtual && srcPath != "" {
+			// 物理→物理：文件已在新目录，移回源目录
+			_ = s.storage.MoveManagedFileToFolder(folderSourcePath(dstFolder), folderSourcePath(srcFolder), file.Name)
+		}
+		if trashPath != "" && srcPath != "" {
+			if _, restoreErr := s.storageMoveRestore(trashPath, srcPath); restoreErr != nil {
+				return fmt.Errorf("commit move failed (%v); restore from trash failed: %w", err, restoreErr)
+			}
+		}
+		return fmt.Errorf("commit move: %w", err)
 	}
-	now := s.nowFunc()
-	if err := s.repo.MoveFileToFolder(ctx, fileID, targetFolderID, input.OperatorID, input.OperatorIP, logID, now); err != nil {
-		return fmt.Errorf("move file in database: %w", err)
-	}
+	committed = true
 	return nil
 }

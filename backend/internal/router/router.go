@@ -45,12 +45,12 @@ func New(db *gorm.DB, cfg config.Config, sessionManager *session.Manager) *gin.E
 	})
 
 	api := engine.Group("/api")
-	registerPublicRoutes(api, handlers)
+	registerPublicRoutes(api, handlers, cfg)
 	// 基于文件夹层级路径的下载直链，注册在顶层以获得更短的 /dl/*path 路径
 	// 同时支持 HEAD 探测：媒体客户端在发起 Range GET 前常用 HEAD 获取 Content-Length/Accept-Ranges。
 	engine.GET("/dl/*path", handlers.publicDownload.DownloadByPath)
 	engine.HEAD("/dl/*path", handlers.publicDownload.DownloadByPath)
-	registerAdminRoutes(api, handlers)
+	registerAdminRoutes(api, handlers, cfg)
 	webui.Register(engine, newCustomPathHTMLHandler(services.publicCatalog, services.publicDownload))
 
 	return engine

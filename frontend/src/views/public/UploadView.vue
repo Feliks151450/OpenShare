@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { safeSessionSet } from "../../lib/safeStorage";
 
 import EmptyState from "../../components/ui/EmptyState.vue";
 import PageHeader from "../../components/ui/PageHeader.vue";
@@ -104,11 +105,11 @@ async function lookupReceipt() {
 
   if (submissionResult.status === "fulfilled") {
     submissionLookupResult.value = submissionResult.value;
-    sessionStorage.setItem("openshare_receipt_code", submissionResult.value.receipt_code);
+    safeSessionSet("openshare_receipt_code", submissionResult.value.receipt_code);
   }
   if (feedbackResult.status === "fulfilled") {
     feedbackLookupResult.value = feedbackResult.value;
-    sessionStorage.setItem("openshare_receipt_code", feedbackResult.value.receipt_code);
+    safeSessionSet("openshare_receipt_code", feedbackResult.value.receipt_code);
   }
 
   if (!submissionLookupResult.value && !feedbackLookupResult.value) {

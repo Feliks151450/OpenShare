@@ -25,6 +25,10 @@ func (s *ImportService) ListDirectories(_ context.Context, rootPath string) (*Im
 	if err != nil {
 		return nil, err
 	}
+	// 白名单校验：配置了 import.allowed_roots 时，浏览范围限制在白名单目录及其子目录内
+	if !s.pathAllowedByRoots(currentPath) {
+		return nil, ErrInvalidImportPath
+	}
 
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {

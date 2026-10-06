@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -98,6 +99,27 @@ func (r *UploadRepository) CreateUploadBatch(ctx context.Context, submissions []
 	})
 }
 
+// FindFolderIDBySourcePath returns the managed folder ID whose source_path matches
+// the given absolute disk path, or an empty string when no folder record points there.
+func (r *UploadRepository) FindFolderIDBySourcePath(ctx context.Context, sourcePath string) (string, error) {
+	trimmed := strings.TrimSpace(sourcePath)
+	if trimmed == "" {
+		return "", nil
+	}
+	var folder model.Folder
+	err := r.db.WithContext(ctx).
+		Select("id").
+		Where("source_path = ?", trimmed).
+		Take(&folder).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find folder by source path: %w", err)
+	}
+	return folder.ID, nil
+}
+
 // UpdateExistingFileMetadata finds a file by folder ID and name, then updates its
 // size, extension, and mime type. Adjusts folder stats for the size delta.
 // Returns the existing file ID, or empty string if not found.
@@ -159,12 +181,15 @@ func (r *UploadRepository) FileIDExists(ctx context.Context, fileID string) (boo
 	return count > 0, nil
 }
 
-// UpdateExistingFileByID updates an existing file's metadata by its ID.
-// Returns the old file's name and folder source path for disk cleanup, or empty strings if not found.
+// UpdateExistingFileByID updates an existing file's metadata by its ID and moves the
+// record into targetFolderID (the folder the new content is uploaded to). Folder stats
+// are adjusted across both folders. Returns the old file's name and folder source path
+// so the caller can clean up the stale disk file, or empty strings if not found.
 func (r *UploadRepository) UpdateExistingFileByID(
 	ctx context.Context,
 	fileID string,
 	submission *model.Submission,
+	targetFolderID string,
 	now time.Time,
 ) (oldName string, oldFolderPath string, err error) {
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -179,7 +204,6 @@ func (r *UploadRepository) UpdateExistingFileByID(
 		}
 
 		oldName = f.Name
-		sizeDelta := submission.Size - f.Size
 		updates := map[string]any{
 			"name":        submission.Name,
 			"description": submission.Description,
@@ -188,10 +212,23 @@ func (r *UploadRepository) UpdateExistingFileByID(
 			"size":        submission.Size,
 			"updated_at":  now,
 		}
+		if targetFolderID != "" && (f.FolderID == nil || *f.FolderID != targetFolderID) {
+			updates["folder_id"] = targetFolderID
+		}
 		if err := tx.Model(&model.File{}).Where("id = ?", fileID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update existing file: %w", err)
 		}
-		if sizeDelta != 0 {
+
+		moved := targetFolderID != "" && (f.FolderID == nil || *f.FolderID != targetFolderID)
+		if moved {
+			// 跨目录覆盖：旧目录整体失去该文件（含原大小），新目录获得新大小
+			if err := model.AdjustFolderStatsTx(tx, f.FolderID, -f.Size, 0, -1); err != nil {
+				return fmt.Errorf("adjust source folder stats: %w", err)
+			}
+			if err := model.AdjustFolderStatsTx(tx, &targetFolderID, submission.Size, 0, 1); err != nil {
+				return fmt.Errorf("adjust target folder stats: %w", err)
+			}
+		} else if sizeDelta := submission.Size - f.Size; sizeDelta != 0 {
 			if err := model.AdjustFolderStatsTx(tx, f.FolderID, sizeDelta, 0, 0); err != nil {
 				return fmt.Errorf("adjust folder stats: %w", err)
 			}

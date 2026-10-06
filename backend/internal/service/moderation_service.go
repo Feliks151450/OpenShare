@@ -140,7 +140,8 @@ func (s *ModerationService) ApproveSubmission(ctx context.Context, submissionID 
 		return nil, err
 	}
 
-	// Move staged file into the folder's physical directory.
+	// Move staged file into the folder's physical directory within the
+	// transaction window; commit failure rolls the file back to staging.
 	finalPath, finalName, err := s.storage.MoveStagedFileToFolder(record.Submission.StagingPath, *targetFolder.SourcePath, record.Submission.Name)
 	if err != nil {
 		return nil, fmt.Errorf("move staged file to folder: %w", err)
@@ -148,8 +149,22 @@ func (s *ModerationService) ApproveSubmission(ctx context.Context, submissionID 
 	finalRelativePath := replaceRelativePathBase(relativePath, finalName)
 
 	reviewedAt := s.nowFunc()
-	if err := s.repository.ApproveSubmission(
-		ctx,
+	tx := s.repository.DB().WithContext(ctx).Begin()
+	if tx.Error != nil {
+		if _, rollbackErr := s.storage.MoveFileBackToStaging(finalPath, record.Submission.StagingPath); rollbackErr != nil {
+			return nil, fmt.Errorf("begin approve transaction failed (%v); rollback failed: %w", tx.Error, rollbackErr)
+		}
+		return nil, fmt.Errorf("begin approve transaction: %w", tx.Error)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	if err := repository.ApproveSubmissionTx(
+		tx,
 		record.Submission.ID,
 		adminID,
 		operatorIP,
@@ -164,6 +179,14 @@ func (s *ModerationService) ApproveSubmission(ctx context.Context, submissionID 
 		}
 		return nil, fmt.Errorf("approve submission: %w", err)
 	}
+
+	if err := tx.Commit().Error; err != nil {
+		if _, rollbackErr := s.storage.MoveFileBackToStaging(finalPath, record.Submission.StagingPath); rollbackErr != nil {
+			return nil, fmt.Errorf("approve commit failed (%v); rollback failed: %w", err, rollbackErr)
+		}
+		return nil, fmt.Errorf("approve commit: %w", err)
+	}
+	committed = true
 
 	return &ReviewResult{
 		SubmissionID: record.Submission.ID,
@@ -235,15 +258,20 @@ func (s *ModerationService) RejectSubmission(ctx context.Context, submissionID s
 	if err != nil {
 		return nil, fmt.Errorf("validate staged file: %w", err)
 	}
-	if exists {
-		if err := s.storage.DeleteStagedFile(record.Submission.StagingPath); err != nil {
-			return nil, fmt.Errorf("delete staged file: %w", err)
-		}
-	}
 
+	// 顺序：先提交 DB 拒绝（原子事务），成功后再删除暂存文件（best-effort）。
+	// 原实现先删文件后写 DB：DB 失败时提交永久卡死在 pending（staged 文件已不在，
+	// 后续审批/驳回均报 ErrStagedFileMissing）。
 	reviewedAt := s.nowFunc()
 	if err := s.repository.RejectSubmission(ctx, record.Submission.ID, adminID, operatorIP, reviewedAt, reviewReason); err != nil {
 		return nil, fmt.Errorf("reject submission: %w", err)
+	}
+
+	if exists {
+		if err := s.storage.DeleteStagedFile(record.Submission.StagingPath); err != nil {
+			fmt.Printf("[warn] delete staged file %q after rejecting submission %s failed: %v\n",
+				record.Submission.StagingPath, record.Submission.ID, err)
+		}
 	}
 
 	return &ReviewResult{

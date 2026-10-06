@@ -1,11 +1,19 @@
 // Web Worker: offloads CPU-intensive marked.parse() from the main thread.
 // DOMPurify stays on the main thread (requires DOM API).
 import { marked, type Renderer, type Tokens } from "marked";
-import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref, markdownFencedCodeHtml } from "./markdown-shared";
-// Reuse the same marked config across invocations
+import {
+  escapeHtml,
+  isSafeImageUrlForSrc,
+  resolveMarkdownImageUrlToHref,
+  markdownFencedCodeHtml,
+  markdownLinkHtml,
+} from "./markdown-shared";
+// Reuse the same marked config across invocations.
+// breaks 必须与主线程 markdown.ts 保持一致（false），否则同一段简介在
+// 正文与编辑器预览中换行表现不同。
 marked.use({
   gfm: true,
-  breaks: true,
+  breaks: false,
   renderer: {
     code(this: Renderer, token: Tokens.Code): string {
       return markdownFencedCodeHtml(token.lang ?? "", token.text, token.escaped ?? false);
@@ -35,6 +43,10 @@ marked.use({
           ? ` title="${escapeHtml(String(token.title))}"`
           : "";
       return `<img src="${src}" alt="${alt}" class="markdown-img" loading="lazy" decoding="async"${maxWidthStyle}${title} />`;
+    },
+    link(this: Renderer, token: Tokens.Link): string {
+      const inner = this.parser.parseInline(token.tokens);
+      return markdownLinkHtml(String(token.href ?? ""), token.title, inner);
     },
   },
 });

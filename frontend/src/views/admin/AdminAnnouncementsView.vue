@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, toRef, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import EmptyState from "../../components/ui/EmptyState.vue";
+import MarkdownEditor from "../../components/markdown/MarkdownEditor.vue";
 import PageHeader from "../../components/ui/PageHeader.vue";
 import SurfaceCard from "../../components/ui/SurfaceCard.vue";
 import { httpClient } from "../../lib/http/client";
 import { readApiError } from "../../lib/http/helpers";
 import { renderSimpleMarkdown } from "../../lib/markdown";
-import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import { toastError, toastSuccess } from "../../lib/toast";
 import { useSessionStore } from "../../stores/session";
 
@@ -49,18 +49,8 @@ const form = reactive({
   isHome: false,
 });
 
-const announcementContentTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const {
-  isDragOver: annIsDragOver,
-  isUploading: annIsUploading,
-  onDragEnter: onAnnDragEnter,
-  onDragOver: onAnnDragOver,
-  onDragLeave: onAnnDragLeave,
-  handleDrop: onAnnDrop,
-} = useMarkdownImageDrop({ modelRef: toRef(form, "content") });
 const canManageAnnouncements = computed(() => sessionStore.hasPermission("announcements"));
 const editorTitle = computed(() => editingItem.value ? "编辑公告" : "新建公告");
-const previewHTML = computed(() => renderSimpleMarkdown(form.content));
 const formDirty = computed(() => {
   if (!editingItem.value) {
     return form.title.trim().length > 0 || form.content.trim().length > 0;
@@ -344,7 +334,7 @@ function homeLabel(item: AnnouncementItem) {
     </SurfaceCard>
   </section>
 
-  <!-- 新建/编辑公告弹窗：左右分栏布局，左侧编辑区（标题 + 发布设置 + 正文），右侧 Markdown 实时预览 -->
+  <!-- 新建/编辑公告弹窗：单栏所见即所得编辑（标题 + 发布设置 + 正文） -->
   <Teleport to="body">
     <Transition name="modal-shell">
     <div v-if="editorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/30 lg:px-4 lg:py-6">
@@ -354,12 +344,13 @@ function homeLabel(item: AnnouncementItem) {
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Announcement Editor</p>
               <h3 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{{ editorTitle }}</h3>
-              <p class="mt-2 text-sm text-slate-500">支持简单 Markdown 语法，暂不支持图片插入。</p>
+              <p class="mt-2 text-sm text-slate-500">所见即所得编辑，支持 Markdown、公式、图表与图片上传。</p>
             </div>
             <button class="btn-secondary" @click="closeEditor">关闭</button>
           </div>
 
-          <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <!-- 所见即所得编辑，不再另设预览栏 -->
+          <div class="space-y-4">
             <!-- 左侧：编辑区 -->
             <div class="space-y-4">
               <label class="space-y-2">
@@ -426,41 +417,20 @@ function homeLabel(item: AnnouncementItem) {
                 </div>
               </div>
 
-              <label class="space-y-2">
+              <div class="space-y-2">
                 <span class="text-sm font-medium text-slate-700">公告内容</span>
-                <div class="relative">
-                  <textarea
-                    ref="announcementContentTextareaRef"
+                <!-- 预留编辑器版面：卸载会在淡出开始时就清空 vditor，不预留的话弹窗会塌成一条；
+                     负边距让它通栏贴卡片边缘，圆角归零成一条带 -->
+                <div
+                  class="vditor-flush -mx-2 sm:-mx-5"
+                  :style="{ minHeight: '460px', '--vditor-flush-radius': '0px' }"
+                >
+                  <MarkdownEditor
                     v-model="form.content"
-                    rows="16"
-                    class="field-area transition-colors"
-                    :class="{ 'border-blue-400 bg-blue-50/60': annIsDragOver, 'opacity-50 pointer-events-none': annIsUploading }"
-                    placeholder="输入公告正文，支持简单 Markdown 语法。拖拽图片到此处自动上传插入。"
-                    @dragenter="onAnnDragEnter"
-                    @dragover="onAnnDragOver"
-                    @dragleave="onAnnDragLeave"
-                    @drop="onAnnDrop($event, announcementContentTextareaRef)"
+                    :height="460"
+                    placeholder="输入公告正文，支持 Markdown、公式与图表。可直接拖入或粘贴图片，自动上传并插入。"
                   />
-                  <!-- 上传中遮罩 -->
-                  <div
-                    v-if="annIsUploading"
-                    class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
-                  >
-                    <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
-                  </div>
                 </div>
-              </label>
-            </div>
-
-            <!-- 右侧：Markdown 实时预览区 -->
-            <div class="space-y-3">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Preview</p>
-                <h4 class="mt-2 text-lg font-semibold text-slate-900">{{ form.title.trim() || "公告预览" }}</h4>
-              </div>
-              <div class="min-h-[420px] rounded-3xl border border-slate-200 bg-white px-5 py-5">
-                <div v-if="previewHTML" class="markdown-content" v-html="previewHTML" />
-                <p v-else class="text-sm text-slate-400">这里会显示公告预览。</p>
               </div>
             </div>
           </div>

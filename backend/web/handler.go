@@ -45,6 +45,10 @@ func Register(engine *gin.Engine, customPathHandler CustomPathHandler) {
 			return
 		}
 
+		if redirectManagedFileImage(ctx, requestPath) {
+			return
+		}
+
 		// 在回退到 SPA 之前，检查是否为 HTML 文件的自定义路径
 		if customPathHandler != nil && customPathHandler(ctx, requestPath) {
 			return
@@ -78,11 +82,21 @@ func serveFile(ctx *gin.Context, handler http.Handler, name string) {
 
 func serveEmbeddedFile(ctx *gin.Context, dist fs.FS, name string) {
 	if name != "index.html" {
+		// Vite 构建产物中带内容哈希的资源（/assets/...）可永久缓存；
+		// 其余静态文件（favicon 等）给一个中等时长。
+		if strings.HasPrefix(name, "assets/") {
+			ctx.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			ctx.Header("Cache-Control", "public, max-age=3600")
+		}
 		// Static assets can still use FileServer semantics safely.
 		fileServer := http.FileServer(http.FS(dist))
 		serveFile(ctx, fileServer, "/"+name)
 		return
 	}
+
+	// index.html 是 SPA 入口：必须每次协商，保证发版后客户端拿到新资源清单
+	ctx.Header("Cache-Control", "no-cache")
 
 	data, err := fs.ReadFile(dist, name)
 	if err != nil {

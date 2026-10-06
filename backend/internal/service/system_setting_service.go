@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -250,7 +251,7 @@ func (s *SystemSettingService) FindGuestAccessKeyByValue(ctx context.Context, va
 		return "", "", false
 	}
 	for _, k := range policy.GuestAccess.Keys {
-		if k.Value == trimmed {
+		if constantTimeEquals(k.Value, trimmed) {
 			return k.ID, k.Hint, true
 		}
 	}
@@ -264,4 +265,13 @@ func (s *SystemSettingService) FindGuestAccessKeyByValue(ctx context.Context, va
 		}
 	}
 	return "", "", false
+}
+
+// constantTimeEquals 常量时间字符串比较，避免密钥值比对被时序侧信道逐前缀猜测。
+// 长度不同直接返回 false（长度本身不是秘密， ConstantTimeCompare 要求等长）。
+func constantTimeEquals(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

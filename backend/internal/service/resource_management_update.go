@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"openshare/backend/internal/model"
+	"openshare/backend/internal/repository"
 	"openshare/backend/internal/storage"
 	"openshare/backend/pkg/identity"
 )
@@ -47,7 +48,10 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 		return ErrInvalidResourceEdit
 	}
 	playbackFallbackURL, err := normalizeOptionalHTTPURL(input.PlaybackFallbackURL)
-	proxySourceURL := strings.TrimSpace(input.ProxySourceURL)
+	if err != nil {
+		return ErrInvalidResourceEdit
+	}
+	proxySourceURL, err := normalizeOptionalHTTPURL(input.ProxySourceURL)
 	if err != nil {
 		return ErrInvalidResourceEdit
 	}
@@ -101,15 +105,40 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 	if err != nil {
 		return fmt.Errorf("generate resource update log id: %w", err)
 	}
+	currentPath := ""
 	if current.Name != name {
 		folder, err := s.repo.FindFolderByID(ctx, normalizeTrimmedString(modelValue(current.FolderID)))
 		if err != nil {
 			return err
 		}
-		currentPath := model.BuildManagedFilePath(folderSourcePath(folder), current.Name)
+		currentPath = model.BuildManagedFilePath(folderSourcePath(folder), current.Name)
 		if currentPath == "" {
 			return ErrManagedFileNotFound
 		}
+	}
+	now := s.nowFunc()
+
+	// 一致性编排：事务开启 → DB 更新（未提交）→ 磁盘改名 → 提交；
+	// 提交失败时把文件名改回旧名，避免磁盘/DB 名字不一致。
+	tx := s.repo.DB().WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin update transaction: %w", tx.Error)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	if err := repository.UpdateFileMetadataTx(tx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, customPath, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, now); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrManagedFileNotFound
+		}
+		return fmt.Errorf("update managed file: %w", err)
+	}
+
+	if currentPath != "" {
 		if _, err := s.storage.RenameManagedFile(currentPath, name); err != nil {
 			if errors.Is(err, storage.ErrManagedFileConflict) {
 				return ErrManagedFileConflict
@@ -117,12 +146,20 @@ func (s *ResourceManagementService) UpdateFile(ctx context.Context, fileID strin
 			return fmt.Errorf("rename managed file: %w", err)
 		}
 	}
-	if err := s.repo.UpdateFileMetadata(ctx, fileID, name, extension, description, remark, playbackURL, playbackFallbackURL, proxySourceURL, coverURL, customPath, applyDl, allowDl, input.OperatorID, input.OperatorIP, logID, s.nowFunc()); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrManagedFileNotFound
+
+	if err := tx.Commit().Error; err != nil {
+		if currentPath != "" {
+			// 磁盘已改名，DB 未提交：把磁盘文件名还原回旧名
+			if folder, findErr := s.repo.FindFolderByID(ctx, normalizeTrimmedString(modelValue(current.FolderID))); findErr == nil && folder != nil {
+				newPath := model.BuildManagedFilePath(folderSourcePath(folder), name)
+				if newPath != "" {
+					_, _ = s.storage.RenameManagedFile(newPath, current.Name)
+				}
+			}
 		}
-		return fmt.Errorf("update managed file: %w", err)
+		return fmt.Errorf("commit update: %w", err)
 	}
+	committed = true
 	return nil
 }
 
@@ -249,13 +286,17 @@ type ProbeURLResult struct {
 }
 
 // ProbeRemoteURL 由服务端发起 HEAD 请求，检测 URL 可达性、文件大小和建议文件名。
+// SSRF 防护（strict 模式）：拒绝内网/环回/链路本地目标，重定向逐跳重检。
 func ProbeRemoteURL(ctx context.Context, rawURL string) ProbeURLResult {
 	candidate, err := normalizeOptionalHTTPURL(rawURL)
 	if err != nil || candidate == "" {
 		return ProbeURLResult{ErrorMessage: "URL 格式无效"}
 	}
+	if validateErr := validateSSRFURL(candidate, SSRFModeStrict); validateErr != nil {
+		return ProbeURLResult{ErrorMessage: "不允许访问该地址（内网或受保护地址被拒绝）"}
+	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := NewSSRFFetchClient(SSRFModeStrict, 10*time.Second)
 	resp, err := client.Head(candidate)
 	if err != nil {
 		return ProbeURLResult{ErrorMessage: fmt.Sprintf("无法连接: %s", err.Error())}
@@ -442,8 +483,13 @@ func (s *ResourceManagementService) ensureCoverManagedRoot(ctx context.Context, 
 	return folderID, nil
 }
 
+// maxReplaceFileBytes 替换文件内容的上限（与默认上传总限一致）。
+const maxReplaceFileBytes int64 = 5 << 30
+
 // ReplaceFile overwrites a managed file on disk with the uploaded content.
 // Only works for managed files that have a physical disk path (non-virtual).
+// 一致性编排：备份旧文件 → 写临时文件（点前缀唯一名，rescan 忽略）→ 原子替换磁盘
+// → 事务更新 size（含目录统计）→ 提交后删备份；DB 失败则把备份还原回原文件。
 func (s *ResourceManagementService) ReplaceFile(ctx context.Context, fileID string, fileHeader *multipart.FileHeader, operatorID, operatorIP string) error {
 	fileID = strings.TrimSpace(fileID)
 	if fileID == "" {
@@ -483,41 +529,94 @@ func (s *ResourceManagementService) ReplaceFile(ctx context.Context, fileID stri
 	}
 	defer src.Close()
 
-	// Write to a temp file first, then rename to avoid partial writes
-	tmpPath := diskPath + ".tmp"
+	// 旧文件备份（点前缀 + UUID，避免并发冲突且不会被 rescan 收录）
+	backupPath := ""
+	if _, statErr := os.Stat(diskPath); statErr == nil {
+		backupPath = filepath.Join(
+			filepath.Dir(diskPath),
+			fmt.Sprintf(".replace-bak-%s-%s", strings.TrimSuffix(filepath.Base(diskPath), filepath.Ext(diskPath)), strings.ReplaceAll(identity.MustNewID(), "-", "")[:12])+filepath.Ext(diskPath),
+		)
+		if backupErr := storage.CopyManagedFile(diskPath, backupPath); backupErr != nil {
+			return fmt.Errorf("backup existing file before replace: %w", backupErr)
+		}
+	}
+	rollbackRestore := func() {
+		if backupPath == "" {
+			return
+		}
+		_, _ = s.storageReplaceRestore(backupPath, diskPath)
+	}
+
+	// Write to a temp file first, then rename to avoid partial writes.
+	// 点前缀 + UUID：并发替换同一文件互不冲突；rescan 忽略点文件，残留会被清理而非收编。
+	tmpPath := filepath.Join(
+		filepath.Dir(diskPath),
+		fmt.Sprintf(".replace-%s.tmp", strings.ReplaceAll(identity.MustNewID(), "-", "")[:16]),
+	)
 	dst, err := os.Create(tmpPath)
 	if err != nil {
+		rollbackRestore()
 		return fmt.Errorf("create destination file: %w", err)
 	}
 	defer dst.Close()
 
-	written, err := io.Copy(dst, src)
+	written, err := io.Copy(dst, io.LimitReader(src, maxReplaceFileBytes+1))
 	if err != nil {
 		os.Remove(tmpPath)
+		rollbackRestore()
 		return fmt.Errorf("write file content: %w", err)
+	}
+	if written > maxReplaceFileBytes {
+		os.Remove(tmpPath)
+		rollbackRestore()
+		return fmt.Errorf("%w: replaced content exceeds size limit", ErrUploadTooLarge)
 	}
 	if err := dst.Close(); err != nil {
 		os.Remove(tmpPath)
+		rollbackRestore()
 		return fmt.Errorf("close destination file: %w", err)
 	}
 
 	// Atomic rename to replace the original
 	if err := os.Rename(tmpPath, diskPath); err != nil {
 		os.Remove(tmpPath)
+		rollbackRestore()
 		return fmt.Errorf("replace file on disk: %w", err)
 	}
 
 	// Update file metadata (extension unchanged since file name stays the same)
 	logID, err := identity.NewID()
 	if err != nil {
+		os.Remove(tmpPath)
+		rollbackRestore()
 		return fmt.Errorf("generate log id: %w", err)
 	}
 	now := s.nowFunc()
-	// Only update size and timestamp; keep other metadata unchanged
-	_ = filepath.Ext(current.Name) // extension unchanged
-	if err := s.repo.UpdateFileSize(ctx, fileID, written, operatorID, operatorIP, logID, now); err != nil {
+
+	tx := s.repo.DB().WithContext(ctx).Begin()
+	if tx.Error != nil {
+		rollbackRestore()
+		return fmt.Errorf("begin replace transaction: %w", tx.Error)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+	if err := repository.UpdateFileSizeTx(tx, fileID, written, operatorID, operatorIP, logID, now); err != nil {
+		rollbackRestore()
 		return fmt.Errorf("update file metadata after replace: %w", err)
 	}
+	if err := tx.Commit().Error; err != nil {
+		rollbackRestore()
+		return fmt.Errorf("commit replace: %w", err)
+	}
+	committed = true
 
+	// 提交成功后清理备份
+	if backupPath != "" {
+		os.Remove(backupPath)
+	}
 	return nil
 }

@@ -52,7 +52,10 @@ type PublicFileDetail struct {
 	Extension           string `json:"extension"`
 	FolderID            string `json:"folder_id"`
 	Path                string `json:"path"`
-	StoragePath         string `json:"storage_path,omitempty"`
+	// IsVirtual 文件是否位于虚拟目录（无物理磁盘文件，经 CDN 直链访问）。
+	// 公开响应中不再直接暴露服务器绝对路径 storage_path（后者仅管理员可见）。
+	IsVirtual   bool `json:"is_virtual"`
+	StoragePath string `json:"storage_path,omitempty"`
 	Description         string `json:"description"`
 	Remark              string `json:"remark"`
 	MimeType            string `json:"mime_type"`
@@ -408,6 +411,12 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 	if resolvedStorage, err := s.resolveManagedFilePath(ctx, file); err == nil {
 		storagePath = strings.TrimSpace(resolvedStorage)
 	}
+	isVirtual := false
+	if file.FolderID != nil {
+		if virtual, virtualErr := s.isFileInVirtualFolder(ctx, *file); virtualErr == nil {
+			isVirtual = virtual
+		}
+	}
 
 	dlAllowed, err := s.EffectiveDownloadAllowedForFile(ctx, file)
 	if err != nil {
@@ -427,6 +436,7 @@ func (s *PublicDownloadService) GetFileDetail(ctx context.Context, fileID string
 		Extension:               file.Extension,
 		FolderID:                strings.TrimSpace(optionalString(file.FolderID)),
 		Path:                    fullPath,
+		IsVirtual:               isVirtual,
 		StoragePath:             storagePath,
 		Description:             file.Description,
 		Remark:                  file.Remark,

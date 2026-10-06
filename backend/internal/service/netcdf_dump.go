@@ -339,10 +339,25 @@ func (s *PublicDownloadService) PrepareNetCDFDumpFallback(ctx context.Context, f
 const max1DValues = 100
 
 // readOneDimValues 从 VarGetter 读取一维变量的值并格式化为字符串切片。
+// 限量读取：仅物化前 max1DValues 个值。原实现 vg.Values() 会把整个一维变量
+// 读进内存（1e8 元素 double ≈ 800MB 峰值）之后才截断，构成公开端点上的
+// 内存放大 DoS 面。
 func readOneDimValues(vg api.VarGetter) (values []string, truncated bool) {
-	raw, err := vg.Values()
-	if err != nil || raw == nil {
+	total := vg.Len()
+	if total <= 0 {
 		return nil, false
+	}
+	limit := int64(max1DValues)
+	if total > limit {
+		truncated = true
+	}
+	raw, err := vg.GetSlice(0, limit)
+	if err != nil || raw == nil {
+		// GetSlice 不可用时退回全量读取（旧行为兜底）
+		raw, err = vg.Values()
+		if err != nil || raw == nil {
+			return nil, false
+		}
 	}
 	rv := reflect.ValueOf(raw)
 	if rv.Kind() != reflect.Slice {
@@ -352,13 +367,12 @@ func readOneDimValues(vg api.VarGetter) (values []string, truncated bool) {
 	if n == 0 {
 		return nil, false
 	}
-	limit := n
-	if limit > max1DValues {
-		limit = max1DValues
+	if n > max1DValues {
+		n = max1DValues
 		truncated = true
 	}
-	values = make([]string, limit)
-	for i := 0; i < limit; i++ {
+	values = make([]string, n)
+	for i := 0; i < n; i++ {
 		values[i] = formatAtom(rv.Index(i))
 	}
 	return values, truncated

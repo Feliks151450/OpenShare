@@ -88,6 +88,12 @@ const visibleItems = computed(() => {
 });
 
 onMounted(() => {
+  // 后端已将该接口收紧为 manage_admins 权限；无权限时不再发起注定 403 的请求
+  if (!canManageAdmins.value) {
+    loading.value = false;
+    error.value = "当前账号没有权限管理权限。";
+    return;
+  }
   void loadItems();
 });
 

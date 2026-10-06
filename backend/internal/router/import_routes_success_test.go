@@ -65,12 +65,14 @@ func TestImportLocalDirectoryCreatesMetadata(t *testing.T) {
 }
 
 func TestFolderTree(t *testing.T) {
+	// folders/tree 需要 resource_moderation 权限（与移动文件选择器一致）
 	_, _, cookie, engine, db := newImportRouteEnv(t, adminAccess{
 		username: "editor",
 		password: "s3cret-pass",
 		role:     string(model.AdminRoleAdmin),
 		permissions: []model.AdminPermission{
 			model.AdminPermissionManageSystem,
+			model.AdminPermissionResourceModeration,
 		},
 	})
 	importRoot := createImportFixture(t)

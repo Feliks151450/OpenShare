@@ -61,10 +61,14 @@ func (s *GuestAccessService) ResolveRequirement(ctx context.Context, folderID st
 // ValidateForFolder 给定 (folderID, candidateKey)，校验 candidateKey 是否能解锁该目录。
 // 命中规则：candidateKey 命中全局密钥池中的某个 key，且该 key ID 在该目录允许列表中。
 // 返回 (allowed, hint)：allowed=true 则通过；hint 在密钥无效或全局禁用时返回任一配置提示。
+// 策略读取失败时按 fail-closed 处理（拒绝访问），避免受保护目录在 DB 异常时被放行。
 func (s *GuestAccessService) ValidateForFolder(ctx context.Context, folderID, candidateKey string) (allowed bool, hint string) {
 	requirement, err := s.ResolveRequirement(ctx, folderID)
-	if err != nil || !requirement.Required {
-		return true, "" // 未启用或目录不要求时一律放行
+	if err != nil {
+		return false, ""
+	}
+	if !requirement.Required {
+		return true, "" // 未启用或目录不要求时放行
 	}
 	if strings.TrimSpace(candidateKey) == "" {
 		return false, firstHint(s.settings, ctx)

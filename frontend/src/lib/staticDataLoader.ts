@@ -312,56 +312,57 @@ class StaticDataLoader {
     }
   }
 
-  /** 按需加载目录数据：若该 folderId 有 cdn_url 映射且未缓存，则拉取 */
+  /** 按需加载目录数据：若该 folderId 有 cdn_url 映射且未缓存，则拉取。
+   *  并发调用同一 folderId 时去重：第二个调用者等待第一个的加载完成。 */
+  private _directoryLoads = new Map<string, Promise<void>>();
+
   async ensureDirectoryLoaded(folderId: string): Promise<void> {
     if (this._directories.has(folderId)) return;
     const url = this._cdnUrlMap.get(folderId);
     if (!url) return;
-    await this.loadDirectory(url);
+    let pending = this._directoryLoads.get(folderId);
+    if (!pending) {
+      const load = this.loadDirectory(url);
+      pending = load.then(() => undefined);
+      this._directoryLoads.set(folderId, pending);
+      void load.finally(() => {
+        this._directoryLoads.delete(folderId);
+      });
+    }
+    await pending;
   }
 
-  /** 用 force-cache 探测浏览器缓存中已有哪些 CDN JSON。
-   *  拿到 directory_cdn_urls 后立即调用；命中缓存则秒加载（不产生网络请求），
-   *  未命中会被浏览器自动回退到网络请求（等同于提前预加载）。
-   *  后续 ensureDirectoryLoaded 发现已缓存时会跳过，不再重复拉取。 */
-  /** 用 HEAD + 计时法探测浏览器缓存。
-   *  已缓存 → 加载完整数据；未缓存 → 跳过（HEAD 流量极小），留给 ensureDirectoryLoaded 按需拉取。 */
+  /** 预加载浏览器缓存中的 CDN JSON（每个会话仅探测一次）。
+   *  依赖 HTTP 缓存语义（force-cache：缓存命中不发网络请求，未命中回退网络），
+   *  不再用响应时间启发式判断——内网/本机 CDN 下 HEAD <20ms 的"命中"误判
+   *  会导致每次进详情页全量拉取所有目录 JSON。首次探测未命中也不会反复重试，
+   *  后续加载交给 ensureDirectoryLoaded 按需进行。 */
+  private _preloadedOnce = false;
+
   async preloadCachedDirectories(): Promise<void> {
-    if (this._cdnUrlMap.size === 0) return;
+    if (this._preloadedOnce || this._cdnUrlMap.size === 0) return;
+    this._preloadedOnce = true;
     const loads: Promise<void>[] = [];
     let checked = 0;
-    let cached = 0;
-    const CACHE_THRESHOLD_MS = 20; // 本地缓存 < 5ms，网络 > 50ms，20ms 安全分界线
 
     for (const [id, url] of this._cdnUrlMap) {
       if (this._directories.has(id)) continue;
       checked++;
       loads.push((async () => {
         try {
-          const t0 = performance.now();
-          const headRes = await fetch(url, { method: "HEAD", cache: "force-cache" });
-          const elapsed = performance.now() - t0;
-          if (!headRes.ok) return;
-
-          if (elapsed < CACHE_THRESHOLD_MS) {
-            // 计时判断是本地缓存命中，加载完整数据
-            const res = await fetch(url, { cache: "force-cache" });
-            if (!res.ok) return;
-            const data = (await res.json()) as DirectoryExportData;
+          const res = await fetch(url, { cache: "force-cache" });
+          if (!res.ok) return;
+          const data = (await res.json()) as DirectoryExportData;
+          if (!this._directories.has(data.managed_root.id)) {
             this._directories.set(data.managed_root.id, data);
-            cached++;
-            console.log(`[staticData] CDN cache hit (${elapsed.toFixed(1)}ms): ${url}`);
-          } else {
-            console.log(`[staticData] CDN miss (${elapsed.toFixed(1)}ms), deferred: ${url}`);
           }
         } catch {
-          // 跳过
+          // 跳过：未缓存或网络失败，交给按需加载
         }
       })());
     }
 
     if (checked > 0) {
-      console.log(`[staticData] CDN probe: ${cached}/${checked} cached, ${checked - cached} deferred`);
       await Promise.all(loads);
     }
   }

@@ -43,8 +43,9 @@ const navItems = computed<AdminSidebarItem[]>(() => [
   { to: "/admin/audit", label: "审核", icon: Inbox, hasAlert: pendingAuditCount.value > 0 },
   ...(sessionStore.hasPermission("announcements") ? [{ to: "/admin/announcements", label: "公告", icon: Megaphone }] : []),
   ...(sessionStore.hasPermission("resource_moderation") ? [{ to: "/admin/file-tags", label: "文件标签", icon: Database }] : []),
-  { to: "/admin/logs", label: "操作记录", icon: ScrollText },
-  { to: "/admin/permissions", label: "权限管理", icon: Shield },
+  // 与后端权限收紧保持一致：操作记录需 manage_system，权限管理需 manage_admins
+  ...(sessionStore.hasPermission("manage_system") ? [{ to: "/admin/logs", label: "操作记录", icon: ScrollText }] : []),
+  ...(sessionStore.hasPermission("manage_admins") ? [{ to: "/admin/permissions", label: "权限管理", icon: Shield }] : []),
 ]);
 
 onMounted(async () => {

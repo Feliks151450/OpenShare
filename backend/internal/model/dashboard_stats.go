@@ -82,11 +82,12 @@ func AdjustSystemStatsTx(tx *gorm.DB, delta SystemStatsDelta) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "key"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"total_visits":        gorm.Expr("total_visits + ?", delta.TotalVisits),
-			"total_files":         gorm.Expr("total_files + ?", delta.TotalFiles),
-			"total_downloads":     gorm.Expr("total_downloads + ?", delta.TotalDownloads),
-			"pending_submissions": gorm.Expr("pending_submissions + ?", delta.PendingSubmissions),
-			"pending_feedbacks":   gorm.Expr("pending_feedbacks + ?", delta.PendingFeedbacks),
+			// MAX(0, ...) 钳制负增量，防止异常路径把计数扣成负数
+			"total_visits":        gorm.Expr("MAX(0, total_visits + ?)", delta.TotalVisits),
+			"total_files":         gorm.Expr("MAX(0, total_files + ?)", delta.TotalFiles),
+			"total_downloads":     gorm.Expr("MAX(0, total_downloads + ?)", delta.TotalDownloads),
+			"pending_submissions": gorm.Expr("MAX(0, pending_submissions + ?)", delta.PendingSubmissions),
+			"pending_feedbacks":   gorm.Expr("MAX(0, pending_feedbacks + ?)", delta.PendingFeedbacks),
 			"updated_at":          now,
 		}),
 	}).Create(&row).Error
@@ -113,9 +114,9 @@ func AdjustDailyStatsTx(tx *gorm.DB, at time.Time, delta DailyStatsDelta) error 
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "day"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"new_files":  gorm.Expr("new_files + ?", delta.NewFiles),
-			"downloads":  gorm.Expr("downloads + ?", delta.Downloads),
-			"visits":     gorm.Expr("visits + ?", delta.Visits),
+			"new_files":  gorm.Expr("MAX(0, new_files + ?)", delta.NewFiles),
+			"downloads":  gorm.Expr("MAX(0, downloads + ?)", delta.Downloads),
+			"visits":     gorm.Expr("MAX(0, visits + ?)", delta.Visits),
 			"updated_at": now,
 		}),
 	}).Create(&row).Error

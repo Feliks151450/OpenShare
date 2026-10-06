@@ -447,7 +447,11 @@ func createPublicTestFile(t *testing.T, db *gorm.DB, input publicTestFile) *mode
 		CreatedAt:     createdAt,
 		UpdatedAt:     createdAt,
 	}
-	if err := db.Create(file).Error; err != nil {
+	createSQL := db
+	if file.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(file).Error; err != nil {
 		t.Fatalf("create public test file failed: %v", err)
 	}
 
@@ -499,7 +503,11 @@ func createPublicTestFolderWithParent(t *testing.T, db *gorm.DB, input publicTes
 		CreatedAt:         time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
 		UpdatedAt:         time.Date(2026, 3, 11, 8, 0, 0, 0, time.UTC),
 	}
-	if err := db.Create(folder).Error; err != nil {
+	createSQL := db
+	if folder.CustomPath == "" {
+		createSQL = db.Omit("custom_path")
+	}
+	if err := createSQL.Create(folder).Error; err != nil {
 		t.Fatalf("create public test folder failed: %v", err)
 	}
 

@@ -340,6 +340,32 @@
   transform: translateY(18px) scale(0.98);
 }
 
+/* vditor 圆角落在真正绘制背景的三层上；外层 wrapper 不要加 overflow-hidden 去裁——
+   那会把边框圆弧剪断（四角看起来断开），也会剪掉编辑器内部的浮层。 */
+.os-vditor-editor .vditor {
+  border-radius: 0.75rem;
+}
+.os-vditor-editor .vditor-toolbar {
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+.os-vditor-editor .vditor-content pre.vditor-reset {
+  border-radius: 0 0 0.75rem 0.75rem;
+}
+
+/* vditor 弹窗全出血：编辑器贴模态边缘，外框与圆角交给卡片承担。
+   底角默认与 panel 的 rounded-xl（0.75rem）对齐，顶角归零接头部 border-b；
+   表单内嵌场景可用 --vditor-flush-radius: 0 变成通栏带。 */
+.vditor-flush .vditor {
+  border: 0;
+  border-radius: 0 0 var(--vditor-flush-radius, 0.75rem) var(--vditor-flush-radius, 0.75rem);
+}
+.vditor-flush .vditor-toolbar {
+  border-radius: 0;
+}
+.vditor-flush .vditor-content pre.vditor-reset {
+  border-radius: 0 0 var(--vditor-flush-radius, 0.75rem) var(--vditor-flush-radius, 0.75rem);
+}
+
 .file-detail-drawer-shell-enter-active,
 .file-detail-drawer-shell-leave-active {
   transition: opacity 260ms ease;

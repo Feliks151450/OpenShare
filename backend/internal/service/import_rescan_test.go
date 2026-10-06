@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"openshare/backend/internal/model"
 	"openshare/backend/internal/repository"
@@ -18,6 +19,19 @@ import (
 //  3. 扫描范围之外的兄弟目录/文件不会被误删。
 func TestRescanManagedDirectoryOnSubfolder(t *testing.T) {
 	_, db, storageSvc := newUploadTestDeps(t)
+
+	// rescan 会写操作日志（admin_id 有外键约束），需先落一条真实 admin 记录
+	testAdminID := "admin-test"
+	if err := db.Create(&model.Admin{
+		ID:        testAdminID,
+		Username:  "rescan-admin",
+		Role:      "admin",
+		Status:    model.AdminStatusActive,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create test admin: %v", err)
+	}
 
 	// 在磁盘上构造：diskroot/sub/inner/ 与 diskroot/sub/keep.txt，外加 diskroot/other.txt
 	diskRoot := filepath.Join(t.TempDir(), "diskroot")
@@ -44,7 +58,7 @@ func TestRescanManagedDirectoryOnSubfolder(t *testing.T) {
 		Name:       "root",
 		SourcePath: stringPtr(diskRoot),
 	}
-	if err := db.Create(rootFolder).Error; err != nil {
+	if err := db.Omit("custom_path").Create(rootFolder).Error; err != nil {
 		t.Fatalf("create root folder: %v", err)
 	}
 	subFolder := &model.Folder{
@@ -53,12 +67,12 @@ func TestRescanManagedDirectoryOnSubfolder(t *testing.T) {
 		Name:       "sub",
 		SourcePath: stringPtr(subDir),
 	}
-	if err := db.Create(subFolder).Error; err != nil {
+	if err := db.Omit("custom_path").Create(subFolder).Error; err != nil {
 		t.Fatalf("create sub folder: %v", err)
 	}
 
 	repo := repository.NewImportRepository(db)
-	svc := NewImportService(repo, storageSvc)
+	svc := NewImportService(repo, storageSvc, nil)
 
 	// 对 sub 触发重新扫描
 	result, err := svc.RescanManagedDirectory(context.Background(), subID, "admin-test", "127.0.0.1")

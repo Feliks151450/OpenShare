@@ -41,9 +41,9 @@ import { toastSuccess, toastError, toastWarning } from "../../lib/toast";
 import { fileCoverImageHrefFromFields, renderSimpleMarkdown } from "../../lib/markdown";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
+import MarkdownEditor from "../../components/markdown/MarkdownEditor.vue";
+import MarkdownPreview from "../../components/markdown/MarkdownPreview.vue";
 import PdfJsViewer from "../../components/public/PdfJsViewer.vue";
-import { renderMarkdownAsync } from "../../lib/useAsyncMarkdown";
-import { useMarkdownImageDrop } from "../../lib/markdownImageDrop";
 import {
   hydrateMarkdownCatalogNavigatePresentation,
   markdownCatalogNavigateInitialPresentation,
@@ -189,15 +189,8 @@ const editCoverUrl = ref("");
 const editCustomPath = ref("");
 const editDownloadPolicy = ref<"inherit" | "allow" | "deny">("inherit");
 const descriptionEditorOpen = ref(false);
-const descriptionTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const {
-  isDragOver: descIsDragOver,
-  isUploading: descIsUploading,
-  onDragEnter: onDescDragEnter,
-  onDragOver: onDescDragOver,
-  onDragLeave: onDescDragLeave,
-  handleDrop: onDescDrop,
-} = useMarkdownImageDrop({ modelRef: editDescription });
+const descriptionFocusOpen = ref(false);
+const descriptionFocusHeight = ref(480);
 const coverPickerOpen = ref(false);
 const tagEditorOpen = ref(false);
 const tagCatalog = ref<FileTagDefinition[]>([]);
@@ -948,12 +941,54 @@ function toggleFetchedTextPreviewCollapsedKey() {
   fetchedTextPreviewCollapsed.value = !fetchedTextPreviewCollapsed.value;
 }
 
-const previewMarkdownRendered = computed(() => {
-  if (previewVisualKind.value !== "markdown") {
-    return "";
+/* ── Markdown 正文所见即所得编辑 ── */
+
+const markdownContentEditorOpen = ref(false);
+const markdownContentDraft = ref("");
+const markdownContentSaving = ref(false);
+const markdownContentHeight = ref(480);
+
+function openMarkdownContentEditor() {
+  // 预览文本是按上限截断读取的，把截断内容写回会毁掉原文件
+  if (previewTextTruncated.value) {
+    toastError("正文过长已被截断，不能编辑保存；请下载后在本地编辑再重新上传。");
+    return;
   }
-  return renderSimpleMarkdown(previewFetchedText.value);
-});
+  markdownContentDraft.value = previewFetchedText.value;
+  // 用打开时的视口算出确定像素值：百分比高度在弹窗的 flex 链路里不解析
+  markdownContentHeight.value = Math.max(360, Math.round(window.innerHeight * 0.7));
+  markdownContentEditorOpen.value = true;
+}
+
+function closeMarkdownContentEditor() {
+  markdownContentEditorOpen.value = false;
+  markdownContentDraft.value = "";
+}
+
+async function saveMarkdownContent() {
+  if (!detail.value || markdownContentSaving.value) return;
+  markdownContentSaving.value = true;
+  try {
+    const formData = new FormData();
+    // ReplaceFile 按原文件名落盘，这里必须带上原名字
+    formData.append(
+      "file",
+      new File([markdownContentDraft.value], detail.value.name, { type: "text/markdown" }),
+    );
+    await httpClient.request(
+      `/admin/resources/files/${encodeURIComponent(detail.value.id)}/replace`,
+      { method: "POST", body: formData },
+    );
+    previewFetchedText.value = markdownContentDraft.value;
+    closeMarkdownContentEditor();
+    toastSuccess("正文已保存。");
+    await loadDetail();
+  } catch (err: unknown) {
+    toastError(readApiError(err, "保存正文失败。"));
+  } finally {
+    markdownContentSaving.value = false;
+  }
+}
 
 /** JSON 预览格式化：解析后带缩进重新序列化，解析失败则返回原文 */
 const previewJsonFormatted = computed(() => {
@@ -1034,6 +1069,10 @@ watch(
     previewTextError.value = "";
     previewTextTruncated.value = false;
     previewTextLoading.value = false;
+    closeMarkdownContentEditor();
+    // 同为图片类型切换文件时也要重置失败标志，否则上一个文件的 404
+    // 会让本可加载的图片直接显示"无法预览"
+    previewImageFailed.value = false;
 
     if (!id || !kind) {
       return;
@@ -1323,6 +1362,7 @@ function getFolderFilesFromStaticCache(folderID: string): FolderFileListItem[] |
 }
 
 async function loadFolderSameExtensionPeers(folderID: string, _currentFileId: string, ext: string) {
+  const gen = detailLoadToken;
   const want = ext.replace(/^\./, "").toLowerCase();
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
@@ -1345,18 +1385,24 @@ async function loadFolderSameExtensionPeers(folderID: string, _currentFileId: st
     const response = await httpClient.get<{ items: FolderFileListItem[] }>(
       `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
     );
+    // 加载期间已切换文件详情时丢弃过期结果
+    if (gen !== detailLoadToken) return;
     const items = response.items ?? [];
     folderVideoPeers.value = items.filter((f) => extensionOfListItem(f) === want);
   } catch {
+    if (gen !== detailLoadToken) return;
     folderVideoPeers.value = [];
   } finally {
-    folderVideoPeersLoading.value = false;
-    await nextTick();
-    scrollCurrentPeerIntoView();
+    if (gen === detailLoadToken) {
+      folderVideoPeersLoading.value = false;
+      await nextTick();
+      scrollCurrentPeerIntoView();
+    }
   }
 }
 
 async function loadFolderVideoPeers(folderID: string, _currentFileId: string) {
+  const gen = detailLoadToken;
   folderVideoPeersLoading.value = true;
   folderVideoPeers.value = [];
 
@@ -1378,31 +1424,23 @@ async function loadFolderVideoPeers(folderID: string, _currentFileId: string) {
     const response = await httpClient.get<{ items: FolderFileListItem[] }>(
       `/public/folders/${encodeURIComponent(folderID)}/files?${params.toString()}`,
     );
+    // 加载期间已切换文件详情时丢弃过期结果
+    if (gen !== detailLoadToken) return;
     const items = response.items ?? [];
     folderVideoPeers.value = items.filter((f) => VIDEO_EXTENSIONS.has(extensionOfListItem(f)));
   } catch {
+    if (gen !== detailLoadToken) return;
     folderVideoPeers.value = [];
   } finally {
-    folderVideoPeersLoading.value = false;
-    await nextTick();
-    scrollCurrentPeerIntoView();
+    if (gen === detailLoadToken) {
+      folderVideoPeersLoading.value = false;
+      await nextTick();
+      scrollCurrentPeerIntoView();
+    }
   }
 }
 
-const descriptionHTML = ref("");
-let descRenderSerial = 0;
-watch(
-  () => detail.value?.description ?? "",
-  (desc) => {
-    const mySerial = ++descRenderSerial;
-    renderMarkdownAsync(desc).then((html) => {
-      if (mySerial === descRenderSerial) {
-        descriptionHTML.value = html;
-      }
-    });
-  },
-  { immediate: true },
-);
+const descriptionSource = computed(() => detail.value?.description ?? "");
 
 function updateFileDescriptionClampUI() {
   const el = fileDescriptionClampRef.value;
@@ -1410,7 +1448,7 @@ function updateFileDescriptionClampUI() {
     fileDescriptionFooterVisible.value = false;
     return;
   }
-  if (!descriptionHTML.value) {
+  if (!descriptionSource.value.trim()) {
     fileDescriptionFooterVisible.value = false;
     return;
   }
@@ -1461,8 +1499,6 @@ const editorDirty = computed(() => {
     editDownloadPolicy.value !== (detail.value.download_policy ?? "inherit")
   );
 });
-
-const fileDescriptionPreviewHTML = computed(() => renderSimpleMarkdown(editDescription.value));
 
 const fileDetailNeedsDownloadConfirm = computed(() => {
   const d = detail.value;
@@ -1561,7 +1597,6 @@ watch(
   () => [
     fileID.value,
     detail.value?.description,
-    descriptionHTML.value,
     fileDescriptionExpanded.value,
   ],
   async () => {
@@ -1648,7 +1683,12 @@ watch(
   },
 );
 
+// 详情加载代际令牌：快速切换文件时，旧文件的慢响应不得覆盖新文件的状态
+let detailLoadToken = 0;
+
 async function loadDetail() {
+  const gen = ++detailLoadToken;
+  const fetchId = fileID.value;
   loading.value = true;
   error.value = "";
   detail.value = null;
@@ -1659,13 +1699,16 @@ async function loadDetail() {
   if (!staticDataLoader.policyApplied) {
     await loadLargeDownloadPolicy();
   }
+  if (gen !== detailLoadToken) return;
   await staticDataLoader.preloadCachedDirectories();
+  if (gen !== detailLoadToken) return;
   if (staticDataLoader.globalCdnUrl) {
     await staticDataLoader.preloadGlobalCdn(staticDataLoader.globalCdnUrl);
   }
+  if (gen !== detailLoadToken) return;
 
   // 优先从 staticDataLoader 获取预加载的文件详情
-  const cachedDetail = staticDataLoader.findFileDetail(fileID.value);
+  const cachedDetail = staticDataLoader.findFileDetail(fetchId);
   if (cachedDetail) {
     detail.value = cachedDetail as unknown as FileDetailResponse;
     if (detail.value) {
@@ -1679,9 +1722,9 @@ async function loadDetail() {
       const fid = detail.value.folder_id?.trim() ?? "";
       if (fid && !props.panelPresentation) {
         if (isVideoDetail(detail.value)) {
-          loadFolderVideoPeers(fid, fileID.value);
+          loadFolderVideoPeers(fid, fetchId);
         } else {
-          loadFolderSameExtensionPeers(fid, fileID.value, detail.value.extension);
+          loadFolderSameExtensionPeers(fid, fetchId, detail.value.extension);
         }
       }
       loading.value = false;
@@ -1690,7 +1733,9 @@ async function loadDetail() {
   }
 
   try {
-    detail.value = await httpClient.get<FileDetailResponse>(`/public/files/${encodeURIComponent(fileID.value)}`);
+    const fetched = await httpClient.get<FileDetailResponse>(`/public/files/${encodeURIComponent(fetchId)}`);
+    if (gen !== detailLoadToken || fetchId !== fileID.value) return;
+    detail.value = fetched;
     if (detail.value) {
       editFileName.value = detail.value.name;
       editDescription.value = detail.value.description;
@@ -1714,6 +1759,7 @@ async function loadDetail() {
       }
     }
   } catch (err: unknown) {
+    if (gen !== detailLoadToken) return;
     const guestKeyCheck = isGuestKeyRequiredError(err);
     if (guestKeyCheck.matched) {
       if (!guestKeyPromptOpen.value) {
@@ -1725,7 +1771,9 @@ async function loadDetail() {
       toastError("加载文件详情失败。");
     }
   } finally {
-    loading.value = false;
+    if (gen === detailLoadToken) {
+      loading.value = false;
+    }
   }
 }
 
@@ -1733,7 +1781,7 @@ async function loadAdminPermission() {
   canManageResourceDescriptions.value = await hasAdminPermission("resource_moderation");
 }
 
-function openDescriptionEditor() {
+function syncDescriptionDrafts() {
   editFileName.value = detail.value?.name ?? "";
   editDescription.value = detail.value?.description ?? "";
   editRemark.value = (detail.value?.remark ?? "").trim();
@@ -1745,7 +1793,24 @@ function openDescriptionEditor() {
   editDownloadPolicy.value = detail.value?.download_policy ?? "inherit";
   saveError.value = "";
   message.value = "";
+}
+
+function openDescriptionEditor() {
+  syncDescriptionDrafts();
   descriptionEditorOpen.value = true;
+}
+
+/** 简介的专注编辑弹窗：vditor 需要足够大的版面，嵌在信息表单里体验很差 */
+function openDescriptionFocusEditor() {
+  syncDescriptionDrafts();
+  // 用打开时的视口算出确定像素值：百分比高度在弹窗的 flex 链路里不解析
+  descriptionFocusHeight.value = Math.max(360, Math.round(window.innerHeight * 0.7));
+  descriptionFocusOpen.value = true;
+}
+
+function closeDescriptionFocusEditor() {
+  descriptionFocusOpen.value = false;
+  syncDescriptionDrafts();
 }
 
 function closeDescriptionEditor() {
@@ -1963,6 +2028,7 @@ async function saveDescription() {
     toastSuccess("文件信息已更新。");
     await loadDetail();
     descriptionEditorOpen.value = false;
+    descriptionFocusOpen.value = false;
   } catch (err: unknown) {
     toastError(readApiError(err, "更新文件简介失败。"));
   } finally {
@@ -2045,7 +2111,8 @@ function formatDate(value: string) {
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /** 用于下载确认等场景，与首页 `formatSize` 一致支持 GB */
@@ -2445,21 +2512,30 @@ function performDownloadFile() {
               <!-- 宽屏左右布局：简介左栏 + 内容右栏；非宽屏时保持原有上下布局 -->
               <div :class="useWideDescriptionLayout && isWideScreen ? 'xl:flex xl:gap-6 xl:pr-0 xl:max-h-[calc(100vh-13rem)]' : ''">
               <div
-                v-if="descriptionHTML && showFileDescriptionAbovePreview || (useWideDescriptionLayout && isWideScreen)"
+                v-if="showFileDescriptionAbovePreview || (useWideDescriptionLayout && isWideScreen)"
                 :class="[
-                  'mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5',
+                  'relative mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5',
                   useWideDescriptionLayout && isWideScreen ? 'xl:w-[40%] xl:shrink-0 xl:overflow-y-auto xl:rounded-none xl:border-none xl:bg-transparent xl:px-0 xl:py-0' : '',
                 ]"
               >
-                <div v-if="descriptionHTML" class="space-y-3">
+                <button
+                  v-if="canManageResourceDescriptions"
+                  type="button"
+                  class="absolute right-3 top-3 z-10 inline-flex items-center rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white"
+                  @click="openDescriptionFocusEditor"
+                >
+                  编辑简介
+                </button>
+                <div class="space-y-3">
                   <div class="relative overflow-y-auto">
                     <div
                       ref="fileDescriptionClampRef"
                       class="markdown-content"
                       :class="!fileDescriptionExpanded && !(useWideDescriptionLayout && isWideScreen) ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
-                      v-html="descriptionHTML"
                       @click.capture="handleMarkdownInternalLinkNavigate"
-                    />
+                    >
+                      <MarkdownPreview :source="descriptionSource" :debounce-ms="0" empty-text="暂无简介" @rendered="updateFileDescriptionClampUI" />
+                    </div>
                     <div
                       v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible && !(useWideDescriptionLayout && isWideScreen)"
                       class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent"
@@ -2843,16 +2919,26 @@ function performDownloadFile() {
                     />
                     <span class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">文件预览</span>
                   </span>
-                  <button
-                    v-if="!previewTextLoading && !previewTextError"
-                    type="button"
-                    class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    :disabled="!previewFetchedText.length && !previewNetcdfStructure"
-                    aria-label="复制预览区文本"
-                    @click.stop="copyFetchedPreviewText"
-                  >
-                    复制
-                  </button>
+                  <span v-if="!previewTextLoading && !previewTextError" class="flex shrink-0 items-center gap-2">
+                    <button
+                      v-if="previewVisualKind === 'markdown' && canManageResourceDescriptions"
+                      type="button"
+                      class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                      aria-label="所见即所得编辑该 Markdown 文件正文"
+                      @click.stop="openMarkdownContentEditor"
+                    >
+                      编辑正文
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      :disabled="!previewFetchedText.length && !previewNetcdfStructure"
+                      aria-label="复制预览区文本"
+                      @click.stop="copyFetchedPreviewText"
+                    >
+                      复制
+                    </button>
+                  </span>
                 </div>
                 <div
                   v-show="!fetchedTextPreviewCollapsed"
@@ -2888,9 +2974,10 @@ function performDownloadFile() {
                       <div
                         v-else
                         class="markdown-content"
-                        v-html="previewMarkdownRendered"
                         @click.capture="handleMarkdownInternalLinkNavigate"
-                      />
+                      >
+                        <MarkdownPreview :source="previewFetchedText" :debounce-ms="0" />
+                      </div>
                     </div>
                     <div
                       v-else-if="previewVisualKind === 'netcdf' && previewNetcdfStructure"
@@ -3012,18 +3099,27 @@ function performDownloadFile() {
               <!-- /宽屏左右布局 -->
 
             <div
-              v-if="!showFileDescriptionAbovePreview && !(useWideDescriptionLayout && isWideScreen) && descriptionHTML"
-              class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
+              v-if="!showFileDescriptionAbovePreview && !(useWideDescriptionLayout && isWideScreen)"
+              class="relative mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5"
             >
-              <div v-if="descriptionHTML" class="space-y-3">
+              <button
+                v-if="canManageResourceDescriptions"
+                type="button"
+                class="absolute right-3 top-3 z-10 inline-flex items-center rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white"
+                @click="openDescriptionFocusEditor"
+              >
+                编辑简介
+              </button>
+              <div class="space-y-3">
                 <div class="relative overflow-y-auto">
                   <div
                     ref="fileDescriptionClampRef"
                     class="markdown-content"
                     :class="!fileDescriptionExpanded ? 'max-h-[min(21vh,10rem)] overflow-hidden' : ''"
-                    v-html="descriptionHTML"
                     @click.capture="handleMarkdownInternalLinkNavigate"
-                  />
+                  >
+                    <MarkdownPreview :source="descriptionSource" :debounce-ms="0" empty-text="暂无简介" @rendered="updateFileDescriptionClampUI" />
+                  </div>
                   <div
                     v-if="!fileDescriptionExpanded && fileDescriptionFooterVisible"
                     class="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-white to-transparent"
@@ -3193,7 +3289,7 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
-    <!-- 弹窗：管理员编辑文件信息（名称、简介Markdown、备注、封面URL、播放URL、下载策略等，支持实时预览） -->
+    <!-- 弹窗：管理员编辑文件信息（名称、备注、封面URL、播放URL、下载策略等；简介改由专注编辑弹窗负责） -->
     <Teleport to="body">
       <Transition name="modal-shell">
       <div v-if="descriptionEditorOpen" class="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
@@ -3236,51 +3332,6 @@ function performDownloadFile() {
                   autocomplete="off"
                 />
               </label>
-
-              <div
-                class="grid min-h-0 grid-cols-1 gap-4 lg:min-h-[28rem] lg:grid-cols-2 lg:grid-rows-[auto_minmax(17rem,1fr)]"
-              >
-                <span class="order-1 text-sm font-medium text-slate-700 lg:order-none lg:col-start-1 lg:row-start-1">
-                  简介（Markdown）
-                </span>
-                <div class="order-2 lg:order-none lg:col-start-1 lg:row-start-2 lg:h-full lg:min-h-0 relative">
-                  <textarea
-                    ref="descriptionTextareaRef"
-                    v-model="editDescription"
-                    class="field-area min-h-[17rem] w-full resize-y rounded-3xl lg:h-full lg:min-h-0 lg:resize-none transition-colors"
-                    :class="{ 'border-blue-400 bg-blue-50/60': descIsDragOver, 'opacity-50 pointer-events-none': descIsUploading }"
-                    rows="10"
-                    placeholder="仅在文件详情页展示；支持简单 Markdown。拖拽图片到此处自动上传插入。"
-                    @dragenter="onDescDragEnter"
-                    @dragover="onDescDragOver"
-                    @dragleave="onDescDragLeave"
-                    @drop="onDescDrop($event, descriptionTextareaRef)"
-                  />
-                  <!-- 上传中遮罩 -->
-                  <div
-                    v-if="descIsUploading"
-                    class="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm"
-                  >
-                    <span class="rounded-2xl bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">上传图片中…</span>
-                  </div>
-                </div>
-                <div class="order-3 shrink-0 lg:order-none lg:col-start-2 lg:row-start-1">
-                  <h4 class="text-sm font-medium text-slate-700">简介预览</h4>
-                </div>
-                <div
-                  class="order-4 flex min-h-[17rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white lg:order-none lg:col-start-2 lg:row-start-2 lg:h-full lg:min-h-0"
-                >
-                  <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                    <div
-                      v-if="fileDescriptionPreviewHTML"
-                      class="markdown-content"
-                      v-html="fileDescriptionPreviewHTML"
-                      @click.capture="handleMarkdownInternalLinkNavigate"
-                    />
-                    <p v-else class="text-sm text-slate-400">这里会显示简介预览。</p>
-                  </div>
-                </div>
-              </div>
 
               <!-- 自定义访问路径：设置后可通过 /doc/report 之类的短链接访问该文件 -->
               <label class="space-y-2">
@@ -3355,6 +3406,68 @@ function performDownloadFile() {
       </Transition>
     </Teleport>
 
+    <!-- 弹窗：简介专注编辑（整块版面都给 vditor 所见即所得，不再挤在信息表单里） -->
+    <Teleport to="body">
+      <Transition name="modal-shell">
+      <div v-if="descriptionFocusOpen" class="fixed inset-0 z-[122] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+          <div class="modal-card panel relative my-auto flex w-full max-w-4xl flex-col overflow-visible">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 pb-3 pt-4">
+              <div class="min-w-0">
+                <h3 class="truncate text-lg font-semibold text-slate-900">编辑简介 · {{ detail?.name }}</h3>
+              </div>
+              <div class="flex shrink-0 gap-3">
+                <button type="button" class="btn-secondary" @click="closeDescriptionFocusEditor">取消</button>
+                <button type="button" class="btn-primary" :disabled="saving || !editorDirty" @click="saveDescription">
+                  {{ saving ? "保存中…" : "保存简介" }}
+                </button>
+              </div>
+            </div>
+            <!-- 预留编辑器版面：卸载会在淡出开始时就清空 vditor，不预留的话外壳会塌成一条 -->
+            <div class="vditor-flush" :style="{ minHeight: `${descriptionFocusHeight}px` }">
+              <MarkdownEditor
+                v-model="editDescription"
+                :height="descriptionFocusHeight"
+                placeholder="填写文件简介；支持 Markdown、公式与图表，可直接拖入或粘贴图片。"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 弹窗：所见即所得编辑 Markdown 文件正文（保存走 replace 接口覆盖磁盘文件） -->
+    <Teleport to="body">
+      <Transition name="modal-shell">
+      <div v-if="markdownContentEditorOpen" class="fixed inset-0 z-[122] overflow-y-auto bg-slate-950/40 backdrop-blur-sm">
+        <div class="flex min-h-[100dvh] justify-center px-4 py-6 sm:py-10">
+          <div class="modal-card panel relative my-auto flex w-full max-w-4xl flex-col overflow-visible">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 pb-3 pt-4">
+              <div class="min-w-0">
+                <h3 class="truncate text-lg font-semibold text-slate-900">编辑正文 · {{ detail?.name }}</h3>
+              </div>
+              <div class="flex shrink-0 gap-3">
+                <button type="button" class="btn-secondary" @click="closeMarkdownContentEditor">取消</button>
+                <button
+                  type="button"
+                  class="btn-primary"
+                  :disabled="markdownContentSaving"
+                  @click="saveMarkdownContent"
+                >
+                  {{ markdownContentSaving ? "保存中…" : "保存正文" }}
+                </button>
+              </div>
+            </div>
+            <!-- 预留编辑器版面：卸载会在淡出开始时就清空 vditor，不预留的话外壳会塌成一条 -->
+            <div class="vditor-flush" :style="{ minHeight: `${markdownContentHeight}px` }">
+              <MarkdownEditor v-model="markdownContentDraft" :height="markdownContentHeight" />
+            </div>
+          </div>
+        </div>
+      </div>
+      </Transition>
+    </Teleport>
     <!-- 弹窗：管理员编辑文件标签（勾选预设标签） -->
     <Teleport to="body">
       <Transition name="modal-shell">

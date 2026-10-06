@@ -20,6 +20,14 @@ type Config struct {
 	Session   SessionConfig   `json:"session"`
 	RateLimit RateLimitConfig `json:"rate_limit"`
 	CORS      CORSConfig      `json:"cors"`
+	Import    ImportConfig    `json:"import"`
+}
+
+// ImportConfig 限制本地目录导入/浏览的可访问范围。
+// AllowedRoots 为空表示不限制（保持旧行为）；非空时浏览与导入仅允许
+// 列表内目录及其子目录。
+type ImportConfig struct {
+	AllowedRoots []string `json:"allowed_roots"`
 }
 
 type ServerConfig struct {
@@ -238,6 +246,16 @@ func applyEnv(cfg *Config) error {
 			part = strings.TrimSpace(part)
 			if part != "" {
 				cfg.CORS.AllowedOrigins = append(cfg.CORS.AllowedOrigins, part)
+			}
+		}
+	}
+
+	if value, ok := os.LookupEnv("OPENSHARE_IMPORT_ALLOWED_ROOTS"); ok {
+		cfg.Import.AllowedRoots = nil
+		for _, part := range strings.Split(value, ":") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				cfg.Import.AllowedRoots = append(cfg.Import.AllowedRoots, filepath.Clean(part))
 			}
 		}
 	}

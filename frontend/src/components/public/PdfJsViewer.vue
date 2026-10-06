@@ -249,6 +249,9 @@ watch(() => props.src, () => { if (props.src) { cleanup(); loadPdf(); } }, { imm
 
 function cleanup() {
   destroyed = true;
+  // 移除 scroll 监听：scrollRef 容器由 v-show 常驻，不清理的话每次换源
+  // 都会叠加一个 listener，浏览 N 个 PDF 后滚动一次触发 N 次 onScroll
+  scrollRef.value?.removeEventListener("scroll", onScroll);
   pageCanvases.clear();
   pdfDoc?.destroy();
   pdfDoc = null;

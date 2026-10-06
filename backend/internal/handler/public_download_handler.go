@@ -2,6 +2,7 @@ package handler
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"openshare/backend/internal/middleware"
+	"openshare/backend/internal/model"
 	"openshare/backend/internal/service"
+	"openshare/backend/internal/session"
 )
 
 type PublicDownloadHandler struct {
-	service    *service.PublicDownloadService
-	catalogSvc *service.PublicCatalogService
+	service     *service.PublicDownloadService
+	catalogSvc  *service.PublicCatalogService
+	guestAccess *service.GuestAccessService
 }
 
 type batchDownloadRequest struct {
@@ -29,8 +34,22 @@ type resourceBatchDownloadRequest struct {
 	FolderIDs []string `json:"folder_ids"`
 }
 
-func NewPublicDownloadHandler(service *service.PublicDownloadService, catalogSvc *service.PublicCatalogService) *PublicDownloadHandler {
-	return &PublicDownloadHandler{service: service, catalogSvc: catalogSvc}
+func NewPublicDownloadHandler(service *service.PublicDownloadService, catalogSvc *service.PublicCatalogService, guestAccess *service.GuestAccessService) *PublicDownloadHandler {
+	return &PublicDownloadHandler{service: service, catalogSvc: catalogSvc, guestAccess: guestAccess}
+}
+
+// validateGuestKeyForFile 对受密钥保护的托管目录下的文件详情做访客密钥校验，
+// 与目录详情/列目录文件接口保持一致（下载类端点按设计不参与密钥校验）。
+func (h *PublicDownloadHandler) validateGuestKeyForFile(ctx *gin.Context, file *service.PublicFileDetail) bool {
+	if h.guestAccess == nil || file.FolderID == "" {
+		return true
+	}
+	ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), file.FolderID, middleware.GuestKeyFromContext(ctx))
+	if ok {
+		return true
+	}
+	ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+	return false
 }
 
 func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
@@ -81,14 +100,42 @@ func (h *PublicDownloadHandler) DownloadFile(ctx *gin.Context) {
 	if shouldRecord && wantInlineEmbed && inlineDisposition && service.InlineEmbedDispositionAllowed(download.MimeType, download.FileName) {
 		shouldRecord = false
 	}
+
+	// 成功后计数：包装 writer，仅在响应以 200 完整写出时记录下载，
+	// 避免客户端中断/写失败时计数虚高。
+	var writer *countingResponseWriter
 	if shouldRecord {
-		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-			return
-		}
+		writer = &countingResponseWriter{ResponseWriter: ctx.Writer}
+		ctx.Writer = writer
 	}
 
 	http.ServeContent(ctx.Writer, ctx.Request, download.FileName, download.ModTime, download.Content)
+
+	if writer != nil && writer.status == http.StatusOK && !writer.clientAborted {
+		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
+			fmt.Printf("[warn] record download count for file %s failed: %v\n", download.FileID, err)
+		}
+	}
+}
+
+// countingResponseWriter 记录状态码与客户端中断，用于"成功后计数"。
+type countingResponseWriter struct {
+	gin.ResponseWriter
+	status        int
+	clientAborted bool
+}
+
+func (w *countingResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *countingResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	if err != nil {
+		w.clientAborted = true
+	}
+	return n, err
 }
 
 // DownloadByPath 根据文件夹层级路径下载文件或打包下载文件夹。
@@ -201,14 +248,20 @@ func (h *PublicDownloadHandler) downloadFileByID(ctx *gin.Context, fileID string
 		shouldRecord = false
 	}
 	// HEAD 探测不写响应体，也不计下载次数，避免媒体客户端预检污染统计。
+	// 成功后计数：仅响应以 200 完整写出时记录。
+	var writer *countingResponseWriter
 	if shouldRecord && ctx.Request.Method != http.MethodHead {
-		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-			return
-		}
+		writer = &countingResponseWriter{ResponseWriter: ctx.Writer, status: http.StatusOK}
+		ctx.Writer = writer
 	}
 
 	http.ServeContent(ctx.Writer, ctx.Request, download.FileName, download.ModTime, download.Content)
+
+	if writer != nil && writer.status == http.StatusOK && !writer.clientAborted {
+		if err := h.service.RecordDownload(ctx.Request.Context(), download.FileID); err != nil {
+			fmt.Printf("[warn] record download count for file %s failed: %v\n", download.FileID, err)
+		}
+	}
 }
 
 // downloadFolderByID 根据文件夹 ID 打包下载为 ZIP。
@@ -230,10 +283,16 @@ func (h *PublicDownloadHandler) downloadFolderByID(ctx *gin.Context, folderID st
 	for _, item := range download.Items {
 		fileIDs = append(fileIDs, item.FileID)
 	}
-	if err := h.service.RecordBatchDownload(ctx.Request.Context(), fileIDs); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-		return
-	}
+	// 成功后计数：包装 writer，仅在响应以 200 完整写出时批量记录下载
+	recorder := &countingResponseWriter{ResponseWriter: ctx.Writer, status: http.StatusOK}
+	ctx.Writer = recorder
+	defer func() {
+		if recorder.status == http.StatusOK && !recorder.clientAborted {
+			if err := h.service.RecordBatchDownload(context.Background(), fileIDs); err != nil {
+				fmt.Printf("[warn] record batch download count failed: %v\n", err)
+			}
+		}
+	}()
 
 	ctx.Header("Content-Type", "application/zip")
 	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FolderName+".zip"))
@@ -266,7 +325,13 @@ func (h *PublicDownloadHandler) downloadFolderByID(ctx *gin.Context, folderID st
 // proxyDownload 反向代理上游 URL，透传 Range/If-Range 头，原样返回上游响应。
 // /dl/* 要求对任意来源开放 CORS，因此上游返回的 Access-Control-* 头必须被过滤，
 // 否则会覆盖 PublicDownloadCORS 写入的 * 策略。
+// SSRF 防护（proxy 模式）：代理功能面向内网存储，因此保留 RFC1918，但拒绝
+// loopback / link-local（含云元数据 169.254.169.254），重定向逐跳重检 + 建连时校验。
 func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *service.DownloadableFile) {
+	if err := service.ValidateProxyURL(download.ProxyURL); err != nil {
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "upstream address not allowed"})
+		return
+	}
 	upstreamMethod := http.MethodGet
 	if ctx.Request.Method == http.MethodHead {
 		upstreamMethod = http.MethodHead
@@ -285,7 +350,8 @@ func (h *PublicDownloadHandler) proxyDownload(ctx *gin.Context, download *servic
 		proxyReq.Header.Set("If-Range", ifRange)
 	}
 
-	client := &http.Client{Timeout: 0} // 无超时，支持大文件和长时间流式传输
+	// 无整体超时以支持大文件流式传输；建连与重定向由 SSRF 防护 client 控制
+	client := service.NewSSRFFetchClient(service.SSRFModeProxy, 0)
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "upstream unreachable"})
@@ -362,10 +428,16 @@ func (h *PublicDownloadHandler) DownloadFolder(ctx *gin.Context) {
 	for _, item := range download.Items {
 		fileIDs = append(fileIDs, item.FileID)
 	}
-	if err := h.service.RecordBatchDownload(ctx.Request.Context(), fileIDs); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-		return
-	}
+	// 成功后计数：包装 writer，仅在响应以 200 完整写出时批量记录下载
+	recorder := &countingResponseWriter{ResponseWriter: ctx.Writer, status: http.StatusOK}
+	ctx.Writer = recorder
+	defer func() {
+		if recorder.status == http.StatusOK && !recorder.clientAborted {
+			if err := h.service.RecordBatchDownload(context.Background(), fileIDs); err != nil {
+				fmt.Printf("[warn] record batch download count failed: %v\n", err)
+			}
+		}
+	}()
 
 	ctx.Header("Content-Type", "application/zip")
 	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FolderName+".zip"))
@@ -442,6 +514,13 @@ func (h *PublicDownloadHandler) GetFileDetail(ctx *gin.Context) {
 		}
 		return
 	}
+	if !h.validateGuestKeyForFile(ctx, detail) {
+		return
+	}
+	// 服务器绝对路径仅对具备资源管理权限的管理员返回，避免向匿名访客泄露目录布局
+	if identity, ok := session.GetAdminIdentity(ctx); !(ok && identity.HasPermission(model.AdminPermissionResourceModeration)) {
+		detail.StoragePath = ""
+	}
 	ctx.JSON(http.StatusOK, detail)
 }
 
@@ -473,10 +552,16 @@ func (h *PublicDownloadHandler) DownloadBatch(ctx *gin.Context) {
 	for _, item := range files {
 		fileIDs = append(fileIDs, item.FileID)
 	}
-	if err := h.service.RecordBatchDownload(ctx.Request.Context(), fileIDs); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-		return
-	}
+	// 成功后计数：包装 writer，仅在响应以 200 完整写出时批量记录下载
+	recorder := &countingResponseWriter{ResponseWriter: ctx.Writer, status: http.StatusOK}
+	ctx.Writer = recorder
+	defer func() {
+		if recorder.status == http.StatusOK && !recorder.clientAborted {
+			if err := h.service.RecordBatchDownload(context.Background(), fileIDs); err != nil {
+				fmt.Printf("[warn] record batch download count failed: %v\n", err)
+			}
+		}
+	}()
 
 	ctx.Header("Content-Type", "application/zip")
 	ctx.Header("Content-Disposition", `attachment; filename="openshare-batch.zip"`)
@@ -535,10 +620,16 @@ func (h *PublicDownloadHandler) DownloadResourceBatch(ctx *gin.Context) {
 	for _, item := range files {
 		fileIDs = append(fileIDs, item.FileID)
 	}
-	if err := h.service.RecordBatchDownload(ctx.Request.Context(), fileIDs); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record download"})
-		return
-	}
+	// 成功后计数：包装 writer，仅在响应以 200 完整写出时批量记录下载
+	recorder := &countingResponseWriter{ResponseWriter: ctx.Writer, status: http.StatusOK}
+	ctx.Writer = recorder
+	defer func() {
+		if recorder.status == http.StatusOK && !recorder.clientAborted {
+			if err := h.service.RecordBatchDownload(context.Background(), fileIDs); err != nil {
+				fmt.Printf("[warn] record batch download count failed: %v\n", err)
+			}
+		}
+	}()
 
 	ctx.Header("Content-Type", "application/zip")
 	ctx.Header("Content-Disposition", `attachment; filename="openshare-selection.zip"`)

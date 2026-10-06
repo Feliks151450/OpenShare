@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -75,6 +74,21 @@ func NewSQLite(opts Options) (*gorm.DB, error) {
 	return db, nil
 }
 
+// dsnPragmaKeys 将连接级 PRAGMA 翻译为 mattn/go-sqlite3 的 DSN 参数。
+// 这些 PRAGMA 只作用于单个连接：若仅在启动时执行一次，连接池回收重建后
+// （例如 ConnMaxLifetime 到期）会静默失效。写入 DSN 后每个新建连接都会
+// 自动生效；applyPragmas 仍作为兜底保留。
+var dsnPragmaKeys = map[string]string{
+	"foreign_keys":       "_foreign_keys",
+	"busy_timeout":       "_busy_timeout",
+	"journal_mode":       "_journal_mode",
+	"cache_size":         "_cache_size",
+	"synchronous":        "_synchronous",
+	"temp_store":         "_temp_store",
+	"mmap_size":          "_mmap_size",
+	"wal_autocheckpoint": "_wal_autocheckpoint",
+}
+
 func buildDSN(opts Options) (string, error) {
 	parts := strings.SplitN(opts.Path, "?", 2)
 	basePath := parts[0]
@@ -88,13 +102,36 @@ func buildDSN(opts Options) (string, error) {
 		}
 	}
 
+	if values == nil {
+		values = make(url.Values)
+	}
+
 	if opts.EnableWAL {
-		if values == nil {
-			values = make(url.Values)
-		}
 		values.Set("_journal_mode", "WAL")
-	} else if values != nil {
+	} else {
 		values.Del("_journal_mode")
+	}
+
+	// 连接级 PRAGMA 全部写入 DSN，保证连接重建后依然生效
+	for _, pragma := range opts.Pragmas {
+		if !allowedPragmas[pragma.Name] {
+			return "", fmt.Errorf("unsupported sqlite pragma: %q", pragma.Name)
+		}
+		dsnKey, ok := dsnPragmaKeys[pragma.Name]
+		if !ok {
+			continue
+		}
+		value := strings.TrimSpace(pragma.Value)
+		switch strings.ToLower(pragma.Name) {
+		case "foreign_keys":
+			switch strings.ToLower(value) {
+			case "on", "true", "1":
+				value = "on"
+			case "off", "false", "0":
+				value = "off"
+			}
+		}
+		values.Set(dsnKey, value)
 	}
 
 	if len(values) == 0 {
@@ -121,9 +158,12 @@ func newLogger(level string) gormlogger.Interface {
 }
 
 func configurePool(sqlDB *sql.DB) {
+	// 单连接模型：连接不复用回收（ConnMaxLifetime=0），连接级 PRAGMA 不会因
+	// 连接重建而丢失（另有 DSN 参数兜底）。若连接因错误被丢弃，新连接由
+	// DSN 参数自动恢复 PRAGMA。
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(10 * time.Minute)
+	sqlDB.SetConnMaxLifetime(0)
 }
 
 func applyPragmas(db *gorm.DB, pragmas []Pragma) error {

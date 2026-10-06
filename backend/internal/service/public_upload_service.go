@@ -218,6 +218,13 @@ type directPublishedUpload struct {
 	finalRelativePath string
 }
 
+// trashedOverwrittenFile 记录被覆盖旧文件的回收站位置与原路径，
+// 发布流程失败时用于把旧文件还原，保证覆盖操作可回滚。
+type trashedOverwrittenFile struct {
+	trashPath    string
+	originalPath string
+}
+
 func (s *PublicUploadService) publishDirectUploadBatch(
 	ctx context.Context,
 	rootFolder *model.Folder,
@@ -233,6 +240,7 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 	}
 
 	published := make([]directPublishedUpload, 0, len(submissions))
+	trashedOldFiles := make([]trashedOverwrittenFile, 0)
 	newItems := make([]repository.ApprovedUploadBatchItem, 0)
 	newSubmissions := make([]model.Submission, 0)
 	allNames := make([]string, 0, len(submissions))
@@ -245,29 +253,59 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 			targetDir = filepath.Join(rootSourcePath, filepath.FromSlash(relativeDir))
 		}
 		if err := s.storage.EnsureManagedDirectory(targetDir); err != nil {
-			rollbackErr := s.rollbackDirectPublishedUploads(published)
+			rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
 			if rollbackErr != nil {
 				return nil, fmt.Errorf("ensure direct upload target directory failed (%v); rollback failed: %w", err, rollbackErr)
 			}
 			return nil, fmt.Errorf("ensure direct upload target directory: %w", err)
 		}
 
-		// 覆盖模式：检查是否已有同名文件，有则替换内容而非创建新记录
+		// 定位本次上传目标目录对应的 DB 目录记录：
+		// 根目录必然存在；子目录记录缺失时说明磁盘文件无 DB 记录可覆盖，按新文件处理。
+		targetFolderID := rootFolder.ID
+		if relativeDir != "" {
+			resolvedID, resolveErr := s.repository.FindFolderIDBySourcePath(ctx, targetDir)
+			if resolveErr != nil {
+				rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("resolve target folder failed (%v); rollback failed: %w", resolveErr, rollbackErr)
+				}
+				return nil, fmt.Errorf("resolve target folder for overwrite: %w", resolveErr)
+			}
+			if resolvedID != "" {
+				targetFolderID = resolvedID
+			}
+		}
+
+		// 覆盖模式：检查是否已有同名文件，有则替换内容而非创建新记录。
+		// 顺序：先更新 DB，再把旧磁盘文件移入回收站（可恢复），最后移入新文件。
 		replaced := false
 		if overwrite {
 			destPath := filepath.Join(targetDir, filepath.Base(submission.Name))
 			if _, statErr := os.Stat(destPath); statErr == nil {
-				// 磁盘：删除旧文件，后面 MoveStagedFileToFolder 会移入新文件
-				if rmErr := s.storage.RemoveManagedFilePermanently(destPath); rmErr != nil {
-					return nil, fmt.Errorf("overwrite existing file on disk: %w", rmErr)
-				}
 				// 数据库：找到旧记录，更新元数据而非创建新记录
 				existingID, updateErr := s.repository.UpdateExistingFileMetadata(
-					ctx, &rootFolder.ID, submission.Name,
+					ctx, &targetFolderID, submission.Name,
 					submission.Size, submission.Extension, submission.MimeType, reviewedAt,
 				)
 				if updateErr != nil {
+					rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
+					if rollbackErr != nil {
+						return nil, fmt.Errorf("update existing file metadata failed (%v); rollback failed: %w", updateErr, rollbackErr)
+					}
 					return nil, fmt.Errorf("update existing file metadata: %w", updateErr)
+				}
+				// 磁盘：旧文件移入回收站（不再永久删除），后续失败时回滚还原
+				trashPath, trashErr := s.storage.MoveManagedFileToTrash(destPath)
+				if trashErr != nil {
+					rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
+					if rollbackErr != nil {
+						return nil, fmt.Errorf("overwrite existing file on disk failed (%v); rollback failed: %w", trashErr, rollbackErr)
+					}
+					return nil, fmt.Errorf("move overwritten file to trash: %w", trashErr)
+				}
+				if trashPath != "" {
+					trashedOldFiles = append(trashedOldFiles, trashedOverwrittenFile{trashPath: trashPath, originalPath: destPath})
 				}
 				if existingID != "" {
 					replaced = true
@@ -285,19 +323,35 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 				if !overwriteID {
 					return nil, ErrFileIDConflict
 				}
-				// 覆盖模式：更新现有文件元数据
+				// 覆盖模式：更新现有文件元数据（记录迁移到本次目标目录，跨目录调整统计）
 				oldName, oldFolderPath, updateErr := s.repository.UpdateExistingFileByID(
-					ctx, submission.FileInputID, &submission, reviewedAt,
+					ctx, submission.FileInputID, &submission, targetFolderID, reviewedAt,
 				)
 				if updateErr != nil {
+					rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
+					if rollbackErr != nil {
+						return nil, fmt.Errorf("update existing file by id failed (%v); rollback failed: %w", updateErr, rollbackErr)
+					}
 					return nil, fmt.Errorf("update existing file by id: %w", updateErr)
 				}
-				// 删除旧的物理文件（如果名称不同）
-				if oldName != "" && oldFolderPath != "" && oldName != submission.Name {
+				// 旧磁盘文件已不再被记录引用（记录已指向本次目标目录），
+				// 名称不同或目录不同都需要清理；移入回收站以保留恢复能力。
+				if oldName != "" && oldFolderPath != "" {
 					oldPath := filepath.Join(oldFolderPath, filepath.Base(oldName))
-					if _, statErr := os.Stat(oldPath); statErr == nil {
-						if rmErr := s.storage.RemoveManagedFilePermanently(oldPath); rmErr != nil {
-							return nil, fmt.Errorf("remove old file for id overwrite: %w", rmErr)
+					stale := oldFolderPath != targetDir || oldName != submission.Name
+					if stale {
+						if _, statErr := os.Stat(oldPath); statErr == nil {
+							trashPath, trashErr := s.storage.MoveManagedFileToTrash(oldPath)
+							if trashErr != nil {
+								rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
+								if rollbackErr != nil {
+									return nil, fmt.Errorf("remove old file for id overwrite failed (%v); rollback failed: %w", trashErr, rollbackErr)
+								}
+								return nil, fmt.Errorf("move stale file of id overwrite to trash: %w", trashErr)
+							}
+							if trashPath != "" {
+								trashedOldFiles = append(trashedOldFiles, trashedOverwrittenFile{trashPath: trashPath, originalPath: oldPath})
+							}
 						}
 					}
 				}
@@ -307,7 +361,7 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 
 		finalPath, finalName, err := s.storage.MoveStagedFileToFolder(submission.StagingPath, targetDir, submission.Name)
 		if err != nil {
-			rollbackErr := s.rollbackDirectPublishedUploads(published)
+			rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
 			if rollbackErr != nil {
 				return nil, fmt.Errorf("direct upload move failed (%v); rollback failed: %w", err, rollbackErr)
 			}
@@ -337,7 +391,7 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 
 	if len(newItems) > 0 {
 		if err := s.repository.CreateApprovedUploadBatch(ctx, rootFolder, newSubmissions, newItems, adminID, operatorIP, reviewedAt); err != nil {
-			rollbackErr := s.rollbackDirectPublishedUploads(published)
+			rollbackErr := s.rollbackDirectPublishedUploads(published, trashedOldFiles)
 			if rollbackErr != nil {
 				return nil, fmt.Errorf("persist direct upload failed (%v); rollback failed: %w", err, rollbackErr)
 			}
@@ -354,14 +408,24 @@ func (s *PublicUploadService) publishDirectUploadBatch(
 	}, nil
 }
 
-func (s *PublicUploadService) rollbackDirectPublishedUploads(published []directPublishedUpload) error {
+// rollbackDirectPublishedUploads 把已发布的新文件移回暂存区、把被覆盖的旧文件从回收站
+// 还原到原位。任何单项失败都会记录并继续处理剩余项（errors.Join 汇总），避免中途放弃
+// 留下更多无主文件。
+func (s *PublicUploadService) rollbackDirectPublishedUploads(published []directPublishedUpload, trashedOldFiles []trashedOverwrittenFile) error {
+	var errs []error
 	for i := len(published) - 1; i >= 0; i-- {
 		entry := published[i]
 		if _, err := s.storage.MoveFileBackToStaging(entry.finalPath, entry.submission.StagingPath); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("rollback published file %s: %w", entry.finalPath, err))
 		}
 	}
-	return nil
+	for i := len(trashedOldFiles) - 1; i >= 0; i-- {
+		entry := trashedOldFiles[i]
+		if err := storage.MoveRegularFile(entry.trashPath, entry.originalPath); err != nil {
+			errs = append(errs, fmt.Errorf("restore overwritten file %s from trash: %w", entry.originalPath, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *PublicUploadService) cleanupStagedSubmissions(submissions []model.Submission) {

@@ -36,14 +36,16 @@ func AdjustFolderStatsTx(tx *gorm.DB, folderID *string, sizeDelta, downloadDelta
 		}
 
 		updates := map[string]any{}
+		// MAX(0, ...) 钳制：负增量不得把统计扣成负数（历史漂移或 OR 优先级
+		// 等异常路径造成的多扣在此兜底，启动时全量重建会进一步纠偏）
 		if sizeDelta != 0 {
-			updates["total_size"] = gorm.Expr("total_size + ?", sizeDelta)
+			updates["total_size"] = gorm.Expr("MAX(0, total_size + ?)", sizeDelta)
 		}
 		if downloadDelta != 0 {
-			updates["download_count"] = gorm.Expr("download_count + ?", downloadDelta)
+			updates["download_count"] = gorm.Expr("MAX(0, download_count + ?)", downloadDelta)
 		}
 		if fileCountDelta != 0 {
-			updates["file_count"] = gorm.Expr("file_count + ?", fileCountDelta)
+			updates["file_count"] = gorm.Expr("MAX(0, file_count + ?)", fileCountDelta)
 		}
 		if len(updates) > 0 {
 			if err := tx.Model(&Folder{}).

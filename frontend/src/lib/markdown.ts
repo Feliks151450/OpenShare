@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify";
 import { marked, type Renderer, type Tokens } from "marked";
-import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref, markdownFencedCodeHtml } from "./markdown-shared";
+import { escapeHtml, isSafeImageUrlForSrc, resolveMarkdownImageUrlToHref, markdownFencedCodeHtml, markdownLinkHtml } from "./markdown-shared";
 export { resolveMarkdownImageUrlToHref };
 
 /** 从简介 Markdown 中取封面图：仅当 alt 为 `cover`（不区分大小写）时，取首次出现的图片 URL */
@@ -48,22 +48,6 @@ export function fileCoverImageHrefFromFields(coverUrlField: string | undefined, 
   return coverImageHrefFromDescription(description);
 }
 
-function encodeHrefLikeMarked(href: string): string | null {
-  const h = href.trim();
-  if (!h) {
-    return null;
-  }
-  try {
-    return encodeURI(decodeURI(h));
-  } catch {
-    try {
-      return encodeURI(h);
-    } catch {
-      return null;
-    }
-  }
-}
-
 marked.use({
   gfm: true,
   breaks: false,
@@ -100,19 +84,7 @@ marked.use({
     },
     link(this: Renderer, token: Tokens.Link): string {
       const inner = this.parser.parseInline(token.tokens);
-      const encoded = encodeHrefLikeMarked(String(token.href ?? ""));
-      if (encoded === null) {
-        return inner;
-      }
-      const title =
-        token.title != null && String(token.title).trim() !== ""
-          ? ` title="${escapeHtml(String(token.title))}"`
-          : "";
-      const hrefAttr = escapeHtml(encoded);
-      if (/^https?:\/\//i.test(encoded)) {
-        return `<a href="${hrefAttr}" target="_blank" rel="noopener noreferrer"${title}>${inner}</a>`;
-      }
-      return `<a href="${hrefAttr}"${title}>${inner}</a>`;
+      return markdownLinkHtml(String(token.href ?? ""), token.title, inner);
     },
   },
 });
