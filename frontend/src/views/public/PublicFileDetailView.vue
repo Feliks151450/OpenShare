@@ -50,6 +50,7 @@ import {
   type MarkdownCatalogConfirmPresentation,
 } from "../../lib/markdownCatalogNavigateDisplay";
 import { onMarkdownLinkClickCapture, isViewportTailwindXlMin, markdownRouteSeekSeconds } from "../../lib/publicMarkdownLinks";
+import { resolveRelativeCatalogLinkRoute } from "../../lib/catalogRelativeLinkRoute";
 import { netcdfStructureToMarkdown, type NetCDFDumpGroup } from "../../lib/netcdfStructureToMarkdown";
 import { useFavorites } from "../../composables/useFavorites";
 /** 递归嵌套「右侧预览」，避免与同名默认导出循环引用告警 */
@@ -84,6 +85,8 @@ interface FileDetailResponse {
   path: string;
   /** 托管存储下磁盘绝对路径（可解析且存在时为非空）；与 `path` 不同 */
   storage_path?: string;
+  /** 是否位于虚拟目录（无本地磁盘文件，经 CDN 直链访问） */
+  is_virtual?: boolean;
   description: string;
   /** 单行备注；卡片副标题用，与 Markdown 简介分离 */
   remark?: string;
@@ -366,6 +369,17 @@ function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
     ...(resolutionBaseHref ? { resolutionBaseHref } : {}),
     interceptPush: interceptMarkdownInternalFileNavigate,
     confirmBeforeMarkdownCatalogNavigate: promptMarkdownCatalogNavigateConfirm,
+    // 简介与正文里的相对链按「该文件所在目录」解析
+    resolveRelativeCatalogLink: (relPath) =>
+      resolveRelativeCatalogLinkRoute(relPath, detail.value?.folder_id ?? ""),
+  });
+}
+
+/** 跳转确认弹窗里的简介：弹窗本身已是目录跳转的确认环节，链一律直跳，锚点为弹窗展示的目录 */
+function handleCatalogConfirmMarkdownLinkNavigate(ev: MouseEvent) {
+  onMarkdownLinkClickCapture(ev, router, {
+    resolveRelativeCatalogLink: (relPath) =>
+      resolveRelativeCatalogLinkRoute(relPath, markdownCatalogNavigatePresentation.value?.folderId ?? ""),
   });
 }
 
@@ -853,11 +867,10 @@ function fileDetailPreviewVisualKind(d: FileDetailResponse): DetailPreviewVisual
   return null;
 }
 
-/** 虚拟文件（无本地 storage_path）不支持内嵌预览 */
+/** 虚拟文件（无本地磁盘文件，经 CDN 直链访问）不支持内嵌预览 */
 const isVirtualDetailFile = computed(() => {
   if (!detail.value) return false;
-  const hasStorage = (detail.value.storage_path ?? "").trim().length > 0;
-  return !hasStorage;
+  return detail.value.is_virtual === true;
 });
 
 const previewVisualKind = computed((): DetailPreviewVisualKind | null => {
@@ -3624,6 +3637,7 @@ function performDownloadFile() {
                   <div
                     class="markdown-content mt-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/50"
                     v-html="markdownCatalogNavigatePresentation.descriptionHtml"
+                    @click.capture="handleCatalogConfirmMarkdownLinkNavigate"
                   />
                 </div>
               </div>

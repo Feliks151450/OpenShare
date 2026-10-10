@@ -25,6 +25,8 @@ func registerPublicRoutes(api *gin.RouterGroup, handlers *routeHandlers, cfg con
 	public.GET("/folders/:folderID/files", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ListPublicFolderFiles)
 	public.GET("/folders/:folderID", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.GetPublicFolderDetail)
 	public.GET("/resolve-custom-path", middleware.ExtractGuestKeyHeader(), handlers.publicCatalog.ResolveCustomPath)
+	// Markdown 相对链按名称解析：每段一次查询，限流并配合服务层的路径长度上限。
+	public.GET("/resolve-catalog-path", middleware.ExtractGuestKeyHeader(), middleware.RateLimit("resolve-catalog-path", cfg.RateLimit.Search), handlers.publicCatalog.ResolveCatalogPath)
 	public.GET("/search", middleware.ExtractGuestKeyHeader(), middleware.RateLimit("search", cfg.RateLimit.Search), handlers.search.Search)
 	// 公开 validate 端点（自身不要求密钥，但允许在已携 header 时直接通过）；限流防密钥爆破
 	public.POST("/guest-access/validate", middleware.ExtractGuestKeyHeader(), middleware.RateLimit("guest-access", cfg.RateLimit.Upload), handlers.guestAccess.Validate)
@@ -59,9 +61,9 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers, cfg conf
 	adminProtected.GET("/dashboard/stats", handlers.adminDashboard.GetStats)
 	adminProtected.POST("/session/change-password", handlers.adminAuth.ChangePassword)
 	adminProtected.PATCH("/account/profile", handlers.adminAuth.UpdateProfile)
-		adminProtected.GET("/api-tokens", handlers.apiToken.List)
-		adminProtected.POST("/api-tokens", handlers.apiToken.Create)
-		adminProtected.DELETE("/api-tokens/:tokenID", handlers.apiToken.Delete)
+	adminProtected.GET("/api-tokens", handlers.apiToken.List)
+	adminProtected.POST("/api-tokens", handlers.apiToken.Create)
+	adminProtected.DELETE("/api-tokens/:tokenID", handlers.apiToken.Delete)
 	adminProtected.GET("/operation-logs",
 		middleware.RequireAdminPermission(model.AdminPermissionManageSystem),
 		handlers.operationLog.List,
@@ -150,29 +152,29 @@ func registerAdminRoutes(api *gin.RouterGroup, handlers *routeHandlers, cfg conf
 		handlers.export_.ExportDirectory,
 	)
 	adminProtected.GET(
-			"/resources/folders",
-			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
-			handlers.resourceManagement.ListFolders,
-		)
-		adminProtected.POST(
-			"/resources/folders",
-			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
-			handlers.resourceManagement.CreateFolder,
-		)
-		adminProtected.POST(
-			"/resources/virtual-folders",
-			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
-			handlers.resourceManagement.CreateVirtualFolder,
-		)
-		adminProtected.GET("/resources/files",
-			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
-			handlers.resourceManagement.ListFiles,
-		)
-		adminProtected.GET("/resources/check-custom-path",
-			middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
-			handlers.resourceManagement.CheckCustomPath,
-		)
-		adminProtected.PUT(
+		"/resources/folders",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.ListFolders,
+	)
+	adminProtected.POST(
+		"/resources/folders",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.CreateFolder,
+	)
+	adminProtected.POST(
+		"/resources/virtual-folders",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.CreateVirtualFolder,
+	)
+	adminProtected.GET("/resources/files",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.ListFiles,
+	)
+	adminProtected.GET("/resources/check-custom-path",
+		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
+		handlers.resourceManagement.CheckCustomPath,
+	)
+	adminProtected.PUT(
 		"/resources/folders/:folderID",
 		middleware.RequireAdminPermission(model.AdminPermissionResourceModeration),
 		handlers.resourceManagement.UpdateFolderDescription,

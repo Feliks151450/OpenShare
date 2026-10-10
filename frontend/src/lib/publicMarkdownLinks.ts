@@ -177,6 +177,47 @@ export function markdownRouteSeekSeconds(route: RouteLocationRaw): number | null
   return seconds;
 }
 
+/**
+ * Markdown 相对链的路径部分（如 `nc/`、`../x.md`、`/data/nc/a.nc`）。
+ *
+ * 只有真正需要按名称查目录的写法才返回非空：带 scheme（http(s)/mailto/data…）、
+ * 协议相对 `//host`、纯锚点都返回 null，交给各自的默认处理。以 `/` 开头的写法
+ * 返回后由后端按「从根目录起」解析，与 URL 语义一致。
+ */
+export function relativeCatalogLinkPathFromHref(hrefRaw: string): string | null {
+  const trimmed = hrefRaw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith("//") || trimmed.startsWith("#")) {
+    return null;
+  }
+  const pathPart = (trimmed.split(/[?#]/)[0] ?? "").trim();
+  if (!pathPart) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(pathPart);
+  } catch {
+    return pathPart;
+  }
+}
+
+/**
+ * 纯相对路径（`nc/`、`../x.md`、`./a.md`）：不含查询、锚点，也不以 `/` 开头。
+ *
+ * 这类写法只能按目录名称解释——它们在详情页里的 URL 解析结果形如 `/files/<名称>`，
+ * 先按站内路由匹配会被当成文件 ID（详情页因此报「文件不存在或未公开」）。
+ * 带查询/锚点的写法（`../?folder=<id>`、`./<id>?t=10`）仍按浏览器 URL 语义处理。
+ */
+function bareRelativeCatalogPathFromHref(hrefRaw: string): string | null {
+  const trimmed = hrefRaw.trim();
+  if (trimmed.startsWith("/") || trimmed.includes("?") || trimmed.includes("#")) {
+    return null;
+  }
+  return relativeCatalogLinkPathFromHref(trimmed);
+}
+
 /** 站内 Markdown 导航可选项（相对路径基准、劫持 push）。 */
 export type MarkdownRouterNavOptions = {
   resolutionBaseHref?: string;
@@ -186,7 +227,38 @@ export type MarkdownRouterNavOptions = {
    * Markdown 链解析为资料目录（`public-home` 或 `public-custom-folder`）时：先由页面弹窗确认，`true` 再 `router.push`。
    */
   confirmBeforeMarkdownCatalogNavigate?: (route: RouteLocationRaw) => Promise<boolean>;
+  /**
+   * 相对链（`nc/`、`../笔记.md`）的名称解析：调用方按被渲染内容的锚点目录查询后端。
+   * 返回 null 表示解析不到（含无权限），此时回退为浏览器默认跳转。
+   */
+  resolveRelativeCatalogLink?: (relPath: string) => Promise<RouteLocationRaw | null>;
 };
+
+function applyMarkdownRoute(
+  route: RouteLocationRaw,
+  router: Pick<Router, "push">,
+  options?: MarkdownRouterNavOptions,
+): void {
+  if (options?.interceptPush?.(route)) {
+    return;
+  }
+
+  const confirmCatalog = options?.confirmBeforeMarkdownCatalogNavigate;
+  if (confirmCatalog != null && markdownRouteIsCatalogHome(route)) {
+    void (async () => {
+      try {
+        if (await confirmCatalog(route)) {
+          await router.push(route);
+        }
+      } catch {
+        /* 弹窗或导航失败时忽略 */
+      }
+    })();
+    return;
+  }
+
+  void router.push(route);
+}
 
 /** 捕获阶段委托：Markdown 正文中的站内链使用 Router 跳转，避免整页刷新。 */
 export function onMarkdownLinkClickCapture(
@@ -206,28 +278,60 @@ export function onMarkdownLinkClickCapture(
     return;
   }
   const href = anchor.getAttribute("href") ?? "";
-  const route = markdownHrefToVueRoute(href, markdownOptions);
-  if (route == null) {
-    return;
-  }
-  ev.preventDefault();
-  if (markdownOptions?.interceptPush?.(route)) {
-    return;
-  }
+  const resolveRelative = markdownOptions?.resolveRelativeCatalogLink;
 
-  const confirmCatalog = markdownOptions?.confirmBeforeMarkdownCatalogNavigate;
-  if (confirmCatalog != null && markdownRouteIsCatalogHome(route)) {
+  // 纯相对路径先按目录名称解析，解析不到再退回站内路由匹配与浏览器默认行为。
+  const bareRelPath = resolveRelative ? bareRelativeCatalogPathFromHref(href) : null;
+  if (bareRelPath != null) {
+    // 相对链要按名称查目录，只能异步解析；先拦住浏览器默认跳转，解析不到再原样放行。
+    ev.preventDefault();
     void (async () => {
+      let resolved: RouteLocationRaw | null = null;
       try {
-        if (await confirmCatalog(route)) {
-          await router.push(route);
-        }
+        resolved = await resolveRelative!(bareRelPath);
       } catch {
-        /* 弹窗或导航失败时忽略 */
+        resolved = null;
       }
+      if (resolved != null) {
+        applyMarkdownRoute(resolved, router, markdownOptions);
+        return;
+      }
+      const fallbackRoute = markdownHrefToVueRoute(href, markdownOptions);
+      if (fallbackRoute != null) {
+        applyMarkdownRoute(fallbackRoute, router, markdownOptions);
+        return;
+      }
+      window.location.href = anchor.href;
     })();
     return;
   }
 
-  void router.push(route);
+  const route = markdownHrefToVueRoute(href, markdownOptions);
+  if (route != null) {
+    ev.preventDefault();
+    applyMarkdownRoute(route, router, markdownOptions);
+    return;
+  }
+
+  if (resolveRelative == null) {
+    return;
+  }
+  const relPath = relativeCatalogLinkPathFromHref(href);
+  if (relPath == null) {
+    return;
+  }
+  // 相对链要按名称查目录，只能异步解析；先拦住浏览器默认跳转，解析不到再原样放行。
+  ev.preventDefault();
+  void (async () => {
+    try {
+      const resolved = await resolveRelative(relPath);
+      if (resolved == null) {
+        window.location.href = anchor.href;
+        return;
+      }
+      applyMarkdownRoute(resolved, router, markdownOptions);
+    } catch {
+      /* 解析异常时保持当前页 */
+    }
+  })();
 }

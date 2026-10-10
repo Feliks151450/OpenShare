@@ -61,6 +61,7 @@ import {
   type MarkdownCatalogConfirmPresentation,
 } from "../../lib/markdownCatalogNavigateDisplay";
 import { markdownRoutePublicFileDetailId, markdownRouteSeekSeconds, onMarkdownLinkClickCapture, isViewportTailwindXlMin } from "../../lib/publicMarkdownLinks";
+import { resolveRelativeCatalogLinkRoute } from "../../lib/catalogRelativeLinkRoute";
 import CoverImagePicker from "../../components/admin/CoverImagePicker.vue";
 import MoveFileModal from "../../components/admin/MoveFileModal.vue";
 import { fileEffectiveDownloadHref, fileUsesBackendDownloadHref } from "../../lib/fileDirectUrl";
@@ -599,6 +600,8 @@ function folderIdFromRouteQuery(raw: unknown): string {
 const customPathResolvedFolderID = ref("");
 /** 自定义路径指向 Markdown 文件时的正文（未进入整页模式时为 null） */
 const customPathMarkdownSource = ref<string | null>(null);
+/** 整页 Markdown 正文里相对链的锚点目录：该 md 文件所在目录，未取到时按根目录解析 */
+const customPathMarkdownAnchorFolderID = ref("");
 /** 与文件详情页的文本预览上限一致：超限的 Markdown 交给详情页提示下载 */
 const CUSTOM_PATH_MARKDOWN_MAX_BYTES = 1_048_576;
 const currentFolderID = computed(() => {
@@ -1238,17 +1241,43 @@ function interceptHomeMarkdownFilePanelPeek(route: RouteLocationRaw): boolean {
   return true;
 }
 
-function handleMarkdownInternalLinkNavigate(ev: MouseEvent) {
-  onMarkdownLinkClickCapture(ev, router, {
-    interceptPush: interceptHomeMarkdownFilePanelPeek,
-    confirmBeforeMarkdownCatalogNavigate: promptMarkdownCatalogNavigateConfirm,
-  });
+/**
+ * 各 Markdown 出口的「锚点目录」不同，因此按出口生成各自的点击委托：
+ * 简介跟着当前目录，公告固定在根目录，自定义路径整页跟着该 md 文件所在目录，
+ * 跳转确认弹窗跟着弹窗正在展示的目录。
+ *
+ * @param homeChromeInteraction 是否启用首页交互形态（文件侧栏预览 + 目录跳转确认弹窗）。
+ *        整页 Markdown 与确认弹窗都在遮罩层内，沿用原来的直跳行为。
+ */
+function makeMarkdownLinkHandler(
+  anchorFolderID: () => string,
+  homeChromeInteraction = true,
+) {
+  return (ev: MouseEvent) => {
+    onMarkdownLinkClickCapture(ev, router, {
+      resolveRelativeCatalogLink: (relPath) =>
+        resolveRelativeCatalogLinkRoute(relPath, anchorFolderID()),
+      ...(homeChromeInteraction
+        ? {
+            interceptPush: interceptHomeMarkdownFilePanelPeek,
+            confirmBeforeMarkdownCatalogNavigate: promptMarkdownCatalogNavigateConfirm,
+          }
+        : {}),
+    });
+  };
 }
 
+const handleMarkdownInternalLinkNavigate = makeMarkdownLinkHandler(() => currentFolderID.value);
+const handleHomeAnnouncementMarkdownLinkNavigate = makeMarkdownLinkHandler(() => "");
+const handleCatalogConfirmMarkdownLinkNavigate = makeMarkdownLinkHandler(
+  () => markdownCatalogNavigatePresentation.value?.folderId ?? "",
+  false,
+);
 /** 整页 Markdown 模式下不渲染目录内容：侧栏抽屉与目录确认弹窗都会被遮罩盖住，站内链一律走路由跳转 */
-function handleCustomPathMarkdownLinkNavigate(ev: MouseEvent) {
-  onMarkdownLinkClickCapture(ev, router);
-}
+const handleCustomPathMarkdownLinkNavigate = makeMarkdownLinkHandler(
+  () => customPathMarkdownAnchorFolderID.value,
+  false,
+);
 
 type MarkdownOutlineItem = { id: string; level: number; text: string };
 
@@ -1586,6 +1615,7 @@ watch(
     const gen = ++customPathLoadToken;
     const trimmed = (customPath ?? "").trim();
     customPathMarkdownSource.value = null;
+    customPathMarkdownAnchorFolderID.value = "";
     customPathMarkdownOutline.value = [];
     customPathMarkdownHeadingElements = [];
     customPathMarkdownDrawerOpen.value = false;
@@ -1632,6 +1662,7 @@ watch(
           if (gen !== customPathLoadToken) return;
           if (source) {
             customPathResolvedFolderID.value = "";
+            customPathMarkdownAnchorFolderID.value = resp.folder_id ?? "";
             customPathMarkdownSource.value = source;
             return;
           }
@@ -3492,6 +3523,7 @@ async function syncSessionReceiptCode() {
                     v-if="homeAnnouncementContentHTML"
                     class="markdown-content mt-2 text-sm text-amber-800/90"
                     v-html="homeAnnouncementContentHTML"
+                    @click.capture="handleHomeAnnouncementMarkdownLinkNavigate"
                   />
                 </div>
               </div>
@@ -4459,6 +4491,7 @@ async function syncSessionReceiptCode() {
                 <div
                   class="markdown-content mt-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/50"
                   v-html="markdownCatalogNavigatePresentation.descriptionHtml"
+                  @click.capture="handleCatalogConfirmMarkdownLinkNavigate"
                 />
               </div>
             </div>
@@ -4640,7 +4673,7 @@ async function syncSessionReceiptCode() {
               </div>
             </div>
             <div class="flex-1 overflow-y-auto px-6 py-5">
-              <div class="markdown-content">
+              <div class="markdown-content" @click.capture="handleHomeAnnouncementMarkdownLinkNavigate">
                 <MarkdownPreview :source="selectedAnnouncement.content" :debounce-ms="0" />
               </div>
             </div>

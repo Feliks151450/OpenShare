@@ -33,6 +33,13 @@ type NetCDFDumpAttr struct {
 type NetCDFDumpDim struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
+	// Range 为该维度对应坐标变量的取值范围（首值 → 末值）：时间坐标为可读时刻，
+	// lat/lon 等数值坐标为原始数值。
+	Range string `json:"range,omitempty"`
+	// TimeUnits 为时间坐标变量原始 units 属性，仅在时间维时返回。
+	TimeUnits string `json:"time_units,omitempty"`
+	// TimeCalendar 为非标准历法名（360_day / noleap 等），标准历法为空。
+	TimeCalendar string `json:"time_calendar,omitempty"`
 }
 
 // NetCDFDumpVar 为变量的类型、维度、形状与属性（不含数据值）。
@@ -45,6 +52,11 @@ type NetCDFDumpVar struct {
 	Unreadable      bool             `json:"unreadable,omitempty"`
 	Values          []string         `json:"values,omitempty"`
 	ValuesTruncated bool             `json:"values_truncated,omitempty"`
+	// TimeValues 与 Values 一一对应：CF 时间变量解析出的可读时间，无法解析的项为空串。
+	TimeValues []string `json:"time_values,omitempty"`
+	// TimeUnits / TimeCalendar 为时间变量的原始 units 与（非标准）历法名。
+	TimeUnits    string `json:"time_units,omitempty"`
+	TimeCalendar string `json:"time_calendar,omitempty"`
 }
 
 // NetCDFDumpGroup 为单个组（含根组）的结构化摘要。
@@ -135,8 +147,14 @@ func writeNetCDFGroup(sb *strings.Builder, trunc *bool, indent string, g api.Gro
 			if !ok {
 				continue
 			}
-			tryWrite(sb, trunc, fmt.Sprintf("%s%s = %d ;\n", indent, name, size))
-			node.Dimensions = append(node.Dimensions, NetCDFDumpDim{Name: name, Size: int64(size)})
+			entry := NetCDFDumpDim{Name: name, Size: int64(size)}
+			entry.Range, entry.TimeUnits, entry.TimeCalendar = dimensionRangeInfo(g, name)
+			comment := ""
+			if entry.Range != "" {
+				comment = fmt.Sprintf(" // %s", entry.Range)
+			}
+			tryWrite(sb, trunc, fmt.Sprintf("%s%s = %d ;%s\n", indent, name, size, comment))
+			node.Dimensions = append(node.Dimensions, entry)
 		}
 		tryWrite(sb, trunc, "\n")
 	}
@@ -179,9 +197,18 @@ func writeNetCDFGroup(sb *strings.Builder, trunc *bool, indent string, g api.Gro
 			writeAttrs(sb, trunc, attrIndent, "", vg.Attributes(), &vEntry.Attributes)
 			// 一维变量：读取变量值供前端预览展示
 			if len(vDims) == 1 {
-				vals, vt := readOneDimValues(vg)
+				vals, numbers, vt := readOneDimValues(vg)
 				vEntry.Values = vals
 				vEntry.ValuesTruncated = vt
+				if codec, ok := cfTimeCodecForVar(vg); ok {
+					vEntry.TimeUnits = codec.unitsRaw
+					vEntry.TimeCalendar = codec.calendar.display()
+					labels := make([]string, len(numbers))
+					for i, number := range numbers {
+						labels[i] = codec.label(number)
+					}
+					vEntry.TimeValues = labels
+				}
 			}
 			node.Variables = append(node.Variables, vEntry)
 		}
@@ -339,43 +366,63 @@ func (s *PublicDownloadService) PrepareNetCDFDumpFallback(ctx context.Context, f
 const max1DValues = 100
 
 // readOneDimValues 从 VarGetter 读取一维变量的值并格式化为字符串切片。
+// numbers 与 values 一一对应，保存原始数值（非数值元素为 NaN），供 CF 时间解析使用。
 // 限量读取：仅物化前 max1DValues 个值。原实现 vg.Values() 会把整个一维变量
 // 读进内存（1e8 元素 double ≈ 800MB 峰值）之后才截断，构成公开端点上的
 // 内存放大 DoS 面。
-func readOneDimValues(vg api.VarGetter) (values []string, truncated bool) {
+func readOneDimValues(vg api.VarGetter) (values []string, numbers []float64, truncated bool) {
 	total := vg.Len()
 	if total <= 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	limit := int64(max1DValues)
 	if total > limit {
 		truncated = true
+	} else {
+		limit = total
 	}
 	raw, err := vg.GetSlice(0, limit)
 	if err != nil || raw == nil {
 		// GetSlice 不可用时退回全量读取（旧行为兜底）
 		raw, err = vg.Values()
 		if err != nil || raw == nil {
-			return nil, false
+			return nil, nil, false
 		}
 	}
 	rv := reflect.ValueOf(raw)
 	if rv.Kind() != reflect.Slice {
-		return nil, false
+		return nil, nil, false
 	}
 	n := rv.Len()
 	if n == 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	if n > max1DValues {
 		n = max1DValues
 		truncated = true
 	}
 	values = make([]string, n)
+	numbers = make([]float64, n)
 	for i := 0; i < n; i++ {
-		values[i] = formatAtom(rv.Index(i))
+		item := rv.Index(i)
+		values[i] = formatAtom(item)
+		numbers[i] = atomFloat(item)
 	}
-	return values, truncated
+	return values, numbers, truncated
+}
+
+// atomFloat 将数值元素转为 float64，非数值返回 NaN。
+func atomFloat(v reflect.Value) float64 {
+	switch v.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return v.Float()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(v.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(v.Uint())
+	default:
+		return math.NaN()
+	}
 }
 
 // formatAtom 将 Go 基础数值/字符串转为可读字符串，特殊处理 NaN/Inf。

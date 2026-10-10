@@ -80,20 +80,20 @@ type PublicFileFeedResult struct {
 }
 
 type PublicFileItem struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	Description             string    `json:"description"`
-	Remark                  string    `json:"remark"`
-	Extension               string    `json:"extension"`
-	CoverURL                string    `json:"cover_url"`
-	PlaybackURL             string    `json:"playback_url"`
-	ProxyDownload           bool      `json:"proxy_download"`
-	ProxySourceURL          string    `json:"proxy_source_url"`
-	FolderDirectDownloadURL string    `json:"folder_direct_download_url"`
-	DownloadAllowed         bool      `json:"download_allowed"`
-	UploadedAt              time.Time `json:"uploaded_at"`
-	DownloadCount           int64     `json:"download_count"`
-	Size                    int64     `json:"size"`
+	ID                      string          `json:"id"`
+	Name                    string          `json:"name"`
+	Description             string          `json:"description"`
+	Remark                  string          `json:"remark"`
+	Extension               string          `json:"extension"`
+	CoverURL                string          `json:"cover_url"`
+	PlaybackURL             string          `json:"playback_url"`
+	ProxyDownload           bool            `json:"proxy_download"`
+	ProxySourceURL          string          `json:"proxy_source_url"`
+	FolderDirectDownloadURL string          `json:"folder_direct_download_url"`
+	DownloadAllowed         bool            `json:"download_allowed"`
+	UploadedAt              time.Time       `json:"uploaded_at"`
+	DownloadCount           int64           `json:"download_count"`
+	Size                    int64           `json:"size"`
 	Tags                    []PublicFileTag `json:"tags"`
 }
 
@@ -265,7 +265,7 @@ func (s *PublicCatalogService) ListPublicFolders(ctx context.Context, parentID s
 			Description:     row.Description,
 			Remark:          row.Remark,
 			CoverURL:        strings.TrimSpace(row.CoverURL),
-				CdnURL:          strings.TrimSpace(row.CdnURL),
+			CdnURL:          strings.TrimSpace(row.CdnURL),
 			DownloadAllowed: allowed,
 			IsVirtual:       row.IsVirtual,
 			UpdatedAt:       row.UpdatedAt,
@@ -479,12 +479,115 @@ type PathResolveResult struct {
 // 解析逻辑：从根目录开始，前 N-1 段逐级匹配子文件夹名称，
 // 最后一段同时尝试匹配文件名和文件夹名（文件优先）。
 func (s *PublicCatalogService) ResolvePathSegments(ctx context.Context, segments []string) (*PathResolveResult, error) {
+	return s.resolveSegmentsFrom(ctx, nil, segments, false)
+}
+
+// maxCatalogLinkPathBytes 与 maxCatalogLinkPathSegments 限制单次链接解析的工作量：
+// 每段都要落一次查询，路径由链接文本提供，属于公开端点上的输入。
+const (
+	maxCatalogLinkPathBytes    = 1024
+	maxCatalogLinkPathSegments = 32
+)
+
+// ResolveCatalogRelativePath 以 anchorFolderID 为锚点解析 Markdown 相对链接的路径。
+// anchorFolderID 为空表示根目录；path 以 "/" 开头时同样按根目录解析（与 URL 语义一致）。
+// 支持 "." 与 ".."（逐级上溯，越过根即停在根），结尾 "/" 强制解析为文件夹
+// （如 [nc/](nc/) 指向子目录而非同名文件）。无法解析时返回 nil, nil。
+func (s *PublicCatalogService) ResolveCatalogRelativePath(ctx context.Context, anchorFolderID, path string) (*PathResolveResult, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || len(path) > maxCatalogLinkPathBytes {
+		return nil, nil
+	}
+
+	folderOnly := strings.HasSuffix(path, "/")
+	segments := splitCatalogLinkPath(path)
+	if len(segments) > maxCatalogLinkPathSegments {
+		return nil, nil
+	}
+
+	parentID := (*string)(nil)
+	if !strings.HasPrefix(path, "/") {
+		anchor := strings.TrimSpace(anchorFolderID)
+		if anchor != "" {
+			folder, err := s.repository.FindPublicFolderByID(ctx, anchor)
+			if err != nil {
+				return nil, err
+			}
+			if folder == nil {
+				return nil, nil
+			}
+			id := folder.ID
+			parentID = &id
+		}
+	}
+
+	// 前导 ".."：逐级回到父目录，根目录之上仍留在根。
+	for len(segments) > 0 && segments[0] == ".." {
+		segments = segments[1:]
+		if parentID == nil {
+			continue
+		}
+		folder, err := s.repository.FindPublicFolderByID(ctx, *parentID)
+		if err != nil {
+			return nil, err
+		}
+		if folder == nil {
+			return nil, nil
+		}
+		parentID = folder.ParentID
+	}
+	// 中间出现的 ".." 意味着路径已越出锚点或被手写错位，不做猜测。
+	for _, seg := range segments {
+		if seg == ".." {
+			return nil, nil
+		}
+	}
+
+	// 只剩 "." 或 ".." 的链接（如 [父目录](../)）指向锚点或其上级目录本身。
+	// 已上溯到根之外时没有对应的目录 ID，交由前端保持默认行为。
+	if len(segments) == 0 {
+		if parentID == nil {
+			return nil, nil
+		}
+		folder, err := s.repository.FindPublicFolderByID(ctx, *parentID)
+		if err != nil {
+			return nil, err
+		}
+		if folder == nil {
+			return nil, nil
+		}
+		return &PathResolveResult{
+			Type:     "folder",
+			FolderID: folder.ID,
+			Name:     folder.Name,
+		}, nil
+	}
+
+	return s.resolveSegmentsFrom(ctx, parentID, segments, folderOnly)
+}
+
+// splitCatalogLinkPath 按 "/" 切分并丢弃空段与 "."；保留 ".." 交由调用方逐级上溯。
+func splitCatalogLinkPath(path string) []string {
+	parts := strings.Split(path, "/")
+	segments := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "." {
+			continue
+		}
+		segments = append(segments, p)
+	}
+	return segments
+}
+
+// resolveSegmentsFrom 从 parentID（nil 为根）开始逐级匹配子文件夹名称，
+// 最后一段默认文件优先；folderOnly 为 true 时只匹配文件夹。
+func (s *PublicCatalogService) resolveSegmentsFrom(ctx context.Context, parentID *string, segments []string, folderOnly bool) (*PathResolveResult, error) {
 	if len(segments) == 0 {
 		return nil, nil
 	}
 
 	// 逐级查找中间的文件夹段
-	var parentID *string
 	for i := 0; i < len(segments)-1; i++ {
 		folder, err := s.repository.FindFolderByParentAndName(ctx, parentID, segments[i])
 		if err != nil {
@@ -500,7 +603,7 @@ func (s *PublicCatalogService) ResolvePathSegments(ctx context.Context, segments
 	// 最后一段：优先查找文件，再查找文件夹
 	lastSegment := segments[len(segments)-1]
 
-	if parentID != nil {
+	if parentID != nil && !folderOnly {
 		file, err := s.repository.FindFileByFolderAndName(ctx, *parentID, lastSegment)
 		if err != nil {
 			return nil, fmt.Errorf("resolve file %q: %w", lastSegment, err)
@@ -514,7 +617,6 @@ func (s *PublicCatalogService) ResolvePathSegments(ctx context.Context, segments
 		}
 	}
 
-	// 查找文件夹
 	folder, err := s.repository.FindFolderByParentAndName(ctx, parentID, lastSegment)
 	if err != nil {
 		return nil, fmt.Errorf("resolve folder %q: %w", lastSegment, err)

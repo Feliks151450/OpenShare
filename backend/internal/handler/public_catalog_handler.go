@@ -142,12 +142,62 @@ func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
 	}
 
 	// 解析后立即按对应目录/文件的归宿检查密钥。
+	// 文件也解析出归宿目录并随响应返回：前端要把该文件正文里的相对链锚定到它所在目录。
+	targetFolderID := result.FolderID
+	if targetFolderID == "" {
+		targetFolderID = fileFolderID(ctx, h.service, result.FileID)
+	}
+	if h.guestAccess != nil && targetFolderID != "" {
+		if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), targetFolderID, middleware.GuestKeyFromContext(ctx)); !ok {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+			return
+		}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"type":      result.Type,
+		"folder_id": targetFolderID,
+		"file_id":   result.FileID,
+		"name":      result.Name,
+		"extension": result.Extension,
+	})
+}
+
+// ResolveCatalogPath 解析 Markdown 相对链接：以 folder_id 为锚点，按名称逐级查找子文件夹/文件。
+// 名称匹配语义与 /dl/* 一致，区别是起点可以是任意目录，并支持 "." 与 ".."。
+func (h *PublicCatalogHandler) ResolveCatalogPath(ctx *gin.Context) {
+	path := strings.TrimSpace(ctx.Query("path"))
+	if path == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+	anchor := strings.TrimSpace(ctx.Query("folder_id"))
+
+	// 锚点自身也要过密钥：链接可能发自受保护目录，跳过锚点等于绕过其访问控制。
+	if h.guestAccess != nil && anchor != "" {
+		if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), anchor, middleware.GuestKeyFromContext(ctx)); !ok {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
+			return
+		}
+	}
+
+	result, err := h.service.ResolveCatalogRelativePath(ctx.Request.Context(), anchor, path)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve path"})
+		return
+	}
+	if result == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "path not found"})
+		return
+	}
+
+	// 目标目录与锚点不同时，按目标归宿再检查一次密钥（与 ResolveCustomPath 一致）。
 	if h.guestAccess != nil {
 		targetFolderID := result.FolderID
 		if targetFolderID == "" {
 			targetFolderID = fileFolderID(ctx, h.service, result.FileID)
 		}
-		if targetFolderID != "" {
+		if targetFolderID != "" && targetFolderID != anchor {
 			if ok, hint := h.guestAccess.ValidateForFolder(ctx.Request.Context(), targetFolderID, middleware.GuestKeyFromContext(ctx)); !ok {
 				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "guest key required", "hint": hint})
 				return
@@ -160,7 +210,6 @@ func (h *PublicCatalogHandler) ResolveCustomPath(ctx *gin.Context) {
 		"folder_id": result.FolderID,
 		"file_id":   result.FileID,
 		"name":      result.Name,
-		"extension": result.Extension,
 	})
 }
 

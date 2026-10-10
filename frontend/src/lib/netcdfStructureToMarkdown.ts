@@ -8,6 +8,10 @@ export interface NetCDFDumpAttr {
 export interface NetCDFDumpDim {
   name: string;
   size: number;
+  /** 坐标取值范围：时间维为「起 → 止」可读时刻，数值维为原始首末值。 */
+  range?: string;
+  time_units?: string;
+  time_calendar?: string;
 }
 
 export interface NetCDFDumpVar {
@@ -19,6 +23,10 @@ export interface NetCDFDumpVar {
   unreadable?: boolean;
   values?: string[];
   values_truncated?: boolean;
+  /** 与 values 等长的 CF 时间标签，非时间变量为空。 */
+  time_values?: string[];
+  time_units?: string;
+  time_calendar?: string;
 }
 
 export interface NetCDFDumpGroup {
@@ -74,7 +82,7 @@ function variableAttributesDisclosureHtml(v: NetCDFDumpVar): string {
   );
 }
 
-/** 一维变量值折叠块，以可读形式展示数值。 */
+/** 一维变量值折叠块，以可读形式展示数值。时间坐标变量额外展示解析后的时刻。 */
 function variableValuesDisclosureHtml(v: NetCDFDumpVar): string {
   const vals = v.values ?? [];
   if (vals.length === 0) return "";
@@ -83,11 +91,31 @@ function variableValuesDisclosureHtml(v: NetCDFDumpVar): string {
     ? ` <span class="netcdf-var-values-truncated-note">（仅展示前 ${n} 项）</span>`
     : "";
   const summary = `变量值 <span class="netcdf-attrs-disclosure-count">（${n} 项）</span>${truncatedNote}`;
-  const valuesList = vals.map((val) => escapeHtmlCell(val)).join(", ");
+
+  const times = v.time_values ?? [];
+  const hasTime = times.length > 0;
+  const calendarNote = hasTime
+    ? `<div class="netcdf-var-values-time-units">换算依据：${escapeHtmlCell(v.time_units ?? "")}${
+        v.time_calendar ? `，历法 ${escapeHtmlCell(v.time_calendar)}` : ""
+      }</div>`
+    : "";
+
+  const body = hasTime
+    ? `<div class="netcdf-attrs-disclosure-body">${calendarNote}` +
+      `<table>\n<thead><tr><th>#</th><th>原始值</th><th>时间</th></tr></thead>\n<tbody>` +
+      vals
+        .map(
+          (val, i) =>
+            `<tr><td>${i + 1}</td><td>${escapeHtmlCell(val)}</td><td>${escapeHtmlCell(times[i] ?? "—")}</td></tr>`,
+        )
+        .join("") +
+      `</tbody>\n</table></div>`
+    : `<div class="netcdf-var-values-body">${vals.map((val) => escapeHtmlCell(val)).join(", ")}</div>`;
+
   return (
     `<details class="netcdf-attrs-disclosure netcdf-var-values-disclosure">\n` +
     `<summary class="netcdf-attrs-disclosure-summary">${summary}</summary>\n` +
-    `<div class="netcdf-var-values-body">${valuesList}</div>\n` +
+    `${body}\n` +
     `</details>`
   );
 }
@@ -177,9 +205,22 @@ function appendGroup(lines: string[], g: NetCDFDumpGroup, depth: number): void {
   const dims = g.dimensions ?? [];
   if (dims.length > 0) {
     lines.push(`${"#".repeat(hSec)} 维度`, "");
-    lines.push("| 名称 | 长度 |", "| --- | --- |");
+    const hasRange = dims.some((d) => (d.range ?? "") !== "");
+    if (hasRange) {
+      lines.push("| 名称 | 长度 | 范围 |", "| --- | --- | --- |");
+    } else {
+      lines.push("| 名称 | 长度 |", "| --- | --- |");
+    }
     for (const d of dims) {
-      lines.push(`| ${mdTableCell(d.name)} | ${d.size} |`);
+      if (!hasRange) {
+        lines.push(`| ${mdTableCell(d.name)} | ${d.size} |`);
+        continue;
+      }
+      let range = d.range ?? "";
+      if (range !== "" && (d.time_calendar ?? "") !== "") {
+        range += `（${d.time_calendar} 历法）`;
+      }
+      lines.push(`| ${mdTableCell(d.name)} | ${d.size} | ${mdTableCell(range)} |`);
     }
     lines.push("");
   }
