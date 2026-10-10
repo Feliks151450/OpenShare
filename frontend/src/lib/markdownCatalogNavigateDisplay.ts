@@ -49,6 +49,8 @@ type PublicFolderDetailJson = {
   name?: string;
   description?: string;
   remark?: string;
+  /** 未配置简介时后端返回的 README 正文 */
+  readme?: string;
   file_count?: number;
   total_size?: number;
   breadcrumbs?: Array<{ id: string; name: string }>;
@@ -123,7 +125,7 @@ export async function hydrateMarkdownCatalogNavigatePresentation(
             .trim()
         : "";
     const remark = (detail.remark ?? "").trim();
-    const descRaw = (detail.description ?? "").trim();
+    const descRaw = (detail.description ?? "").trim() || (detail.readme ?? "").trim();
     const fileCount = Number(detail.file_count ?? 0);
     const totalSize = Number(detail.total_size ?? 0);
 

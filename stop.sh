@@ -58,14 +58,19 @@ done
 
 # start.sh 前台模式不落 PID 文件：按端口兜底清理残留的开发进程
 DEV_BACKEND_PORT="${BACKEND_PORT:-8080}"
-for port in "$DEV_BACKEND_PORT" 5173; do
-  PIDS="$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true)"
-  if [[ -n "$PIDS" ]]; then
-    for pid in $PIDS; do
-      echo "  端口 :$port 仍有监听进程 (PID $pid)，停止之"
-      stop_pid "$pid" "端口 :$port 进程"
-    done
-  fi
-done
+if command -v lsof >/dev/null 2>&1; then
+  for port in "$DEV_BACKEND_PORT" 5173; do
+    PIDS="$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "$PIDS" ]]; then
+      for pid in $PIDS; do
+        echo "  端口 :$port 仍有监听进程 (PID $pid)，停止之"
+        stop_pid "$pid" "端口 :$port 进程"
+      done
+    fi
+  done
+else
+  echo "警告: 未安装 lsof，无法按端口清理残留监听进程"
+  echo "      请手动检查并结束占用 :${DEV_BACKEND_PORT} 与 :5173 的进程（如 \`ps aux | grep openshare-dev\`）"
+fi
 
 echo "==> 开发服务已停止"

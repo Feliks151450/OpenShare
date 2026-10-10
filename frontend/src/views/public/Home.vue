@@ -754,7 +754,14 @@ const downloadConfirmMessage = computed(() => {
   return `该文件大小为 ${row.sizeText}，已超过本站设定的大文件阈值（${formatSize(largeDownloadConfirmBytes.value)}）。确定要下载吗？`;
 });
 const allVisibleRowsSelected = computed(() => sortedRows.value.length > 0 && selectedRows.value.length === sortedRows.value.length);
-const currentFolderDescriptionSource = computed(() => currentFolderDetail.value?.description ?? "");
+/** 未配置简介时回退到目录下的 README.md 正文（后端在 description 为空时随详情返回） */
+const currentFolderDescriptionSource = computed(
+  () => (currentFolderDetail.value?.description ?? "").trim() || (currentFolderDetail.value?.readme ?? "").trim(),
+);
+/** 简介区当前显示的是 README 回退内容，用于提示「配置简介后以配置为准」 */
+const currentFolderDescriptionFromReadme = computed(
+  () => !(currentFolderDetail.value?.description ?? "").trim() && Boolean((currentFolderDetail.value?.readme ?? "").trim()),
+);
 
 /** 首页公告条是紧凑摘要（自带琥珀配色），继续用 marked 渲染，避免为一条摘要拉取 vditor 静态资源 */
 const homeAnnouncementContentHTML = ref("");
@@ -774,8 +781,8 @@ watch(
 
 const useWideDescriptionLayout = computed(() => {
   if (!currentFolderDetail.value) return false;
-  const desc = currentFolderDetail.value.description ?? "";
-  if (desc.trim().length > 300) return true;
+  const desc = currentFolderDescriptionSource.value;
+  if (desc.length > 300) return true;
   if (/!\[.*?\]\(.*?\)/.test(desc)) return true;
   return false;
 });
@@ -844,7 +851,7 @@ watch(
 watch(
   () => [
     currentFolderID.value,
-    currentFolderDetail.value?.description,
+    currentFolderDescriptionSource.value,
     folderMarkdownExpanded.value,
   ],
   async () => {
@@ -3674,6 +3681,9 @@ async function syncSessionReceiptCode() {
                         aria-hidden="true"
                       />
                     </div>
+                    <p v-if="currentFolderDescriptionFromReadme" class="text-xs text-slate-400">
+                      简介来自目录下的 README.md，配置简介后以配置内容为准。
+                    </p>
                     <div v-if="folderMarkdownFooterVisible" class="flex justify-center sm:justify-start">
                       <button
                         type="button"

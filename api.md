@@ -160,10 +160,12 @@
   "custom_path": "doc",
   "hide_file_extension": "inherit|hide|show",
   "hide_file_extension_resolved": false,
+  "readme": "...",
   "breadcrumbs": [{ "id": "uuid", "name": "..." }]
 }
 ```
 > `hide_file_extension` 为原始设置值；`hide_file_extension_resolved` 为沿祖先链解析后的最终值（`true` 表示隐藏后缀，默认 `false`）。
+> `readme` 仅在 `description` 为空且该目录下存在 `README.md`（大小写不敏感，含 `.markdown`）时返回，为文件正文（Markdown，上限 256 KB），前端简介区据此回退展示；虚拟目录与配置了 `cdn_url` 的目录不读取本地文件，故不返回该字段。
 
 #### `GET /api/public/folders/:folderID/files`
 

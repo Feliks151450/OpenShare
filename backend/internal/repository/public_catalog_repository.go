@@ -255,6 +255,25 @@ func (r *PublicCatalogRepository) FindFolderByParentAndName(ctx context.Context,
 	return &folder, nil
 }
 
+// FindFolderReadmeFile 查找文件夹的 README 说明文件：文件名忽略大小写匹配
+// README.md / README.markdown。name 按二进制序排列，"README.md" 天然优先于小写变体。
+// 未找到时返回 nil, nil。
+func (r *PublicCatalogRepository) FindFolderReadmeFile(ctx context.Context, folderID string) (*model.File, error) {
+	var file model.File
+	err := r.db.WithContext(ctx).
+		Where("folder_id = ? AND lower(name) IN (?, ?)", folderID, "readme.md", "readme.markdown").
+		Order("name").
+		Take(&file).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find folder readme file: %w", err)
+	}
+	return &file, nil
+}
+
 // FindFileByFolderAndName 根据文件夹 ID 和文件名查找文件。
 // name 为精确匹配（含扩展名，如 "report.pdf"）。
 func (r *PublicCatalogRepository) FindFileByFolderAndName(ctx context.Context, folderID string, name string) (*model.File, error) {

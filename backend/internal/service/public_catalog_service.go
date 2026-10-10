@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -142,6 +144,8 @@ type PublicFolderDetail struct {
 	HideFileExtension *bool `json:"hide_file_extension,omitempty"`
 	// HideFileExtensionResolved 解析后的最终值：true 表示隐藏后缀，false 表示显示
 	HideFileExtensionResolved bool `json:"hide_file_extension_resolved"`
+	// Readme 该目录下 README 文件的正文；仅在 description 为空时填充，供前端简介区回退展示。
+	Readme string `json:"readme,omitempty"`
 }
 
 func NewPublicCatalogService(
@@ -348,7 +352,44 @@ func (s *PublicCatalogService) GetPublicFolderDetail(ctx context.Context, folder
 		h := current.HidePublicCatalog
 		detail.HidePublicCatalog = &h
 	}
+	if strings.TrimSpace(detail.Description) == "" {
+		detail.Readme = s.readFolderReadme(ctx, current)
+	}
 	return &detail, nil
+}
+
+// maxFolderReadmeBytes 自动加载 README 的大小上限：简介面板只放说明文档，
+// 大文件不该整份塞进每次目录详情请求。
+const maxFolderReadmeBytes = 256 << 10
+
+// readFolderReadme 读取托管目录下 README 文件的正文，用于未配置简介时的回退展示。
+// 虚拟目录与 CDN 目录没有本地文件，直接返回空串。
+func (s *PublicCatalogService) readFolderReadme(ctx context.Context, folder *model.Folder) string {
+	if folder.IsVirtual || strings.TrimSpace(folder.CdnURL) != "" {
+		return ""
+	}
+
+	file, err := s.repository.FindFolderReadmeFile(ctx, folder.ID)
+	if err != nil || file == nil {
+		return ""
+	}
+
+	path := model.BuildManagedFilePath(folder.SourcePath, file.Name)
+	if path == "" {
+		return ""
+	}
+	handle, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer handle.Close()
+
+	content, err := io.ReadAll(io.LimitReader(handle, maxFolderReadmeBytes))
+	if err != nil {
+		return ""
+	}
+	// 截断可能落在多字节字符中间，渲染前去掉残缺尾部
+	return strings.ToValidUTF8(string(content), "")
 }
 
 // ResolveCustomPath 根据自定义路径解析到文件夹。未找到时返回 nil, nil。

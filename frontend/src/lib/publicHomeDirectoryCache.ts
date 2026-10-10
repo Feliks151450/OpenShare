@@ -64,6 +64,8 @@ export interface FolderDetailResponse {
   hide_file_extension?: "inherit" | "hide" | "show";
   /** 子文件是否隐藏后缀：解析后的最终值 */
   hide_file_extension_resolved?: boolean;
+  /** 该目录下 README.md 正文：仅在 description 为空时由后端返回，简介区回退用 */
+  readme?: string;
   breadcrumbs: Array<{
     id: string;
     name: string;
